@@ -1,5 +1,7 @@
 # Browser Control
 
+[中文说明](README.zh-CN.md)
+
 Browser Control is a local Chrome automation bridge for AI agents. It gives an agent a controlled way to operate the user's real Chrome browser through a localhost daemon and a Chrome Manifest V3 extension.
 
 ```text
