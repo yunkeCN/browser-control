@@ -1,5 +1,7 @@
 # Browser Control
 
+[![skills.sh](https://skills.sh/b/yunkeCN/browser-control)](https://skills.sh/yunkeCN/browser-control)
+
 Browser Control 是一个面向 AI Agent 的本地 Chrome 自动化桥接工具。Agent 通过本地 Skill 脚本连接 localhost daemon，daemon 再通过 WebSocket 连接 Chrome Manifest V3 扩展，从而操作用户真实 Chrome 浏览器中的页面、标签页、下载、截图和网络请求。
 
 ```text
@@ -19,11 +21,13 @@ AI Agent -> Browser Control skill scripts -> localhost HTTP daemon -> WebSocket 
 
 ## 安装为 Skill
 
-发布到 GitHub 后，可以通过 skills CLI 安装：
+可以通过 skills CLI 安装：
 
 ```bash
 npx skills add yunkeCN/browser-control --skill browser-control
 ```
+
+这也是 skills.sh 收录和排行社区 Skill 的主要方式：用户通过 `skills` CLI 安装后，会产生匿名安装统计；如果用户关闭 telemetry，则不会计入排行。
 
 本地开发时，也可以从当前仓库安装：
 

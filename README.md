@@ -1,5 +1,7 @@
 # Browser Control
 
+[![skills.sh](https://skills.sh/b/yunkeCN/browser-control)](https://skills.sh/yunkeCN/browser-control)
+
 [中文说明](README.zh-CN.md)
 
 Browser Control is a local Chrome automation bridge for AI agents. It gives an agent a controlled way to operate the user's real Chrome browser through a localhost daemon and a Chrome Manifest V3 extension.
@@ -21,11 +23,13 @@ The published Skill lives in `skills/browser-control/`. That directory is self-c
 
 ## Install As A Skill
 
-After this repository is published on GitHub, install it with the skills CLI:
+Install it with the skills CLI:
 
 ```bash
-npx skills add <owner>/<repo> --skill browser-control
+npx skills add yunkeCN/browser-control --skill browser-control
 ```
+
+This is also how skills.sh discovers and ranks community skills: installs through the `skills` CLI are counted anonymously unless users opt out of telemetry.
 
 For local development, install from this checkout:
 
