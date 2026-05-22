@@ -1,0 +1,244 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { protocolModule, artifactStoreModule } = require('./helpers/browser-control-paths');
+const {
+  COMMANDS,
+  normalizeRequest,
+  validateRequest,
+  createResultEnvelope,
+  mapNetworkCommand,
+  protocolErrorFrom,
+  ProtocolError
+} = require('../skills/browser-control/scripts/protocol');
+const { ArtifactStore, extractArtifacts } = require('../skills/browser-control/scripts/artifact-store');
+
+test('protocol validates all supported command envelopes', () => {
+  for (const command of Object.keys(COMMANDS)) {
+    const args = {};
+    for (const field of COMMANDS[command].required) {
+      args[field] = field === 'files' ? ['fixture.txt'] : field === 'checked' ? true : `${field}-value`;
+    }
+    const req = validateRequest(normalizeRequest({ command, args, session: 's1' }));
+    assert.equal(req.command, command);
+    assert.equal(req.session, 's1');
+  }
+});
+
+test('protocol keeps action strategy diagnostics args backward compatible', () => {
+  const click = validateRequest(normalizeRequest({
+    command: 'click',
+    args: {
+      selector: '@e1',
+      strategy: 'dom_pointer',
+      force: false,
+      button: 'left',
+      clickCount: 1,
+      modifiers: ['Shift'],
+      expectChange: true,
+      observe: { includeNetwork: true }
+    }
+  }));
+  assert.equal(click.args.strategy, 'dom_pointer');
+  assert.equal(click.args.expectChange, true);
+  assert.deepEqual(COMMANDS.click.strategies, ['auto', 'cdp_mouse', 'dom_pointer', 'element_click']);
+
+  const fill = validateRequest(normalizeRequest({
+    command: 'fill',
+    args: { selector: '@e2', value: 'draft', strategy: 'native_setter', clear: true, commit: 'change', expectChange: false }
+  }));
+  assert.equal(fill.args.strategy, 'native_setter');
+  assert.equal(fill.args.commit, 'change');
+
+  const press = validateRequest(normalizeRequest({
+    command: 'press',
+    args: { key: 'Enter', strategy: 'dom_keyboard', modifiers: ['Control'], expectChange: true }
+  }));
+  assert.equal(press.args.strategy, 'dom_keyboard');
+  assert.deepEqual(COMMANDS.press.strategies, ['auto', 'cdp_keyboard', 'dom_keyboard']);
+});
+
+test('protocol docs and TypeScript contracts expose action observe options and navigate result shape', () => {
+  const root = path.resolve(__dirname, '..');
+  const contracts = fs.readFileSync(path.join(path.resolve(__dirname, '..'), 'contracts.ts'), 'utf8');
+  const api = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'references', 'api.md'), 'utf8');
+
+  for (const option of ['strategy', 'force', 'button', 'clickCount', 'modifiers', 'expectChange', 'observe']) {
+    assert.match(contracts, new RegExp(`click: \\{[^}]*${option}`, 's'));
+  }
+  for (const option of ['strategy', 'clear', 'commit', 'expectChange', 'observe']) {
+    assert.match(contracts, new RegExp(`fill: \\{[^}]*${option}`, 's'));
+  }
+  for (const option of ['strategy', 'modifiers', 'expectChange', 'observe']) {
+    assert.match(contracts, new RegExp(`press: \\{[^}]*${option}`, 's'));
+  }
+  assert.match(contracts, /export interface ObserveOptions/);
+  assert.match(contracts, /export interface NavigateResult/);
+  assert.match(contracts, /navigationComplete:\s*boolean/);
+  assert.match(api, /Stable response fields:/);
+  assert.doesNotMatch(contracts, /urlContains|titleContains/);
+  assert.doesNotMatch(api, /urlContains|titleContains/);
+  assert.match(api, /intentionally loose/);
+});
+
+test('protocol rejects invalid commands and missing required args with stable error codes', () => {
+  assert.throws(() => validateRequest(normalizeRequest({ command: 'bogus' })), err => err instanceof ProtocolError && err.code === 'UNKNOWN_COMMAND');
+  assert.throws(() => validateRequest(normalizeRequest({ command: 'navigate', args: {} })), err => err instanceof ProtocolError && err.code === 'VALIDATION_ERROR');
+});
+
+test('fill validation points agents from text to value', () => {
+  assert.throws(
+    () => validateRequest(normalizeRequest({ command: 'fill', args: { selector: '@e1', text: 'hello' } })),
+    err => err instanceof ProtocolError &&
+      err.code === 'VALIDATION_ERROR' &&
+      err.details?.field === 'value' &&
+      err.details?.receivedAlias === 'text' &&
+      /args\.value/.test(err.details?.hint || '')
+  );
+});
+
+test('wait_for accepts text args as documented', () => {
+  const req = validateRequest(normalizeRequest({ command: 'wait_for', args: { text: 'Ready', timeoutMs: 1000 } }));
+  assert.equal(req.command, 'wait_for');
+  assert.equal(req.args.text, 'Ready');
+  assert.equal(req.args.timeoutMs, 1000);
+});
+
+test('backend errors include recoverable next steps for common agent failures', () => {
+  const notFound = protocolErrorFrom(new Error('Element not found: @e99'));
+  assert.equal(notFound.code, 'NOT_FOUND');
+  assert.equal(notFound.retryable, true);
+  assert.ok(notFound.details?.nextSteps?.length);
+
+  const noTab = protocolErrorFrom(new Error('No active tab in session'));
+  assert.equal(noTab.code, 'BACKEND_UNAVAILABLE');
+  assert.equal(noTab.retryable, true);
+  assert.match(noTab.details.nextSteps[0], /navigate|find_tab/);
+});
+
+test('result envelope contains stable agent-facing metadata', () => {
+  const req = validateRequest(normalizeRequest({ action: 'saveAsPdf', session: 's2' }));
+  const envelope = createResultEnvelope(req, {
+    ok: true,
+    startedAt: '2026-05-19T00:00:00.000Z',
+    endedAt: '2026-05-19T00:00:01.000Z',
+    data: { artifact: { path: '/tmp/page.pdf' } },
+    artifacts: [{ kind: 'pdf', path: '/tmp/page.pdf' }],
+    diagnostics: { extensionConnected: true }
+  });
+  assert.equal(envelope.command, 'save_as_pdf');
+  assert.equal(envelope.backend, 'extension');
+  assert.equal(envelope.durationMs, 1000);
+  assert.equal(envelope.artifacts[0].kind, 'pdf');
+  assert.equal(envelope.error, null);
+});
+
+test('network aliases map to extension network command shape', () => {
+  assert.deepEqual(mapNetworkCommand('network_start', { filter: '/api' }), { command: 'network', args: { filter: '/api', cmd: 'start' } });
+  assert.deepEqual(mapNetworkCommand('network_stop', {}), { command: 'network', args: { cmd: 'stop' } });
+});
+
+test('network filter validation rejects non-string filters before extension dispatch', () => {
+  for (const command of ['network', 'network_start', 'network_list']) {
+    const args = command === 'network' ? { cmd: 'list', filter: {} } : { filter: {} };
+    assert.throws(
+      () => validateRequest(normalizeRequest({ command, args })),
+      err => err instanceof ProtocolError &&
+        err.code === 'VALIDATION_ERROR' &&
+        err.details?.field === 'filter' &&
+        err.details?.expectedType === 'string' &&
+        err.details?.actualType === 'object' &&
+        /URL substring/.test(err.details?.hint || '')
+    );
+  }
+
+  assert.equal(validateRequest(normalizeRequest({ command: 'network_list', args: { filter: '/api/' } })).args.filter, '/api/');
+  assert.equal(validateRequest(normalizeRequest({ command: 'network_list', args: { filter: '' } })).args.filter, '');
+  assert.equal(validateRequest(normalizeRequest({ command: 'network_list', args: { filter: null } })).args.filter, null);
+});
+
+test('public docs and contracts stay aligned with current command argument surface', () => {
+  const root = path.resolve(__dirname, '..');
+  const contracts = fs.readFileSync(path.join(root, 'contracts.ts'), 'utf8');
+  const api = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'references', 'api.md'), 'utf8');
+  const recipes = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'references', 'recipes.md'), 'utf8');
+  const screenshotHelper = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'scripts', 'screenshot.sh'), 'utf8');
+
+  assert.match(api, /--args-file <path>/);
+  assert.match(api, /--code-file <path>/);
+  assert.match(api, /codeBase64/);
+  assert.match(api, /download`: args `url` required/);
+  assert.match(contracts, /download:\s*\{\s*url:\s*string;[^}]*saveAs\?:\s*boolean/s);
+  assert.match(api, /fullPage:true.*forward compatibility/s);
+  assert.match(screenshotHelper, /current extension backend returns viewport capture/);
+  assert.match(api, /network_list`: list captured requests; optional args `filter`, `sinceTimestampMs`, and `limit`/);
+  assert.match(contracts, /network_list:\s*\{[^}]*sinceTimestampMs\?:\s*number;[^}]*limit\?:\s*number/s);
+  assert.match(recipes, /snapshot --session read-page --args '\{"hasVisibleText":true,"viewportOnly":true,"maxElements":120\}'/);
+  assert.match(api, /schemaVersion: 2/);
+  assert.match(api, /compact-dom-v2/);
+  assert.match(contracts, /interface SnapshotResult/);
+  assert.match(contracts, /semantics:\s*'compact-dom-v2'/);
+  assert.doesNotMatch(api, /navigate[\s\S]{0,250}optional `tabId`/);
+  assert.doesNotMatch(contracts, /navigate:\s*\{[^}]*tabId/s);
+});
+
+test('artifact store persists raw outputs and returns metadata without base64 payload', () => {
+  const store = new ArtifactStore(fs.mkdtempSync(path.join(os.tmpdir(), 'ab-artifacts-')));
+  const encoded = Buffer.from('pdf-body').toString('base64');
+  const { data, artifacts } = extractArtifacts('save_as_pdf', { format: 'pdf', data: encoded, fileName: 'fixture.pdf' }, store);
+  assert.equal(artifacts.length, 1);
+  assert.equal(artifacts[0].mimeType, 'application/pdf');
+  assert.ok(fs.existsSync(artifacts[0].path));
+  assert.equal(data.data, undefined);
+});
+
+test('protocol exposes usability optimization commands without codeBase64', () => {
+  for (const command of ['get_text', 'attach_tab']) {
+    assert.ok(COMMANDS[command], `${command} should be protocol-visible`);
+  }
+  assert.equal(COMMANDS.evaluate.required.includes('code'), true);
+  assert.doesNotMatch(JSON.stringify(COMMANDS), /codeBase64/);
+  assert.doesNotMatch(fs.readFileSync(path.join(path.resolve(__dirname, '..'), 'contracts.ts'), 'utf8'), /codeBase64/);
+});
+
+test('validation details include optional fields, examples, and common recovery hints', () => {
+  assert.throws(
+    () => validateRequest(normalizeRequest({ command: 'network_detail', args: { index: 0 } })),
+    err => err instanceof ProtocolError &&
+      err.details?.field === 'requestId' &&
+      Array.isArray(err.details?.optional) &&
+      err.details?.example?.requestId &&
+      /requestId/.test((err.details?.hints || []).join(' '))
+  );
+  assert.throws(
+    () => validateRequest(normalizeRequest({ command: 'observe_diff', args: {} })),
+    err => err instanceof ProtocolError && /observe_start/.test((err.details?.hints || []).join(' '))
+  );
+  assert.throws(
+    () => validateRequest(normalizeRequest({ command: 'click', args: { text: 'Save' } })),
+    err => err instanceof ProtocolError && /snapshot/.test((err.details?.hints || []).join(' '))
+  );
+});
+
+test('protocol command metadata lists documented optional args for file, tab, and artifact commands', () => {
+  assert.deepEqual(COMMANDS.select_option.optional, ['tabId']);
+  assert.deepEqual(COMMANDS.set_checked.optional, ['tabId']);
+  assert.deepEqual(COMMANDS.upload.optional, ['tabId']);
+  assert.deepEqual(COMMANDS.close_tab.optional, ['tabId']);
+  for (const field of ['tabId', 'paper_format', 'landscape', 'scale', 'print_background', 'file_name']) {
+    assert.equal(COMMANDS.save_as_pdf.optional.includes(field), true, `${field} should be listed for save_as_pdf`);
+  }
+  for (const field of ['filename', 'saveAs']) {
+    assert.equal(COMMANDS.download.optional.includes(field), true, `${field} should be listed for download`);
+  }
+  for (const field of ['tabId', 'urlIncludes', 'titleIncludes', 'active']) {
+    assert.equal(COMMANDS.attach_tab.optional.includes(field), true, `${field} should be listed for attach_tab`);
+  }
+  for (const field of ['urlIncludes', 'titleIncludes', 'active', 'tabId', 'attach']) {
+    assert.equal(COMMANDS.find_tab.optional.includes(field), true, `${field} should be listed for find_tab`);
+  }
+});

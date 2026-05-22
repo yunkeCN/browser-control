@@ -1,0 +1,15 @@
+.DS_Store
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.omc/
+.omx/logs/
+.omx/state/
+.omx/context/
+.omx/interviews/
+.omx/specs/
+.claude/
+.playwright-mcp/
+*.log
+/private/tmp/

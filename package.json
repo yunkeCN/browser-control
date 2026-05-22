@@ -1,0 +1,32 @@
+{
+  "name": "browser-control",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Local Chrome browser control bridge for AI agents.",
+  "type": "commonjs",
+  "bin": {
+    "browser-control": "./skills/browser-control/scripts/browser-control.js"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.extension.json --noEmit",
+    "test": "npm run build:extension && node --test --test-concurrency=1 tests/*.test.js",
+    "lint": "node skills/browser-control/scripts/lint.js",
+    "e2e:fixture": "npm run build:extension && node tests/fixture-e2e.test.js",
+    "e2e:live": "bash tests/e2e-test.sh",
+    "build": "npm run build:extension",
+    "build:extension": "node scripts/build-extension.mjs",
+    "check:extension-build": "node scripts/check-extension-build-drift.mjs && node tests/extension-build.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.42",
+    "esbuild": "^0.28.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}

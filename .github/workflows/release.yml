@@ -1,0 +1,61 @@
+name: Release Packages
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-packages:
+    name: Build and release packages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build extension
+        run: npm run build
+
+      - name: Package release assets
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          skill_asset="browser-control-skill-${tag}.zip"
+          extension_asset="browser-control-extension-${tag}.zip"
+          mkdir -p release
+          cp -R skills/browser-control release/browser-control
+          cp -R skills/browser-control/extension release/extension
+          (cd release && zip -r "../${skill_asset}" browser-control)
+          (cd release && zip -r "../${extension_asset}" extension)
+          echo "skill_asset=${skill_asset}" >> "$GITHUB_ENV"
+          echo "extension_asset=${extension_asset}" >> "$GITHUB_ENV"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes="Release packages for ${GITHUB_REF_NAME}.
+
+          - browser-control-skill-${GITHUB_REF_NAME}.zip contains the complete browser-control Skill directory.
+          - browser-control-extension-${GITHUB_REF_NAME}.zip contains only the Chrome extension/ directory."
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" "${skill_asset}" "${extension_asset}" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" "${skill_asset}" "${extension_asset}" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes "${notes}"
+          fi

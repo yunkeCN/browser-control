@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Browser Control</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { width: 320px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; color: #1a1a2e; }
+    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; padding: 16px; }
+    .header h1 { font-size: 16px; font-weight: 600; }
+    .header .version { font-size: 11px; opacity: 0.8; }
+    .content { padding: 16px; }
+    .status-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid #e5e5e5; }
+    .status-row:last-child { border-bottom: none; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dot.green { background: #22c55e; }
+    .dot.red { background: #ef4444; }
+    .dot.yellow { background: #f59e0b; }
+    .label { flex: 1; font-weight: 500; }
+    .value { color: #6b7280; font-variant-numeric: tabular-nums; }
+    .actions { padding: 0 16px 16px; display: flex; gap: 8px; }
+    button { flex: 1; padding: 8px 12px; border: none; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+    button.primary { background: #667eea; color: #fff; }
+    button.primary:hover { background: #5a6fd6; }
+    button.secondary { background: #f3f4f6; color: #374151; }
+    button.secondary:hover { background: #e5e7eb; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .session-list { padding: 0 16px 8px; }
+    .session-tag { display: inline-flex; align-items: center; gap: 4px; background: #f0f0ff; color: #667eea; padding: 3px 8px; border-radius: 12px; font-size: 11px; margin: 2px; }
+    .footer { padding: 8px 16px; background: #f9fafb; font-size: 11px; color: #9ca3af; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Browser Control</h1>
+    <div class="version">v1.0.0 — AI Browser Automation</div>
+  </div>
+  <div class="content" id="statusContent">
+    <div class="status-row">
+      <div class="dot red" id="daemonDot"></div>
+      <span class="label">Daemon Connection</span>
+      <span class="value" id="daemonStatus">disconnected</span>
+    </div>
+    <div class="status-row">
+      <div class="dot" id="wsDot"></div>
+      <span class="label">WebSocket</span>
+      <span class="value" id="wsStatus">—</span>
+    </div>
+    <div class="status-row">
+      <span class="label">Active Sessions</span>
+      <span class="value" id="sessionCount">0</span>
+    </div>
+    <div class="status-row">
+      <span class="label">Managed Tabs</span>
+      <span class="value" id="tabCount">0</span>
+    </div>
+  </div>
+  <div class="session-list" id="sessionList"></div>
+  <div class="actions">
+    <button class="primary" id="btnConnect">Connect</button>
+    <button class="secondary" id="btnDisconnect">Disconnect</button>
+  </div>
+  <div class="footer">Daemon: ws://127.0.0.1:10087</div>
+  <script src="popup.js"></script>
+</body>
+</html>
