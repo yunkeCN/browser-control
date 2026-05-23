@@ -556,6 +556,149 @@
       return `Failed to detach temporary debugger session: ${err?.message || String(err)}`;
     }
   }
+  function buildRuntimeEvaluationExpression(source2, mode) {
+    const invocation = mode === "expression" ? `const __bcValue = await (async () => (${source2}))();` : `const __bcValue = await (async () => { ${source2}
+ })();`;
+    return `(async () => {
+    ${invocation}
+    const __bcState = { warnings: [], truncated: false, seen: typeof WeakSet !== 'undefined' ? new WeakSet() : null };
+    function __bcSerialize(value, depth) {
+      if (value === null) return null;
+      const type = typeof value;
+      if (type === 'string' || type === 'number' || type === 'boolean') return value;
+      if (type === 'undefined') return null;
+      if (type === 'bigint') {
+        __bcState.warnings.push('Converted bigint to string.');
+        return value.toString();
+      }
+      if (type === 'symbol' || type === 'function') {
+        __bcState.warnings.push('Converted ' + type + ' to string.');
+        return String(value);
+      }
+      if (depth >= 6) {
+        __bcState.truncated = true;
+        return '[MaxDepth]';
+      }
+      if (__bcState.seen && typeof value === 'object') {
+        if (__bcState.seen.has(value)) {
+          __bcState.warnings.push('Replaced circular reference.');
+          return '[Circular]';
+        }
+        __bcState.seen.add(value);
+      }
+      if (typeof Element !== 'undefined' && value instanceof Element) {
+        const rect = value.getBoundingClientRect();
+        return {
+          nodeType: 'element',
+          tagName: value.tagName.toLowerCase(),
+          id: value.id || null,
+          className: typeof value.className === 'string' ? value.className : null,
+          textContent: (value.innerText || value.textContent || '').slice(0, 500),
+          boundingBox: {
+            x: Math.round(rect.x + window.scrollX),
+            y: Math.round(rect.y + window.scrollY),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height)
+          }
+        };
+      }
+      if (typeof Node !== 'undefined' && value instanceof Node) {
+        return { nodeType: value.nodeType, nodeName: value.nodeName, textContent: (value.textContent || '').slice(0, 500) };
+      }
+      if (value instanceof Error) {
+        return { name: value.name, message: value.message, stack: typeof value.stack === 'string' ? value.stack.split('\\n').slice(0, 8).join('\\n') : undefined };
+      }
+      if (value instanceof Date) return value.toISOString();
+      if (Array.isArray(value)) {
+        if (value.length > 100) __bcState.truncated = true;
+        return value.slice(0, 100).map(item => __bcSerialize(item, depth + 1));
+      }
+      const output = {};
+      const keys = Object.keys(value);
+      if (keys.length > 100) __bcState.truncated = true;
+      for (const key of keys.slice(0, 100)) {
+        try {
+          output[key] = __bcSerialize(value[key], depth + 1);
+        } catch (err) {
+          output[key] = '[Unserializable: ' + ((err && err.message) || err) + ']';
+          __bcState.warnings.push('Could not serialize property ' + key + '.');
+        }
+      }
+      return output;
+    }
+    const __bcPayload = { result: __bcSerialize(__bcValue, 0) };
+    if (__bcValue === undefined) {
+      __bcPayload.result = null;
+      __bcPayload.serialization = { undefinedResult: true, warnings: ['Evaluation returned undefined; use return ... or a single expression to return data.'] };
+    } else if (__bcState.warnings.length || __bcState.truncated) {
+      __bcPayload.serialization = { truncated: __bcState.truncated, warnings: __bcState.warnings };
+    }
+    return __bcPayload;
+  })()`;
+  }
+  function formatRuntimeEvaluationException(details) {
+    const exception = details?.exception || {};
+    const description = exception.description || details?.text || "Runtime.evaluate failed";
+    const firstLine = String(description).split("\n")[0];
+    return {
+      error: firstLine,
+      errorDetails: {
+        name: exception.className || "Error",
+        message: firstLine,
+        stack: typeof description === "string" ? description.split("\n").slice(0, 8).join("\n") : void 0
+      }
+    };
+  }
+  function isSyntaxException(details) {
+    const exception = details?.exception || {};
+    const text = `${exception.className || ""} ${exception.description || ""} ${details?.text || ""}`;
+    return text.includes("SyntaxError");
+  }
+  async function evaluateRuntimeExpression(debuggee, expression) {
+    const response = await chrome.debugger.sendCommand(debuggee, "Runtime.evaluate", {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+      userGesture: true
+    });
+    if (response?.exceptionDetails) {
+      return { exceptionDetails: response.exceptionDetails, payload: formatRuntimeEvaluationException(response.exceptionDetails) };
+    }
+    return { payload: response?.result?.value ?? { result: null, serialization: { undefinedResult: true } } };
+  }
+  async function performCdpEvaluate(tabId, code2) {
+    const lease = await acquireActionDebugger(tabId);
+    if (lease.error) {
+      return {
+        error: lease.error,
+        recoverable: lease.recoverable,
+        warnings: lease.warnings || []
+      };
+    }
+    const source2 = String(code2 ?? "");
+    const hasExplicitReturn2 = /\breturn\b/.test(source2);
+    const debuggee = lease.debuggee;
+    try {
+      if (!hasExplicitReturn2) {
+        const expressionResult = await evaluateRuntimeExpression(debuggee, buildRuntimeEvaluationExpression(source2, "expression"));
+        if (!expressionResult.exceptionDetails) return expressionResult.payload;
+        if (!isSyntaxException(expressionResult.exceptionDetails)) return expressionResult.payload;
+      }
+      const bodyResult = await evaluateRuntimeExpression(debuggee, buildRuntimeEvaluationExpression(source2, "body"));
+      return bodyResult.payload;
+    } catch (err) {
+      return {
+        error: `Runtime.evaluate failed: ${err?.message || String(err)}`,
+        recoverable: true,
+        warnings: lease.warnings || []
+      };
+    } finally {
+      const detachWarning = await releaseActionDebugger(lease);
+      if (detachWarning) {
+        console.warn("[AgentBridge] " + detachWarning);
+      }
+    }
+  }
   async function performCdpMouseClick(tabId, selector, options = {}) {
     const geometryResults = await chrome.scripting.executeScript({
       target: { tabId },
@@ -3410,11 +3553,13 @@
     if (!code2) throw new Error("code is required for evaluate");
     const tabId = args?.tabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
+    const cdpResult = await performCdpEvaluate(tabId, code2);
+    if (!cdpResult?.recoverable) return cdpResult;
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       func: performEvaluate,
       args: [code2],
-      world: "MAIN"
+      world: "ISOLATED"
     });
     return results[0]?.result;
   }

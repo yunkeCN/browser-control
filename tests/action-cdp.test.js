@@ -49,6 +49,17 @@ test('press with @e selectors does not bypass stale validation through cdp_keybo
   assert.match(navigationSource, /!\s*selectorIsAgentRef && \(strategy === ['"]auto['"] \|\| strategy === ['"]cdp_keyboard['"]\)/);
 });
 
+test('evaluate uses CDP Runtime.evaluate before isolated-world fallback', () => {
+  assert.match(networkCdpSource, /export async function performCdpEvaluate/);
+  assert.match(networkCdpSource, /Runtime\.evaluate/);
+  assert.match(networkCdpSource, /returnByValue:\s*true/);
+  assert.match(networkCdpSource, /awaitPromise:\s*true/);
+  assert.match(networkCdpSource, /buildRuntimeEvaluationExpression/);
+  assert.match(navigationSource, /const cdpResult = await performCdpEvaluate\(tabId,\s*code\)/);
+  assert.match(navigationSource, /if \(!cdpResult\?\.recoverable\) return cdpResult/);
+  assert.match(navigationSource, /world:\s*['"]ISOLATED['"]/);
+});
+
 test('find_tab accepts only current Includes filters for new-project protocol clarity', () => {
   assert.match(navigationSource, /const urlNeedle = query\.urlIncludes/);
   assert.match(navigationSource, /const titleNeedle = query\.titleIncludes/);

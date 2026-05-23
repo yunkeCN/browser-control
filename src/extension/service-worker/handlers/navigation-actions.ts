@@ -1,6 +1,6 @@
 import { createArtifactHint, getTabMetadata } from '../runtime-metadata';
 import { getActiveTabId, setActiveTab } from '../sessions';
-import { ensureNetworkCapture, performCdpKeyboardPress, performCdpMouseClick, performCdpWheelScroll } from './network-cdp';
+import { ensureNetworkCapture, performCdpEvaluate, performCdpKeyboardPress, performCdpMouseClick, performCdpWheelScroll } from './network-cdp';
 import { getAccessibilitySnapshot } from '../page-runtime/snapshot';
 import { captureViewportTextObservation } from '../page-runtime/observation';
 import { getDocumentTextSnapshot, getTextSnapshot } from '../page-runtime/get-text';
@@ -400,11 +400,14 @@ export async function handleEvaluate(args: CommandArgs = {}, session: SessionNam
   const tabId = args?.tabId || getActiveTabId(session);
   if (!tabId) throw new Error('No active tab in session');
 
+  const cdpResult = await performCdpEvaluate(tabId, code);
+  if (!cdpResult?.recoverable) return cdpResult;
+
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: performEvaluate,
     args: [code],
-    world: 'MAIN'
+    world: 'ISOLATED'
   });
 
   return results[0]?.result;
