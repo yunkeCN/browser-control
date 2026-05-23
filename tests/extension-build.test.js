@@ -177,7 +177,7 @@ test('snapshot runtime emits compact schema, deterministic depth, direct text, a
   const button = full.elements.find(element => element.tag === 'button');
   assert.equal(button.name, 'Nested descendant text');
   assert.equal(button.visibleText, 'Nested descendant text');
-  assert.match(button.id, /^@e\d+$/);
+  assert.match(button.id, /^@e[a-z0-9]+_\d+$/);
 
   const token = full.elements.find(element => element.testId === 'token-input');
   assert.equal(token.attributes.value, '[redacted]');
@@ -193,7 +193,7 @@ test('snapshot runtime emits compact schema, deterministic depth, direct text, a
   assert.equal(buttons.elements.length, 1);
   assert.equal(buttons.stats.matched >= 1, true);
   assert.equal(buttons.elements.every(element => element.role === 'button'), true);
-  assert.notEqual(buttons.elements[0].id, button.id);
+  assert.equal(buttons.elements[0].id, button.id);
 
   const assignedIds = sandbox.document
     .querySelectorAll('[data-agent-id^="@e"]')
@@ -203,6 +203,33 @@ test('snapshot runtime emits compact schema, deterministic depth, direct text, a
     sandbox.document.querySelector(`[data-agent-id="${buttons.elements[0].id}"]`),
     sandbox.fixture.button
   );
+});
+
+test('snapshot runtime keeps structural ids stable and stale @e refs fail closed', async () => {
+  const source = read(extensionPath('service-worker.js'));
+  const getSnapshotSource = extractFunction(source, 'getAccessibilitySnapshot');
+  const performClickSource = extractFunction(source, 'performClick');
+  const sandbox = createSnapshotSandbox();
+  vm.createContext(sandbox);
+  const getSnapshot = vm.runInContext(`(${getSnapshotSource})`, sandbox);
+  const performClick = vm.runInContext(`(${performClickSource})`, sandbox);
+
+  const first = await getSnapshot({ roles: ['button'] });
+  const firstButton = first.elements[0];
+  assert.match(firstButton.id, /^@e[a-z0-9]+_1$/);
+
+  const second = await getSnapshot({ roles: ['button'] });
+  assert.equal(second.elements[0].id, firstButton.id);
+
+  sandbox.fixture.button.childNodes[0].textContent = '超過 20 分鐘';
+  const staleClick = performClick(firstButton.id, { strategy: 'dom_pointer', force: true });
+  assert.equal(staleClick.code, 'STALE_ELEMENT_REFERENCE');
+  assert.equal(staleClick.recoverable, true);
+  assert.equal(sandbox.fixture.button.events.length, 0);
+
+  const third = await getSnapshot({ roles: ['button'] });
+  assert.match(third.elements[0].id, new RegExp(`^@e${firstButton.structureId}_2$`));
+  assert.notEqual(third.elements[0].id, firstButton.id);
 });
 
 function createIsolatedPageSandbox() {
@@ -293,6 +320,8 @@ function createSnapshotSandbox() {
       this.style = options.style || { display: 'block', visibility: 'visible' };
       this.options = options.options || [];
       this.selectedIndex = options.selectedIndex || 0;
+      this.events = [];
+      this.ownerDocument = null;
       if (options.text) this.childNodes.push({ nodeType: 3, textContent: options.text });
       for (const child of options.children || []) this.appendChild(child);
     }
@@ -315,8 +344,26 @@ function createSnapshotSandbox() {
     }
     appendChild(child) {
       child.parentElement = this;
+      child.ownerDocument = this.ownerDocument;
       this.children.push(child);
       this.childNodes.push(child);
+    }
+    contains(other) {
+      if (other === this) return true;
+      return this.children.some(child => child.contains?.(other));
+    }
+    scrollIntoView(options) {
+      this.scrolledWith = options;
+    }
+    focus() {
+      if (this.ownerDocument) this.ownerDocument.activeElement = this;
+    }
+    click() {
+      this.events.push({ type: 'native-click' });
+    }
+    dispatchEvent(event) {
+      this.events.push(event);
+      return true;
     }
     getBoundingClientRect() {
       return this.rect;
@@ -363,14 +410,25 @@ function createSnapshotSandbox() {
   const document = {
     title: 'Snapshot Fixture',
     body,
+    activeElement: body,
+    elementFromPoint() {
+      return button;
+    },
     querySelector(selector) {
-      if (!selector.startsWith('[data-agent-id="')) return null;
-      const id = selector.slice('[data-agent-id="'.length, -2);
-      return allElements().find(element => element.getAttribute('data-agent-id') === id) || null;
+      if (selector.startsWith('[data-agent-id="')) {
+        const id = selector.slice('[data-agent-id="'.length, -2);
+        return allElements().find(element => element.getAttribute('data-agent-id') === id) || null;
+      }
+      if (selector.startsWith('[data-agent-structure-id="')) {
+        const id = selector.slice('[data-agent-structure-id="'.length, -2);
+        return allElements().find(element => element.getAttribute('data-agent-structure-id') === id) || null;
+      }
+      return null;
     },
     querySelectorAll(selector) {
+      if (selector === '*') return allElements();
       if (selector !== '[data-agent-id^="@e"]') return [];
-      return allElements().filter(element => /^@e\d+$/.test(element.getAttribute('data-agent-id') || ''));
+      return allElements().filter(element => /^@e[a-z0-9]+_\d+$/.test(element.getAttribute('data-agent-id') || ''));
     },
     createTreeWalker(root, _show, filter) {
       const nodes = [];
@@ -398,6 +456,7 @@ function createSnapshotSandbox() {
       };
     }
   };
+  for (const element of [body, ...allElements()]) element.ownerDocument = document;
 
   return {
     document,

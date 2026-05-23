@@ -44,7 +44,7 @@ Browser command helper examples:
 
 ```bash
 node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{}'
-node skills/browser-control/scripts/browser-control.js command click --session demo --args '{"selector":"@e4"}'
+node skills/browser-control/scripts/browser-control.js command click --session demo --args '{"selector":"@e1jm0sbb_1"}'
 node skills/browser-control/scripts/browser-control.js command scroll --session demo --args '{"deltaY":800,"strategy":"dom"}'
 node skills/browser-control/scripts/browser-control.js command evaluate --session demo --code-file ./snippet.js
 ```
@@ -75,6 +75,8 @@ Fields:
 - `args`: command-specific arguments.
 - `timeoutMs`: command timeout in milliseconds.
 
+Command arguments are strict. Unknown fields fail validation instead of being ignored, with a hint when a close canonical name exists; for example `find_tab` uses the canonical `*Includes` substring fields for URL and title matching.
+
 ## Result envelope
 
 Responses include:
@@ -91,7 +93,7 @@ Common error codes: `VALIDATION_ERROR`, `UNKNOWN_COMMAND`, `TIMEOUT`, `BACKEND_U
 Validation and recoverable backend failures include `error.details` when the agent can act on them. Examples:
 
 - `fill` with `text` instead of `value` returns a `VALIDATION_ERROR` whose details point to `args.value`.
-- stale `@e` references usually return `NOT_FOUND` with next steps to take a fresh `snapshot` and retry after `wait_for` if needed.
+- stale `@e<structureId>_<revision>` references return `STALE_ELEMENT_REFERENCE` when Browser Control can prove the element at that structural location changed. Missing references may return `NOT_FOUND`; in both cases take a fresh `snapshot` and retry after `wait_for` if needed.
 - missing active tabs or disconnected extension failures return `BACKEND_UNAVAILABLE` with readiness or attach/navigation guidance.
 
 ## Browser commands
@@ -138,7 +140,7 @@ Response semantics:
 - `maxDepth` is enforced only when explicitly provided; omitting it preserves broad default element discovery for deeply nested SPA controls.
 - Generic containers prefer direct text instead of aggregating all descendant text, which reduces duplicated Ant Design/layout text. Interactive elements still preserve discoverable names/text for targeting.
 - Likely sensitive input values, such as password/token/secret/session/cookie/API-key fields, are redacted by default with `attributes.redacted:true` and optional `valueLength`.
-- `@e` references are scoped to the latest snapshot of the current document. Refresh the snapshot after navigation or significant DOM changes.
+- `@e` references use the format `@e<structureId>_<revision>`. They are page-state references scoped to the latest snapshot of the current document, not permanent selectors. Refresh the snapshot after navigation, dialog reconstruction, filtering, list reordering, or significant DOM changes. Browser Control rejects stale revisions with `STALE_ELEMENT_REFERENCE` rather than clicking a changed element.
 
 Examples:
 
@@ -151,7 +153,7 @@ node skills/browser-control/scripts/browser-control.js command snapshot --sessio
 
 Click an element by `@e` reference or CSS selector.
 
-Arguments: `selector` required, optional `tabId`, `strategy`, `force`, `button`, `clickCount`, `modifiers`, `expectChange`, `observe`, `observeNewTab`, and `expectNewTab`. New-tab observation is opt-in; ordinary clicks do not automatically attach arbitrary new tabs.
+Arguments: `selector` required, optional `tabId`, `strategy`, `force`, `button`, `clickCount`, `modifiers`, `expectChange`, `observe`, `observeNewTab`, and `expectNewTab`.
 
 Strategies:
 
@@ -160,10 +162,10 @@ Strategies:
 - `dom_pointer`: dispatch one pointer/mouse sequence against the hit-tested target. It does not call `el.click()` after a successful sequence.
 - `element_click`: explicitly call `el.click()`. This is an escape hatch, not the default, and may bypass pointer/mouse semantics.
 
-Diagnostics may include `strategyUsed`, `target`, `hitTest`, `focusBefore`, `focusAfter`, and `warnings`. Covered targets fail by default with covering element details; use `force:true` only after confirming the overlay should be bypassed.
+Diagnostics may include `strategyUsed`, `target`, `hitTest`, `focusBefore`, `focusAfter`, `newTab` / `newTabs` when the action opens another tab, and `warnings`. When a click opens a new tab, Browser Control attaches that tab to the session and extends session network capture so the next `snapshot` or `wait_for` continues on the new page. Covered targets fail by default with covering element details; use `force:true` only after confirming the overlay should be bypassed.
 
 ```json
-{"command":"click","args":{"selector":"@e4","strategy":"auto","expectChange":true}}
+{"command":"click","args":{"selector":"@e1jm0sbb_1","strategy":"auto","expectChange":true}}
 ```
 
 ### `fill`
@@ -183,14 +185,14 @@ Strategies:
 Use `value` exactly:
 
 ```json
-{"command":"fill","args":{"selector":"@e5","value":"draft text"}}
+{"command":"fill","args":{"selector":"@e0abc12_1","value":"draft text"}}
 ```
 
 ### `press`
 
 Press a keyboard key, optionally targeting an element first.
 
-Arguments: `key` required, optional `selector`, optional `tabId`, `strategy`, `modifiers`, `expectChange`, `observe`.
+Arguments: `key` required, optional `selector`, optional `tabId`, `strategy`, `modifiers`, `expectChange`, `observe`, `observeNewTab`, and `expectNewTab`.
 
 Strategies:
 
@@ -198,7 +200,7 @@ Strategies:
 - `cdp_keyboard`: use Chrome debugger keyboard events where available.
 - `dom_keyboard`: dispatch synthetic keyboard events and report that they are untrusted.
 
-Press diagnostics may include key/code/modifier data, focused target before and after the action, `strategyUsed`, and `warnings`.
+Press diagnostics may include key/code/modifier data, focused target before and after the action, `strategyUsed`, `newTab` / `newTabs` when the key opens another tab, and `warnings`.
 
 ### Action observation options
 

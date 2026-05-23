@@ -1,11 +1,19 @@
 type CdpTargetElement = any;
 
 export function resolveClickTargetForCdp(selector: string, options: any = {}): any {
-  function localFindElement(sel: string | null | undefined): CdpTargetElement | null {
+  function localFindElement(sel: string | null | undefined): { element: CdpTargetElement | null; error?: any } | null {
     if (!sel) return null;
     try {
-        if (String(sel).startsWith('@e')) return document.querySelector(`[data-agent-id="${sel}"]`) as CdpTargetElement | null;
-        return document.querySelector(sel) as CdpTargetElement | null;
+        if (String(sel).startsWith('@e')) {
+          const runtime = (window as any).__browserControlAgentRef;
+          if (!runtime?.resolve) {
+            return { element: null, error: { error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`, code: 'STALE_ELEMENT_REFERENCE', recoverable: true, retryable: true, selector: sel, strategyUsed: 'cdp_mouse', nextStep: 'Take a fresh snapshot and retry with the new @e reference.' } };
+          }
+          const resolved = runtime.resolve(String(sel));
+          if (resolved?.error) return { element: null, error: { ...resolved, strategyUsed: 'cdp_mouse' } };
+          return { element: resolved.element as CdpTargetElement };
+        }
+        return { element: document.querySelector(sel) as CdpTargetElement | null };
     } catch {
       return null;
     }
@@ -29,7 +37,9 @@ export function resolveClickTargetForCdp(selector: string, options: any = {}): a
     };
   }
 
-  const el = localFindElement(selector);
+  const found = localFindElement(selector);
+  if (found?.error) return found.error;
+  const el = found?.element;
   if (!el) return { error: `Element not found: ${selector}`, recoverable: true, strategyUsed: 'cdp_mouse' };
 
   el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });

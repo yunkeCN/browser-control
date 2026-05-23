@@ -38,8 +38,15 @@ test('auto action strategies fall back visibly while explicit CDP strategies ret
   assert.match(navigationSource, /cdp_mouse unavailable in auto mode; fell back to dom_pointer/);
   assert.match(navigationSource, /strategy === ['"]cdp_mouse['"]\) return cdpResult/);
   assert.match(navigationSource, /cdp_keyboard unavailable in auto mode; fell back to dom_keyboard/);
-  assert.match(navigationSource, /strategy === ['"]cdp_keyboard['"]\) return cdpResult/);
+  assert.match(navigationSource, /strategy === ['"]cdp_keyboard['"]\) return observeNewTabResult\(cdpResult\)/);
   assert.match(networkCdpSource, /recoverable:\s*true/);
+});
+
+test('press with @e selectors does not bypass stale validation through cdp_keyboard', () => {
+  assert.match(navigationSource, /const selectorIsAgentRef = typeof selector === ['"]string['"] && selector\.startsWith\(['"]@e['"]\)/);
+  assert.match(navigationSource, /selectorIsAgentRef && strategy === ['"]cdp_keyboard['"]/);
+  assert.match(navigationSource, /UNSUPPORTED_SELECTOR_STRATEGY/);
+  assert.match(navigationSource, /!\s*selectorIsAgentRef && \(strategy === ['"]auto['"] \|\| strategy === ['"]cdp_keyboard['"]\)/);
 });
 
 test('find_tab accepts only current Includes filters for new-project protocol clarity', () => {

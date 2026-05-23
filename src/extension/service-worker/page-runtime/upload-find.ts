@@ -1,25 +1,26 @@
 type FileInputElement = any;
 
 export function performUpload(selector: string, files: unknown): any {
-  function localFindElement(sel: string): FileInputElement | null {
-    // Support @e references (accessibility tree IDs)
+  function localFindElement(sel: string): { element: FileInputElement | null; error?: any } | null {
     if (sel.startsWith('@e')) {
-      // @e references point to elements by their position in the snapshot
-      // We need to rebuild the tree to find them — for now use a marker approach
-      // This is handled by tagging elements during snapshot
-      // Fallback: try to find by data-agent-id
-      return document.querySelector(`[data-agent-id="${sel}"]`) as FileInputElement | null;
+      const runtime = (window as any).__browserControlAgentRef;
+      if (!runtime?.resolve) return { element: null, error: { error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`, code: 'STALE_ELEMENT_REFERENCE', recoverable: true, retryable: true, selector: sel, nextStep: 'Take a fresh snapshot and retry with the new @e reference.' } };
+      const resolved = runtime.resolve(String(sel));
+      if (resolved?.error) return { element: null, error: resolved };
+      return { element: resolved.element as FileInputElement };
     }
 
     // CSS selector
     try {
-      return document.querySelector(sel) as FileInputElement | null;
+      return { element: document.querySelector(sel) as FileInputElement | null };
     } catch {
       return null;
     }
   }
 
-  const el = localFindElement(selector);
+  const found = localFindElement(selector);
+  if (found?.error) return found.error;
+  const el = found?.element;
   if (!el) return { error: `Element not found: ${selector}` };
   if (el.tagName.toLowerCase() !== 'input' || el.type !== 'file') {
     return { error: 'Element is not a file input' };

@@ -1,16 +1,24 @@
 type MutableFormElement = any;
 
 export function performSelectOption(selector: string, value: unknown): any {
-  function localFindElement(sel: string): MutableFormElement | null {
+  function localFindElement(sel: string): { element: MutableFormElement | null; error?: any } | null {
     if (!sel) return null;
     try {
-      if (String(sel).startsWith('@e')) return document.querySelector(`[data-agent-id="${sel}"]`) as MutableFormElement | null;
-      return document.querySelector(sel) as MutableFormElement | null;
+      if (String(sel).startsWith('@e')) {
+        const runtime = (window as any).__browserControlAgentRef;
+        if (!runtime?.resolve) return { element: null, error: { error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`, code: 'STALE_ELEMENT_REFERENCE', recoverable: true, retryable: true, selector: sel, nextStep: 'Take a fresh snapshot and retry with the new @e reference.' } };
+        const resolved = runtime.resolve(String(sel));
+        if (resolved?.error) return { element: null, error: resolved };
+        return { element: resolved.element as MutableFormElement };
+      }
+      return { element: document.querySelector(sel) as MutableFormElement | null };
     } catch {
       return null;
     }
   }
-  const el = localFindElement(selector);
+  const found = localFindElement(selector);
+  if (found?.error) return found.error;
+  const el = found?.element;
   if (!el) return { error: `Element not found: ${selector}` };
   if (el.tagName.toLowerCase() !== 'select') return { error: `Element is not a select: ${selector}` };
   const values = Array.isArray(value) ? value.map(String) : [String(value)];
@@ -27,16 +35,24 @@ export function performSelectOption(selector: string, value: unknown): any {
 }
 
 export function performSetChecked(selector: string, checked: boolean): any {
-  function localFindElement(sel: string): MutableFormElement | null {
+  function localFindElement(sel: string): { element: MutableFormElement | null; error?: any } | null {
     if (!sel) return null;
     try {
-      if (String(sel).startsWith('@e')) return document.querySelector(`[data-agent-id="${sel}"]`) as MutableFormElement | null;
-      return document.querySelector(sel) as MutableFormElement | null;
+      if (String(sel).startsWith('@e')) {
+        const runtime = (window as any).__browserControlAgentRef;
+        if (!runtime?.resolve) return { element: null, error: { error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`, code: 'STALE_ELEMENT_REFERENCE', recoverable: true, retryable: true, selector: sel, nextStep: 'Take a fresh snapshot and retry with the new @e reference.' } };
+        const resolved = runtime.resolve(String(sel));
+        if (resolved?.error) return { element: null, error: resolved };
+        return { element: resolved.element as MutableFormElement };
+      }
+      return { element: document.querySelector(sel) as MutableFormElement | null };
     } catch {
       return null;
     }
   }
-  const el = localFindElement(selector);
+  const found = localFindElement(selector);
+  if (found?.error) return found.error;
+  const el = found?.element;
   if (!el) return { error: `Element not found: ${selector}` };
   if (!['checkbox', 'radio'].includes((el.type || '').toLowerCase())) return { error: `Element is not checkable: ${selector}` };
   if (el.checked !== checked) {

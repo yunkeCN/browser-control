@@ -16,6 +16,62 @@ import type { CommandArgs, SessionName } from '../../shared/types';
 
 // ─── Action handlers ─────────────────────────────────────────────────
 
+type NewTabCandidate = {
+  id?: number;
+  title?: string;
+  url?: string;
+  active?: boolean;
+  openerTabId?: number;
+  windowId?: number;
+};
+
+function tabSummary(tab: chrome.tabs.Tab): NewTabCandidate {
+  return {
+    id: tab.id,
+    title: tab.title,
+    url: tab.url,
+    active: tab.active,
+    openerTabId: tab.openerTabId,
+    windowId: tab.windowId
+  };
+}
+
+async function beginNewTabWatch(): Promise<Set<number>> {
+  const tabs = await chrome.tabs.query({});
+  return new Set(tabs.map(tab => tab.id).filter((id): id is number => typeof id === 'number'));
+}
+
+async function attachNewTabsIfAny(session: SessionName, sourceTabId: number, beforeIds: Set<number>, args: CommandArgs = {}): Promise<any> {
+  await new Promise(resolve => setTimeout(resolve, 250));
+  const afterTabs = await chrome.tabs.query({});
+  const candidates = afterTabs
+    .filter(tab => typeof tab.id === 'number' && !beforeIds.has(tab.id))
+    .map(tabSummary);
+  const openerMatch = candidates.find(tab => tab.openerTabId === sourceTabId) || (candidates.length === 1 ? candidates[0] : null);
+  const warnings: string[] = [];
+  if (args?.expectNewTab === true && !openerMatch) warnings.push('expectNewTab was requested but no new tab was observed after the action.');
+  if (openerMatch?.id) {
+    await setActiveTab(session, openerMatch.id);
+    await ensureNetworkCapture(session, { tabId: openerMatch.id, auto: true, scope: 'session' });
+  }
+  return { openerMatch, candidates, warnings };
+}
+
+function mergeNewTabObservation(result: any, observed: any): any {
+  const warnings = [...(result?.warnings || []), ...(observed.warnings || [])];
+  if (!observed.openerMatch && !observed.candidates.length && !warnings.length) return result;
+  return {
+    ...result,
+    newTab: observed.openerMatch,
+    newTabs: observed.candidates,
+    observedNewTabs: observed.candidates,
+    suggestedNextStep: observed.openerMatch?.id
+      ? `A new tab opened and Browser Control attached it to this session. Continue with snapshot or wait_for on tab ${observed.openerMatch.id}.`
+      : result?.suggestedNextStep,
+    warnings
+  };
+}
+
 export async function handleNavigate(args: CommandArgs = {}, session: SessionName): Promise<any> {
   const { url, newTab = true } = args || {};
   if (!url) throw new Error('url is required for navigate');
@@ -97,13 +153,12 @@ export async function handleClick(args: CommandArgs = {}, session: SessionName):
   const tabId = argTabId || getActiveTabId(session);
   if (!tabId) throw new Error('No active tab in session');
   const strategy = args?.strategy || 'auto';
-  const shouldObserveNewTab = args?.observeNewTab === true || args?.expectNewTab === true;
-  const beforeTabs = shouldObserveNewTab ? await chrome.tabs.query({}) : [];
-  const beforeIds = new Set(beforeTabs.map(tab => tab.id).filter((id): id is number => typeof id === 'number'));
+  const beforeIds = await beginNewTabWatch();
 
   if (strategy === 'auto' || strategy === 'cdp_mouse') {
     const cdpResult = await performCdpMouseClick(tabId, selector, args || {});
     if (!cdpResult.error) return observeNewTabResult(cdpResult);
+    if (cdpResult.code === 'STALE_ELEMENT_REFERENCE') return cdpResult;
     if (strategy === 'cdp_mouse') return cdpResult;
     args = {
       ...args,
@@ -135,20 +190,8 @@ export async function handleClick(args: CommandArgs = {}, session: SessionName):
   return observeNewTabResult(result);
 
   async function observeNewTabResult(result: any): Promise<any> {
-    if (!shouldObserveNewTab) return result;
-    await new Promise(resolve => setTimeout(resolve, 250));
-    const afterTabs = await chrome.tabs.query({});
-    const candidates = afterTabs
-      .filter(tab => typeof tab.id === 'number' && !beforeIds.has(tab.id))
-      .map(tab => ({ id: tab.id, title: tab.title, url: tab.url, active: tab.active, openerTabId: tab.openerTabId, windowId: tab.windowId }));
-    const openerMatch = candidates.find(tab => tab.openerTabId === tabId) || candidates[0] || null;
-    const warnings = [...(result?.warnings || [])];
-    if (args?.expectNewTab === true && !openerMatch) warnings.push('expectNewTab was requested but no new tab was observed after the click.');
-    if (openerMatch?.id) {
-      await setActiveTab(session, openerMatch.id as number);
-      await ensureNetworkCapture(session, { tabId: openerMatch.id, auto: true, scope: 'session' });
-    }
-    return { ...result, newTab: openerMatch, observedNewTabs: candidates, warnings };
+    const observed = await attachNewTabsIfAny(session, tabId, beforeIds, args || {});
+    return mergeNewTabObservation(result, observed);
   }
 }
 
@@ -169,6 +212,7 @@ export async function handleFill(args: CommandArgs = {}, session: SessionName): 
 
   const result = results[0]?.result as any;
   if (result == null) throw new Error('Fill script returned no result');
+  if (result?.error && result?.recoverable) return result;
   if (result?.error) throw new Error(result.error);
   return result;
 }
@@ -180,10 +224,25 @@ export async function handlePress(args: CommandArgs = {}, session: SessionName):
   const tabId = args?.tabId || getActiveTabId(session);
   if (!tabId) throw new Error('No active tab in session');
   const strategy = args?.strategy || 'auto';
+  const selectorIsAgentRef = typeof selector === 'string' && selector.startsWith('@e');
+  const beforeIds = await beginNewTabWatch();
 
-  if (strategy === 'auto' || strategy === 'cdp_keyboard') {
+  if (selectorIsAgentRef && strategy === 'cdp_keyboard') {
+    return {
+      pressed: false,
+      key,
+      selector,
+      strategyUsed: 'cdp_keyboard',
+      error: 'cdp_keyboard does not support @e selectors because stale-reference validation requires DOM target resolution. Use auto or dom_keyboard.',
+      code: 'UNSUPPORTED_SELECTOR_STRATEGY',
+      recoverable: true,
+      retryable: true
+    };
+  }
+
+  if (!selectorIsAgentRef && (strategy === 'auto' || strategy === 'cdp_keyboard')) {
     const cdpResult = await performCdpKeyboardPress(tabId, key, args || {});
-    if (!cdpResult.error || strategy === 'cdp_keyboard') return cdpResult;
+    if (!cdpResult.error || strategy === 'cdp_keyboard') return observeNewTabResult(cdpResult);
     args = {
       ...args,
       strategy: 'dom_keyboard',
@@ -202,8 +261,14 @@ export async function handlePress(args: CommandArgs = {}, session: SessionName):
   });
 
   const result = results[0]?.result as any;
+  if (result?.error && result?.recoverable) return result;
   if (result?.error) throw new Error(result.error);
-  return result;
+  return observeNewTabResult(result);
+
+  async function observeNewTabResult(result: any): Promise<any> {
+    const observed = await attachNewTabsIfAny(session, tabId, beforeIds, args || {});
+    return mergeNewTabObservation(result, observed);
+  }
 }
 
 
@@ -255,6 +320,7 @@ export async function handleSelectOption(args: CommandArgs = {}, session: Sessio
   });
 
   const result = results[0]?.result as any;
+  if (result?.error && result?.recoverable) return result;
   if (result?.error) throw new Error(result.error);
   return result;
 }
@@ -275,6 +341,7 @@ export async function handleSetChecked(args: CommandArgs = {}, session: SessionN
   });
 
   const result = results[0]?.result as any;
+  if (result?.error && result?.recoverable) return result;
   if (result?.error) throw new Error(result.error);
   return result;
 }
@@ -293,6 +360,7 @@ export async function handleWaitFor(args: CommandArgs = {}, session: SessionName
 
   const result = results[0]?.result as any;
   if (!result) throw new Error('Wait script returned no result');
+  if (result?.error && result?.recoverable) return result;
   if (result?.error) throw new Error(result.error);
   return result;
 }

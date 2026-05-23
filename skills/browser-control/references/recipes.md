@@ -64,7 +64,7 @@ Use when clicking controls, opening menus, choosing options, or manipulating vis
 2. Identify the target by role/name/text and use its `@e` reference.
 3. Perform the action:
    ```bash
-   node scripts/browser-control.js command click --session ui-task --args '{"selector":"@e4"}'
+   node scripts/browser-control.js command click --session ui-task --args '{"selector":"@e1jm0sbb_1"}'
    ```
 4. Verify with `snapshot`, `wait_for`, or screenshot.
 5. If the UI changed, do not reuse old `@e` references; snapshot again.
@@ -80,9 +80,9 @@ Use when preparing form fields but not sending the form yet.
 1. Snapshot and identify each input/select/checkbox by `@e`.
 2. Fill fields:
    ```bash
-   node scripts/browser-control.js command fill --session form-draft --args '{"selector":"@e2","value":"example text"}'
-   node scripts/browser-control.js command select_option --session form-draft --args '{"selector":"@e3","value":"standard"}'
-   node scripts/browser-control.js command set_checked --session form-draft --args '{"selector":"@e4","checked":true}'
+   node scripts/browser-control.js command fill --session form-draft --args '{"selector":"@e0field_1","value":"example text"}'
+   node scripts/browser-control.js command select_option --session form-draft --args '{"selector":"@e0select_1","value":"standard"}'
+   node scripts/browser-control.js command set_checked --session form-draft --args '{"selector":"@e1jm0sbb_1","checked":true}'
    ```
 3. Verify values with a fresh snapshot or targeted evaluate.
 4. Stop before clicking Submit/Send/Confirm unless the user explicitly approved submission.
@@ -100,7 +100,7 @@ Use only when the user asked for a submission or final action.
 3. Ask for confirmation unless the current user instruction already explicitly authorizes this exact final action.
 4. Snapshot, click the final control by `@e`, and verify result:
    ```bash
-   node scripts/browser-control.js command click --session submit-task --args '{"selector":"@e9"}'
+   node scripts/browser-control.js command click --session submit-task --args '{"selector":"@e0submit_1"}'
    node scripts/browser-control.js command wait_for --session submit-task --args '{"text":"Success","timeoutMs":10000}'
    ```
 

@@ -65,8 +65,8 @@ The editable extension source path is `<repo>/src/extension`; the Chrome Load un
 
 ## Element not found
 
-- Take a fresh `snapshot`; `@e` references are only valid for the snapshot's current page state.
-- Prefer `@e` references returned by the latest snapshot.
+- Take a fresh `snapshot`; `@e<structureId>_<revision>` references are only valid for the snapshot's current page state.
+- Prefer `@e` references returned by the latest snapshot. If an action returns `STALE_ELEMENT_REFERENCE`, do not retry the old revision; snapshot again and use the new id.
 - Fall back to stable CSS selectors such as `[data-testid="..."]` when available.
 - Avoid retrying the exact same stale selector without verifying the DOM changed.
 
