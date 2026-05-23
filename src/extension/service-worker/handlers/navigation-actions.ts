@@ -1,11 +1,13 @@
 import { createArtifactHint, getTabMetadata } from '../runtime-metadata';
 import { getActiveTabId, setActiveTab } from '../sessions';
-import { ensureNetworkCapture, performCdpKeyboardPress, performCdpMouseClick } from './network-cdp';
+import { ensureNetworkCapture, performCdpKeyboardPress, performCdpMouseClick, performCdpWheelScroll } from './network-cdp';
 import { getAccessibilitySnapshot } from '../page-runtime/snapshot';
 import { captureViewportTextObservation } from '../page-runtime/observation';
+import { getDocumentTextSnapshot, getTextSnapshot } from '../page-runtime/get-text';
 import { performClick } from '../page-runtime/click';
 import { performFill } from '../page-runtime/fill';
 import { performPress } from '../page-runtime/press';
+import { performDomScroll } from '../page-runtime/scroll';
 import { performSelectOption, performSetChecked } from '../page-runtime/select-check';
 import { performWaitFor } from '../page-runtime/wait-for';
 import { performEvaluate } from '../page-runtime/evaluate';
@@ -204,6 +206,39 @@ export async function handlePress(args: CommandArgs = {}, session: SessionName):
   return result;
 }
 
+
+export async function handleScroll(args: CommandArgs = {}, session: SessionName): Promise<any> {
+  const tabId = args?.tabId || getActiveTabId(session);
+  if (!tabId) throw new Error('No active tab in session');
+  const strategy = args?.strategy || 'auto';
+
+  if (strategy === 'wheel' || (strategy === 'auto' && (args?.x !== undefined || args?.y !== undefined || args?.region))) {
+    const cdpResult = await performCdpWheelScroll(tabId, args || {});
+    if (!cdpResult.error || strategy === 'wheel') return cdpResult;
+    args = {
+      ...args,
+      strategy: 'dom',
+      warnings: [
+        ...(args?.warnings || []),
+        `wheel unavailable in auto mode; fell back to dom: ${cdpResult.error}`
+      ]
+    };
+  }
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: performDomScroll,
+    args: [args || {}],
+    world: 'MAIN'
+  });
+
+  const result = results[0]?.result as any;
+  if (!result) throw new Error('Scroll script returned no result');
+  if (result?.error && result?.recoverable) return result;
+  if (result?.error) throw new Error(result.error);
+  return result;
+}
+
 export async function handleSelectOption(args: CommandArgs = {}, session: SessionName): Promise<any> {
   const { selector, value } = args || {};
   if (!selector) throw new Error('selector is required for select_option');
@@ -276,7 +311,9 @@ export async function handleFindTab(args: CommandArgs = {}, session: SessionName
   }).map(tab => ({ id: tab.id, title: tab.title, url: tab.url, active: tab.active, windowId: tab.windowId }));
 
   if (query.attach !== false && candidates[0]) {
-    await setActiveTab(session, candidates[0].id as number);
+    const tabId = candidates[0].id as number;
+    await setActiveTab(session, tabId);
+    await ensureNetworkCapture(session, { tabId, auto: true, extend: true, scope: 'session' });
   }
 
   return { session, tabs: candidates, tab: candidates[0] || null };
@@ -285,7 +322,6 @@ export async function handleFindTab(args: CommandArgs = {}, session: SessionName
 export async function handleAttachTab(args: CommandArgs = {}, session: SessionName): Promise<any> {
   const result = await handleFindTab({ ...args, attach: true }, session);
   if (!result.tab) throw new Error('No matching tab found to attach');
-  await ensureNetworkCapture(session, { tabId: result.tab.id, auto: true, extend: true, scope: 'session' });
   return { session, attached: result.tab.id, tab: result.tab, tabs: result.tabs };
 }
 
@@ -309,41 +345,48 @@ export async function handleEvaluate(args: CommandArgs = {}, session: SessionNam
 export async function handleGetText(args: CommandArgs = {}, session: SessionName): Promise<any> {
   const tabId = args?.tabId || getActiveTabId(session);
   if (!tabId) throw new Error('No active tab in session');
-  const scope = args?.scope === 'document' ? 'document' : 'viewport';
+  const scope = args?.scope === 'document' ? 'document' : args?.scope === 'full' ? 'full' : 'viewport';
   const maxChars = Number.isFinite(args?.maxChars) ? Math.max(0, Math.min(Number(args.maxChars), 200000)) : 12000;
+  const selector = args?.selector || null;
 
   if (scope === 'viewport') {
     const observed = await handleObserveCapture({
       tabId,
       maxTextChars: maxChars,
-      maxTextRuns: args?.includeRuns === true ? 1000 : 300
+      maxTextRuns: args?.includeRuns === true ? 1000 : 300,
+      selector
     }, session);
+    const textRuns = args?.includeRuns ? observed.textRuns || [] : undefined;
     return {
       text: observed.visibleText || '',
       truncated: Boolean(observed.truncated),
       caps: observed.caps || { maxTextChars: maxChars },
       url: observed.url || null,
       title: observed.title || '',
-      runs: args?.includeRuns ? observed.textRuns || [] : undefined
+      textRuns,
+      runs: textRuns,
+      error: observed.error || undefined,
+      selector
     };
+  }
+
+  if (scope === 'document') {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: getDocumentTextSnapshot,
+      args: [{ maxChars, includeRuns: args?.includeRuns === true, selector }],
+      world: 'MAIN'
+    });
+    return results[0]?.result || { text: '', truncated: false, caps: { maxChars, scope: 'document' }, url: null, title: '' };
   }
 
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    func: (limit: number) => {
-      const raw = (document.body?.innerText || document.documentElement?.innerText || '').replace(/\s+\n/g, '\n').trim();
-      return {
-        text: raw.slice(0, limit),
-        truncated: raw.length > limit,
-        caps: { maxChars: limit, textChars: Math.min(raw.length, limit), totalTextChars: raw.length },
-        url: window.location.href,
-        title: document.title
-      };
-    },
-    args: [maxChars],
+    func: getTextSnapshot,
+    args: [{ scope, maxChars, includeRuns: args?.includeRuns === true, maxTextRuns: args?.includeRuns === true ? 1000 : 300, selector }],
     world: 'MAIN'
   });
-  return results[0]?.result || { text: '', truncated: false, caps: { maxChars }, url: null, title: '' };
+  return results[0]?.result || { text: '', truncated: false, caps: { maxChars, scope }, url: null, title: '' };
 }
 
 export async function handleScreenshot(args: CommandArgs = {}, session: SessionName): Promise<any> {
@@ -392,7 +435,8 @@ export async function handleObserveCapture(args: CommandArgs = {}, session: Sess
   const options = {
     mode: args?.mode || 'viewport_text',
     maxTextChars: Number.isFinite(args?.maxTextChars) ? args.maxTextChars : 12000,
-    maxTextRuns: Number.isFinite(args?.maxTextRuns) ? args.maxTextRuns : 300
+    maxTextRuns: Number.isFinite(args?.maxTextRuns) ? args.maxTextRuns : 300,
+    selector: args?.selector || null
   };
   const results = await chrome.scripting.executeScript({
     target: { tabId },

@@ -137,16 +137,17 @@ test('result envelope contains stable agent-facing metadata', () => {
   assert.equal(envelope.error, null);
 });
 
-test('network aliases map to extension network command shape', () => {
+test('discrete network commands map to extension network command shape', () => {
   assert.deepEqual(mapNetworkCommand('network_start', { filter: '/api' }), { command: 'network', args: { filter: '/api', cmd: 'start' } });
   assert.deepEqual(mapNetworkCommand('network_stop', {}), { command: 'network', args: { cmd: 'stop' } });
 });
 
 test('network filter validation rejects non-string filters before extension dispatch', () => {
-  for (const command of ['network', 'network_start', 'network_list']) {
-    const args = command === 'network' ? { cmd: 'list', filter: {} } : { filter: {} };
+  assert.throws(() => validateRequest(normalizeRequest({ command: 'network', args: { cmd: 'list' } })), err => err instanceof ProtocolError && err.code === 'UNKNOWN_COMMAND');
+
+  for (const command of ['network_start', 'network_list']) {
     assert.throws(
-      () => validateRequest(normalizeRequest({ command, args })),
+      () => validateRequest(normalizeRequest({ command, args: { filter: {} } })),
       err => err instanceof ProtocolError &&
         err.code === 'VALIDATION_ERROR' &&
         err.details?.field === 'filter' &&
@@ -159,6 +160,11 @@ test('network filter validation rejects non-string filters before extension disp
   assert.equal(validateRequest(normalizeRequest({ command: 'network_list', args: { filter: '/api/' } })).args.filter, '/api/');
   assert.equal(validateRequest(normalizeRequest({ command: 'network_list', args: { filter: '' } })).args.filter, '');
   assert.equal(validateRequest(normalizeRequest({ command: 'network_list', args: { filter: null } })).args.filter, null);
+  const filteredList = validateRequest(normalizeRequest({ command: 'network_list', args: { tabId: 42, sinceTimestampMs: 123, limit: 2, method: 'POST', statusCode: 201, type: 'fetch' } }));
+  assert.equal(filteredList.args.tabId, 42);
+  assert.equal(filteredList.args.method, 'POST');
+  assert.equal(filteredList.args.statusCode, 201);
+  assert.equal(filteredList.args.type, 'fetch');
 });
 
 test('public docs and contracts stay aligned with current command argument surface', () => {
@@ -175,9 +181,19 @@ test('public docs and contracts stay aligned with current command argument surfa
   assert.match(contracts, /download:\s*\{\s*url:\s*string;[^}]*saveAs\?:\s*boolean/s);
   assert.match(api, /fullPage:true.*forward compatibility/s);
   assert.match(screenshotHelper, /current extension backend returns viewport capture/);
-  assert.match(api, /network_list`: list captured requests; optional args `filter`, `sinceTimestampMs`, and `limit`/);
-  assert.match(contracts, /network_list:\s*\{[^}]*sinceTimestampMs\?:\s*number;[^}]*limit\?:\s*number/s);
+  assert.match(api, /network_list`: list captured requests; optional args `filter`, `sinceTimestampMs`, `limit`, `tabId`, `method`, `statusCode`, and `type`/);
+  assert.match(api, /`limit` is clamped to 1\.\.100/);
+  assert.match(api, /omittedUntimestamped/);
+  assert.match(contracts, /network_list:\s*\{[^}]*sinceTimestampMs\?:\s*number;[^}]*limit\?:\s*number;[^}]*tabId\?:\s*number;[^}]*method\?:\s*string;[^}]*statusCode\?:\s*number;[^}]*type\?:\s*string/s);
+  assert.doesNotMatch(api, /includeResources/);
+  assert.doesNotMatch(contracts, /includeResources/);
+  assert.equal(COMMANDS.network_start.optional.includes('includeResources'), false);
   assert.match(recipes, /snapshot --session read-page --args '\{"hasVisibleText":true,"viewportOnly":true,"maxElements":120\}'/);
+  assert.match(api, /### `scroll`/);
+  assert.match(api, /strategy.*wheel.*x.*y.*deltaY/s);
+  assert.match(api, /explicit wheel failures are recoverable/s);
+  assert.match(api, /backward-compatible `document`/);
+  assert.match(recipes, /first-class `scroll` rather than keyboard keys or an `evaluate` workaround/);
   assert.match(api, /schemaVersion: 2/);
   assert.match(api, /compact-dom-v2/);
   assert.match(contracts, /interface SnapshotResult/);
@@ -196,12 +212,38 @@ test('artifact store persists raw outputs and returns metadata without base64 pa
   assert.equal(data.data, undefined);
 });
 
+
+
+test('protocol exposes first-class scroll command with DOM and wheel strategies', () => {
+  assert.ok(COMMANDS.scroll, 'scroll should be protocol-visible');
+  assert.deepEqual(COMMANDS.scroll.strategies, ['auto', 'dom', 'wheel']);
+  for (const field of ['tabId', 'selector', 'strategy', 'deltaX', 'deltaY', 'x', 'y', 'region', 'steps', 'block', 'behavior', 'waitMs']) {
+    assert.equal(COMMANDS.scroll.optional.includes(field), true, `${field} should be listed for scroll`);
+  }
+  assert.equal(COMMANDS.scroll.optional.includes('mode'), false, 'mode is a legacy runtime override, not a public scroll option');
+  const req = validateRequest(normalizeRequest({ command: 'scroll', args: { strategy: 'wheel', x: 100, y: 200, deltaY: 600 } }));
+  assert.equal(req.command, 'scroll');
+  assert.equal(req.args.strategy, 'wheel');
+  const contracts = fs.readFileSync(path.join(path.resolve(__dirname, '..'), 'contracts.ts'), 'utf8');
+  assert.match(contracts, /scroll:\s*\{[^}]*strategy\?:\s*'auto' \| 'dom' \| 'wheel'/s);
+  assert.doesNotMatch(contracts, /mode\?:\s*'by' \| 'to' \| 'element'/);
+  assert.match(contracts, /ArtifactKind[\s\S]*'observation'/);
+});
+
 test('protocol exposes usability optimization commands without codeBase64', () => {
-  for (const command of ['get_text', 'attach_tab']) {
+  for (const command of ['get_text', 'find_tab']) {
     assert.ok(COMMANDS[command], `${command} should be protocol-visible`);
   }
+  assert.equal(COMMANDS.get_text.optional.includes('selector'), true, 'get_text selector should be protocol-visible');
+  assert.equal(COMMANDS.attach_tab, undefined);
+  const legacyAttach = validateRequest(normalizeRequest({ command: 'attach_tab', args: { urlIncludes: 'example.com' } }));
+  assert.equal(legacyAttach.command, 'find_tab');
+  assert.equal(legacyAttach.args.attach, true);
   assert.equal(COMMANDS.evaluate.required.includes('code'), true);
   assert.doesNotMatch(JSON.stringify(COMMANDS), /codeBase64/);
+  const api = fs.readFileSync(path.join(path.resolve(__dirname, '..'), 'skills/browser-control/references/api.md'), 'utf8');
+  assert.match(api, /scope` \(`viewport` default, backward-compatible `document`, or rendered\/reachable `full`\)/);
+  assert.match(api, /canonical `textRuns`/);
   assert.doesNotMatch(fs.readFileSync(path.join(path.resolve(__dirname, '..'), 'contracts.ts'), 'utf8'), /codeBase64/);
 });
 
@@ -234,9 +276,6 @@ test('protocol command metadata lists documented optional args for file, tab, an
   }
   for (const field of ['filename', 'saveAs']) {
     assert.equal(COMMANDS.download.optional.includes(field), true, `${field} should be listed for download`);
-  }
-  for (const field of ['tabId', 'urlIncludes', 'titleIncludes', 'active']) {
-    assert.equal(COMMANDS.attach_tab.optional.includes(field), true, `${field} should be listed for attach_tab`);
   }
   for (const field of ['urlIncludes', 'titleIncludes', 'active', 'tabId', 'attach']) {
     assert.equal(COMMANDS.find_tab.optional.includes(field), true, `${field} should be listed for find_tab`);

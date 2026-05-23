@@ -9,6 +9,11 @@ interface PopupStatus {
 
 const el = (id: string): HTMLElement => document.getElementById(id)!;
 
+function renderExtensionVersion(): void {
+  const manifest = chrome.runtime.getManifest();
+  el('extensionVersion').textContent = `v${manifest.version} — AI Browser Automation`;
+}
+
 async function refreshStatus(): Promise<void> {
   try {
     const status = await chrome.runtime.sendMessage({ type: 'getStatus' });
@@ -59,6 +64,7 @@ el('btnDisconnect').addEventListener('click', async () => {
 });
 
 // Refresh on open
+renderExtensionVersion();
 refreshStatus();
 
 // Poll status every 5 seconds

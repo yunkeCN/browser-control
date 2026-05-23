@@ -85,7 +85,7 @@ Artifacts are written under `~/.browser-control/artifacts` unless `BROWSER_CONTR
 
 - Capture is scoped to the active session tab.
 - `navigate` starts API-focused capture before load.
-- Resource requests are filtered by default. Use `network_start` with `includeResources: true` only when debugging images, fonts, CSS, scripts, or document loads.
+- Resource requests are intentionally excluded. Network capture is API-focused on XHR/fetch traffic; inspect page resource loads separately with browser tooling or `performance.getEntriesByType('resource')` when needed.
 - Service-worker restarts can affect timing; restart capture and repeat the action when in doubt.
 
 ## Known limitations
@@ -93,5 +93,5 @@ Artifacts are written under `~/.browser-control/artifacts` unless `BROWSER_CONTR
 - Synthetic DOM events have `isTrusted: false`; sites that require trusted user gestures may reject clicks or fills.
 - Cross-origin iframes are not controlled from the main frame; navigate directly to the iframe URL when practical.
 - File uploads are constrained by Chrome extension and browser security rules.
-- Custom dropdowns are not native selects; interact with them through click sequences or evaluated page code.
+- Custom dropdowns are not native selects; interact with them through click sequences, fresh snapshots, and `scroll` when the option list is below the fold.
 - Screenshots are viewport-only in the current extension backend. The `fullPage` argument is accepted for protocol compatibility and reports that full-page capture is not currently supported.

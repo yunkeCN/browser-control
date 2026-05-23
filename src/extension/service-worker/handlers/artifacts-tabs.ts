@@ -1,6 +1,6 @@
 import { ARTIFACT_SCHEMA_VERSION, EXTENSION_BACKEND_NAME, createArtifactHint, getTabMetadata, nowIso } from '../runtime-metadata';
 import { activeSessions, getActiveTabId, getSessionTabs, sessionTabs, setActiveTab } from '../sessions';
-import { networkCaptures, removeNetworkTab } from './network-cdp';
+import { clearPersistedNetworkCapture, networkCaptures, removeNetworkTab } from './network-cdp';
 import { performUpload } from '../page-runtime/upload-find';
 import type { CommandArgs, SessionName } from '../../shared/types';
 
@@ -172,6 +172,7 @@ export async function handleCloseSession(session: SessionName): Promise<any> {
 
   sessionTabs.delete(session);
   activeSessions.delete(session);
+  await clearPersistedNetworkCapture(session);
   networkCaptures.delete(session);
 
   return { closed: session, tabCount: tabs.size };

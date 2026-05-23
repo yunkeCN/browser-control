@@ -44,8 +44,10 @@ test('extension build emits declared Chrome-loadable output from src/extension',
 
 test('generated extension manifest preserves source manifest semantics', () => {
   const source = JSON.parse(read('src/extension/manifest.json'));
+  const packageJson = JSON.parse(read('package.json'));
   const generated = JSON.parse(read(extensionPath('manifest.json')));
-  assert.deepEqual(generated, source);
+  assert.deepEqual(generated, { ...source, version: packageJson.version });
+  assert.equal(generated.version, packageJson.version);
   assert.equal(generated.background.service_worker, 'service-worker.js');
   assert.deepEqual(generated.content_scripts[0].js, ['content.js']);
   assert.equal(generated.action.default_popup, 'popup.html');

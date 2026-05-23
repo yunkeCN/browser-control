@@ -11,6 +11,10 @@
   var require_popup = __commonJS({
     "src/extension/ui/popup.ts"() {
       var el = (id) => document.getElementById(id);
+      function renderExtensionVersion() {
+        const manifest = chrome.runtime.getManifest();
+        el("extensionVersion").textContent = `v${manifest.version} \u2014 AI Browser Automation`;
+      }
       async function refreshStatus() {
         try {
           const status = await chrome.runtime.sendMessage({ type: "getStatus" });
@@ -49,6 +53,7 @@
         await chrome.runtime.sendMessage({ type: "disconnect" });
         setTimeout(refreshStatus, 500);
       });
+      renderExtensionVersion();
       refreshStatus();
       setInterval(refreshStatus, 5e3);
     }

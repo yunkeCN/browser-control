@@ -47,6 +47,7 @@ test('recipes reference covers common browser automation tasks', () => {
   assert.match(recipes, /@e/);
   assert.match(recipes, /screenshot\.sh/);
   assert.doesNotMatch(recipes, /base64 into context/i);
+  assert.match(recipes, /first-class `scroll`/);
 });
 
 test('decision guide defines readiness, failure, escalation, and evidence rules', () => {
