@@ -1,11 +1,19 @@
 type FillElement = any;
 
 export function performFill(selector: string, value: any, options: any = {}): any {
-  function localFindElement(sel: string | null | undefined): FillElement | null {
+  function localFindElement(sel: string | null | undefined): { element: FillElement | null; error?: any } | null {
     if (!sel) return null;
     try {
-      if (String(sel).startsWith('@e')) return document.querySelector(`[data-agent-id="${sel}"]`) as FillElement | null;
-      return document.querySelector(sel) as FillElement | null;
+      if (String(sel).startsWith('@e')) {
+        const runtime = (window as any).__browserControlAgentRef;
+        if (!runtime?.resolve) {
+          return { element: null, error: { error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`, code: 'STALE_ELEMENT_REFERENCE', recoverable: true, retryable: true, selector: sel, nextStep: 'Take a fresh snapshot and retry with the new @e reference.' } };
+        }
+        const resolved = runtime.resolve(String(sel));
+        if (resolved?.error) return { element: null, error: resolved };
+        return { element: resolved.element as FillElement };
+      }
+      return { element: document.querySelector(sel) as FillElement | null };
     } catch {
       return null;
     }
@@ -56,7 +64,9 @@ export function performFill(selector: string, value: any, options: any = {}): an
     el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
   }
 
-  const el = localFindElement(selector);
+  const found = localFindElement(selector);
+  if (found?.error) return found.error;
+  const el = found?.element;
   if (!el) return { error: `Element not found: ${selector}` };
 
   const tag = el.tagName.toLowerCase();

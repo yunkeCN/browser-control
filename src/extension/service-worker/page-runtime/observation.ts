@@ -70,6 +70,14 @@ export function captureViewportTextObservation(options: any = {}) {
 
   function ensureAgentId(el: Element | null): string | null {
     if (!el || el.nodeType !== Node.ELEMENT_NODE) return null;
+    const runtime = (window as any).__browserControlAgentRef;
+    if (runtime?.assign) {
+      try {
+        return runtime.assign(el).id;
+      } catch {
+        // Fall through to the legacy observation-only marker if assignment fails.
+      }
+    }
     let id = el.getAttribute('data-agent-id');
     if (!id) {
       id = `@e${++counter}`;

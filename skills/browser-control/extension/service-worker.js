@@ -89,6 +89,7 @@
         "observe_start",
         "observe_diff",
         "network",
+        "cdpEvaluate",
         "cdpMouse",
         "cdpKeyboard",
         "cdpWheelScroll",
@@ -150,8 +151,16 @@
     function localFindElement(sel) {
       if (!sel) return null;
       try {
-        if (String(sel).startsWith("@e")) return document.querySelector(`[data-agent-id="${sel}"]`);
-        return document.querySelector(sel);
+        if (String(sel).startsWith("@e")) {
+          const runtime = window.__browserControlAgentRef;
+          if (!runtime?.resolve) {
+            return { element: null, error: { error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`, code: "STALE_ELEMENT_REFERENCE", recoverable: true, retryable: true, selector: sel, strategyUsed: "cdp_mouse", nextStep: "Take a fresh snapshot and retry with the new @e reference." } };
+          }
+          const resolved = runtime.resolve(String(sel));
+          if (resolved?.error) return { element: null, error: { ...resolved, strategyUsed: "cdp_mouse" } };
+          return { element: resolved.element };
+        }
+        return { element: document.querySelector(sel) };
       } catch {
         return null;
       }
@@ -173,7 +182,9 @@
         } : null
       };
     }
-    const el = localFindElement(selector);
+    const found = localFindElement(selector);
+    if (found?.error) return found.error;
+    const el = found?.element;
     if (!el) return { error: `Element not found: ${selector}`, recoverable: true, strategyUsed: "cdp_mouse" };
     el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
     const rect = el.getBoundingClientRect();
@@ -544,6 +555,149 @@
       return null;
     } catch (err) {
       return `Failed to detach temporary debugger session: ${err?.message || String(err)}`;
+    }
+  }
+  function buildRuntimeEvaluationExpression(source2, mode) {
+    const invocation = mode === "expression" ? `const __bcValue = await (async () => (${source2}))();` : `const __bcValue = await (async () => { ${source2}
+ })();`;
+    return `(async () => {
+    ${invocation}
+    const __bcState = { warnings: [], truncated: false, seen: typeof WeakSet !== 'undefined' ? new WeakSet() : null };
+    function __bcSerialize(value, depth) {
+      if (value === null) return null;
+      const type = typeof value;
+      if (type === 'string' || type === 'number' || type === 'boolean') return value;
+      if (type === 'undefined') return null;
+      if (type === 'bigint') {
+        __bcState.warnings.push('Converted bigint to string.');
+        return value.toString();
+      }
+      if (type === 'symbol' || type === 'function') {
+        __bcState.warnings.push('Converted ' + type + ' to string.');
+        return String(value);
+      }
+      if (depth >= 6) {
+        __bcState.truncated = true;
+        return '[MaxDepth]';
+      }
+      if (__bcState.seen && typeof value === 'object') {
+        if (__bcState.seen.has(value)) {
+          __bcState.warnings.push('Replaced circular reference.');
+          return '[Circular]';
+        }
+        __bcState.seen.add(value);
+      }
+      if (typeof Element !== 'undefined' && value instanceof Element) {
+        const rect = value.getBoundingClientRect();
+        return {
+          nodeType: 'element',
+          tagName: value.tagName.toLowerCase(),
+          id: value.id || null,
+          className: typeof value.className === 'string' ? value.className : null,
+          textContent: (value.innerText || value.textContent || '').slice(0, 500),
+          boundingBox: {
+            x: Math.round(rect.x + window.scrollX),
+            y: Math.round(rect.y + window.scrollY),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height)
+          }
+        };
+      }
+      if (typeof Node !== 'undefined' && value instanceof Node) {
+        return { nodeType: value.nodeType, nodeName: value.nodeName, textContent: (value.textContent || '').slice(0, 500) };
+      }
+      if (value instanceof Error) {
+        return { name: value.name, message: value.message, stack: typeof value.stack === 'string' ? value.stack.split('\\n').slice(0, 8).join('\\n') : undefined };
+      }
+      if (value instanceof Date) return value.toISOString();
+      if (Array.isArray(value)) {
+        if (value.length > 100) __bcState.truncated = true;
+        return value.slice(0, 100).map(item => __bcSerialize(item, depth + 1));
+      }
+      const output = {};
+      const keys = Object.keys(value);
+      if (keys.length > 100) __bcState.truncated = true;
+      for (const key of keys.slice(0, 100)) {
+        try {
+          output[key] = __bcSerialize(value[key], depth + 1);
+        } catch (err) {
+          output[key] = '[Unserializable: ' + ((err && err.message) || err) + ']';
+          __bcState.warnings.push('Could not serialize property ' + key + '.');
+        }
+      }
+      return output;
+    }
+    const __bcPayload = { result: __bcSerialize(__bcValue, 0) };
+    if (__bcValue === undefined) {
+      __bcPayload.result = null;
+      __bcPayload.serialization = { undefinedResult: true, warnings: ['Evaluation returned undefined; use return ... or a single expression to return data.'] };
+    } else if (__bcState.warnings.length || __bcState.truncated) {
+      __bcPayload.serialization = { truncated: __bcState.truncated, warnings: __bcState.warnings };
+    }
+    return __bcPayload;
+  })()`;
+  }
+  function formatRuntimeEvaluationException(details) {
+    const exception = details?.exception || {};
+    const description = exception.description || details?.text || "Runtime.evaluate failed";
+    const firstLine = String(description).split("\n")[0];
+    return {
+      error: firstLine,
+      errorDetails: {
+        name: exception.className || "Error",
+        message: firstLine,
+        stack: typeof description === "string" ? description.split("\n").slice(0, 8).join("\n") : void 0
+      }
+    };
+  }
+  function isSyntaxException(details) {
+    const exception = details?.exception || {};
+    const text = `${exception.className || ""} ${exception.description || ""} ${details?.text || ""}`;
+    return text.includes("SyntaxError");
+  }
+  async function evaluateRuntimeExpression(debuggee, expression) {
+    const response = await chrome.debugger.sendCommand(debuggee, "Runtime.evaluate", {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+      userGesture: true
+    });
+    if (response?.exceptionDetails) {
+      return { exceptionDetails: response.exceptionDetails, payload: formatRuntimeEvaluationException(response.exceptionDetails) };
+    }
+    return { payload: response?.result?.value ?? { result: null, serialization: { undefinedResult: true } } };
+  }
+  async function performCdpEvaluate(tabId, code2) {
+    const lease = await acquireActionDebugger(tabId);
+    if (lease.error) {
+      return {
+        error: lease.error,
+        recoverable: lease.recoverable,
+        warnings: lease.warnings || []
+      };
+    }
+    const source2 = String(code2 ?? "");
+    const hasExplicitReturn2 = /\breturn\b/.test(source2);
+    const debuggee = lease.debuggee;
+    try {
+      if (!hasExplicitReturn2) {
+        const expressionResult = await evaluateRuntimeExpression(debuggee, buildRuntimeEvaluationExpression(source2, "expression"));
+        if (!expressionResult.exceptionDetails) return expressionResult.payload;
+        if (!isSyntaxException(expressionResult.exceptionDetails)) return expressionResult.payload;
+      }
+      const bodyResult = await evaluateRuntimeExpression(debuggee, buildRuntimeEvaluationExpression(source2, "body"));
+      return bodyResult.payload;
+    } catch (err) {
+      return {
+        error: `Runtime.evaluate failed: ${err?.message || String(err)}`,
+        recoverable: true,
+        warnings: lease.warnings || []
+      };
+    } finally {
+      const detachWarning = await releaseActionDebugger(lease);
+      if (detachWarning) {
+        console.warn("[AgentBridge] " + detachWarning);
+      }
     }
   }
   async function performCdpMouseClick(tabId, selector, options = {}) {
@@ -1089,6 +1243,7 @@
 
   // src/extension/service-worker/page-runtime/snapshot.ts
   function getAccessibilitySnapshot(options = {}) {
+    const agentRefs = installAgentRefRuntime();
     const maxDepthOption = Number.isFinite(options?.maxDepth) ? Math.max(0, Math.min(Number(options.maxDepth), 50)) : null;
     const roleFilter = Array.isArray(options?.roles) ? new Set(options.roles.map((r) => String(r).toLowerCase())) : null;
     const tagFilter = Array.isArray(options?.tags) ? new Set(options.tags.map((t) => String(t).toLowerCase())) : null;
@@ -1162,7 +1317,6 @@
         }
       );
       const result = [];
-      let lastId = getExistingAgentIdMax();
       while (walker.nextNode()) {
         const el = walker.currentNode;
         const tag = el.tagName.toLowerCase();
@@ -1190,11 +1344,13 @@
           stats.truncated = true;
           continue;
         }
-        const id = `@e${++lastId}`;
-        el.setAttribute("data-agent-id", id);
+        const agentRef = agentRefs.assign(el);
+        const id = agentRef.id;
         const attributes = getSafeAttributes(el);
         const elementRecord = {
           id,
+          structureId: agentRef.structureId,
+          revision: agentRef.revision,
           tag,
           role: aria.role,
           name: accessibleName,
@@ -1306,14 +1462,6 @@
       }
       return current === document.body ? depth : Number.MAX_SAFE_INTEGER;
     }
-    function getExistingAgentIdMax() {
-      let max = 0;
-      for (const el of Array.from(document.querySelectorAll('[data-agent-id^="@e"]'))) {
-        const match = /^@e(\d+)$/.exec(el.getAttribute("data-agent-id") || "");
-        if (match) max = Math.max(max, Number(match[1]));
-      }
-      return max;
-    }
     function isSensitiveField(el) {
       const tag = el.tagName?.toLowerCase?.() || "";
       if (tag !== "input" && tag !== "textarea") return false;
@@ -1342,6 +1490,264 @@
         placeholder: el.getAttribute("placeholder") || null,
         redacted: sensitive || null
       };
+    }
+    function installAgentRefRuntime() {
+      const root = window;
+      if (root.__browserControlAgentRef?.version === 1) return root.__browserControlAgentRef;
+      const registry = root.__browserControlAgentRefRegistry?.version === 1 ? root.__browserControlAgentRefRegistry : { version: 1, entries: {} };
+      root.__browserControlAgentRefRegistry = registry;
+      function normalizeText2(value, max = 160) {
+        return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+      }
+      function inferRoleForRef(el) {
+        const explicit = el.getAttribute?.("role") || el.getAttribute?.("aria-role");
+        if (explicit) return String(explicit);
+        const tag = String(el.tagName || "").toLowerCase();
+        const type = String(el.getAttribute?.("type") || "").toLowerCase();
+        const roleMap = {
+          a: "link",
+          button: "button",
+          input: type === "checkbox" ? "checkbox" : type === "radio" ? "radio" : type === "submit" || type === "button" ? "button" : "textbox",
+          select: "combobox",
+          textarea: "textbox",
+          img: "img",
+          h1: "heading",
+          h2: "heading",
+          h3: "heading",
+          h4: "heading",
+          h5: "heading",
+          h6: "heading",
+          nav: "navigation",
+          main: "main",
+          form: "form",
+          table: "table",
+          li: "listitem",
+          ul: "list",
+          ol: "list",
+          dialog: "dialog"
+        };
+        return roleMap[tag] || "generic";
+      }
+      function directText(el) {
+        const parts = [];
+        for (const child of Array.from(el.childNodes || [])) {
+          if (child.nodeType === Node.TEXT_NODE) parts.push(child.textContent || "");
+        }
+        return normalizeText2(parts.join(" "), 160);
+      }
+      function visibleTextForRef(el) {
+        const tag = String(el.tagName || "").toLowerCase();
+        if (tag === "input" || tag === "textarea") return normalizeText2(el.getAttribute?.("placeholder") || "", 120);
+        if (tag === "select") return normalizeText2(el.options?.[el.selectedIndex]?.text || "", 120);
+        if (tag === "img") return normalizeText2(el.getAttribute?.("alt") || el.alt || "", 120);
+        return directText(el) || normalizeText2(el.getAttribute?.("aria-label") || el.textContent || "", 160);
+      }
+      function accessibleNameForRef(el) {
+        return normalizeText2(
+          el.getAttribute?.("aria-label") || el.getAttribute?.("aria-labelledby") || el.getAttribute?.("title") || el.getAttribute?.("alt") || el.getAttribute?.("placeholder") || "",
+          160
+        );
+      }
+      function stableAttr(el) {
+        const testId = el.getAttribute?.("data-testid") || el.getAttribute?.("data-test-id");
+        if (testId) return `test=${normalizeText2(testId, 80)}`;
+        const id = el.getAttribute?.("id") || "";
+        if (id && !/[0-9a-f]{8,}|react-select-\d+|ember\d+|^[:_\-a-z]*\d{4,}$/i.test(id)) {
+          return `id=${normalizeText2(id, 80)}`;
+        }
+        const name = el.getAttribute?.("name") || "";
+        if (name) return `name=${normalizeText2(name, 80)}`;
+        return "";
+      }
+      function siblingIndex(el) {
+        const parent = el.parentElement;
+        if (!parent) return 1;
+        const tag = el.tagName;
+        let index = 0;
+        for (const child of Array.from(parent.children)) {
+          if (child.tagName === tag) index += 1;
+          if (child === el) return index || 1;
+        }
+        return 1;
+      }
+      function structuralSegment(el) {
+        const tag = String(el.tagName || "").toLowerCase();
+        const role = inferRoleForRef(el);
+        const attr = stableAttr(el);
+        const index = siblingIndex(el);
+        const anchor = attr && attr.startsWith("id=") ? `[${attr}]` : `${attr ? `[${attr}]` : ""}:nth(${index})`;
+        return `${tag}[role=${role}]${anchor}`;
+      }
+      function urlScope() {
+        try {
+          const url = new URL(window.location.href);
+          return `${url.origin}${url.pathname}`;
+        } catch {
+          return String(window.location.href || "").split("?")[0].split("#")[0];
+        }
+      }
+      function structuralPath(el) {
+        const parts = [];
+        let current = el;
+        let depth = 0;
+        while (current && current !== document.documentElement && depth < 8) {
+          parts.unshift(structuralSegment(current));
+          if (current === document.body) break;
+          current = current.parentElement;
+          depth += 1;
+        }
+        return `top|${urlScope()}|${parts.join(">")}`;
+      }
+      function hashString(value) {
+        let hash = 2166136261;
+        for (let i = 0; i < value.length; i += 1) {
+          hash ^= value.charCodeAt(i);
+          hash = Math.imul(hash, 16777619);
+        }
+        return (hash >>> 0).toString(36).padStart(6, "0");
+      }
+      function computeStructureId(el) {
+        return hashString(structuralPath(el));
+      }
+      function fingerprintSource(el) {
+        const tag = String(el.tagName || "").toLowerCase();
+        const href = tag === "a" ? normalizeText2(el.getAttribute?.("href") || "", 200) : "";
+        return [
+          `tag=${tag}`,
+          `role=${inferRoleForRef(el)}`,
+          `name=${accessibleNameForRef(el)}`,
+          `text=${visibleTextForRef(el)}`,
+          `href=${href}`,
+          `type=${normalizeText2(el.getAttribute?.("type") || "", 40)}`,
+          `test=${normalizeText2(el.getAttribute?.("data-testid") || el.getAttribute?.("data-test-id") || "", 80)}`,
+          `ariaChecked=${normalizeText2(el.getAttribute?.("aria-checked") || "", 20)}`,
+          `ariaSelected=${normalizeText2(el.getAttribute?.("aria-selected") || "", 20)}`
+        ].join("|");
+      }
+      function computeFingerprint(el) {
+        return hashString(fingerprintSource(el));
+      }
+      function labelFor(el) {
+        const role = inferRoleForRef(el);
+        const text = accessibleNameForRef(el) || visibleTextForRef(el);
+        return normalizeText2(`${role} ${text}`.trim(), 120);
+      }
+      function writeMetadata(el, structureId, revision, fingerprint, id, label) {
+        try {
+          el.setAttribute("data-agent-id", id);
+          el.setAttribute("data-agent-structure-id", structureId);
+          el.setAttribute("data-agent-revision", String(revision));
+          el.setAttribute("data-agent-fingerprint", fingerprint);
+          el.setAttribute("data-agent-label", label);
+        } catch {
+        }
+      }
+      function assign(el) {
+        const structureId = computeStructureId(el);
+        const fingerprint = computeFingerprint(el);
+        const label = labelFor(el);
+        const existing = registry.entries[structureId];
+        const revision = existing ? existing.fingerprint === fingerprint ? existing.revision : existing.revision + 1 : 1;
+        const id = `@e${structureId}_${revision}`;
+        registry.entries[structureId] = { revision, fingerprint, id, label, lastSeenAt: Date.now() };
+        writeMetadata(el, structureId, revision, fingerprint, id, label);
+        return { id, structureId, revision, fingerprint, label };
+      }
+      function parse(ref) {
+        const match = /^@e([a-z0-9]+)_(\d+)$/i.exec(String(ref || ""));
+        if (!match) return null;
+        return { structureId: match[1], revision: Number(match[2]) };
+      }
+      function attrSelector(name, value) {
+        return `[${name}="${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`;
+      }
+      function describe(el) {
+        if (!el || !el.tagName) return null;
+        return {
+          id: el.getAttribute("data-agent-id") || null,
+          tag: el.tagName.toLowerCase(),
+          role: inferRoleForRef(el),
+          label: labelFor(el),
+          text: visibleTextForRef(el)
+        };
+      }
+      function stale(ref, parsed, current, reason) {
+        const entry = registry.entries[parsed.structureId] || null;
+        const currentId = current ? `@e${computeStructureId(current)}_${entry && entry.fingerprint !== computeFingerprint(current) ? entry.revision + 1 : Number(current.getAttribute("data-agent-revision") || entry?.revision || parsed.revision)}` : entry?.id || null;
+        return {
+          error: `${ref} is stale. Take a fresh snapshot.`,
+          code: "STALE_ELEMENT_REFERENCE",
+          recoverable: true,
+          retryable: true,
+          selector: ref,
+          reason,
+          expected: { structureId: parsed.structureId, revision: parsed.revision },
+          current: current ? { ...describe(current), id: currentId } : entry ? { id: entry.id, label: entry.label } : null,
+          nextStep: "Take a fresh snapshot and retry with the new @e reference."
+        };
+      }
+      function findSameStructure(structureId) {
+        const marked = document.querySelector(attrSelector("data-agent-structure-id", structureId));
+        if (marked) return marked;
+        const all = Array.from(document.body?.querySelectorAll?.("*") || []).slice(0, 5e3);
+        for (const el of all) {
+          try {
+            if (computeStructureId(el) === structureId) return el;
+          } catch {
+          }
+        }
+        return null;
+      }
+      function resolve(ref) {
+        const parsed = parse(ref);
+        if (!parsed) {
+          return {
+            error: `Invalid @e reference format: ${ref}. Take a fresh snapshot.`,
+            code: "INVALID_ELEMENT_REFERENCE",
+            recoverable: true,
+            retryable: true,
+            selector: ref
+          };
+        }
+        const exact = document.querySelector(attrSelector("data-agent-id", ref));
+        if (!exact) {
+          const sameStructure = findSameStructure(parsed.structureId);
+          if (sameStructure) return stale(ref, parsed, sameStructure, "reference revision is no longer attached");
+          return {
+            error: `Element not found: ${ref}`,
+            code: "NOT_FOUND",
+            recoverable: true,
+            retryable: true,
+            selector: ref,
+            nextStep: "Take a fresh snapshot and retry with the new @e reference."
+          };
+        }
+        const currentStructureId = computeStructureId(exact);
+        const currentFingerprint = computeFingerprint(exact);
+        const storedStructureId = exact.getAttribute("data-agent-structure-id") || parsed.structureId;
+        const storedFingerprint = exact.getAttribute("data-agent-fingerprint") || "";
+        const storedRevision = Number(exact.getAttribute("data-agent-revision") || parsed.revision);
+        const entry = registry.entries[parsed.structureId] || null;
+        if (storedStructureId !== parsed.structureId || currentStructureId !== parsed.structureId) {
+          return stale(ref, parsed, exact, "element structural location changed");
+        }
+        if (storedRevision !== parsed.revision || entry && entry.revision !== parsed.revision) {
+          return stale(ref, parsed, exact, "reference revision changed");
+        }
+        if (storedFingerprint && currentFingerprint !== storedFingerprint) {
+          return stale(ref, parsed, exact, "element fingerprint changed");
+        }
+        return { element: exact, id: ref, structureId: parsed.structureId, revision: parsed.revision };
+      }
+      root.__browserControlAgentRef = {
+        version: 1,
+        assign,
+        resolve,
+        computeStructureId,
+        computeFingerprint,
+        parse
+      };
+      return root.__browserControlAgentRef;
     }
     const elements = buildA11yTree(document.body) || [];
     return {
@@ -1438,6 +1844,13 @@
     }
     function ensureAgentId(el) {
       if (!el || el.nodeType !== Node.ELEMENT_NODE) return null;
+      const runtime = window.__browserControlAgentRef;
+      if (runtime?.assign) {
+        try {
+          return runtime.assign(el).id;
+        } catch {
+        }
+      }
       let id = el.getAttribute("data-agent-id");
       if (!id) {
         id = `@e${++counter}`;
@@ -1872,10 +2285,28 @@
     function localFindElement(sel) {
       if (!sel) return null;
       try {
-        if (String(sel).startsWith("@e")) return document.querySelector(`[data-agent-id="${sel}"]`);
-        return document.querySelector(sel);
+        if (String(sel).startsWith("@e")) {
+          const runtime = window.__browserControlAgentRef;
+          if (!runtime?.resolve) {
+            return {
+              element: null,
+              error: {
+                error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`,
+                code: "STALE_ELEMENT_REFERENCE",
+                recoverable: true,
+                retryable: true,
+                selector: sel,
+                nextStep: "Take a fresh snapshot and retry with the new @e reference."
+              }
+            };
+          }
+          const resolved = runtime.resolve(String(sel));
+          if (resolved?.error) return { element: null, error: resolved };
+          return { element: resolved.element };
+        }
+        return { element: document.querySelector(sel) };
       } catch {
-        return null;
+        return { element: null };
       }
     }
     function localDescribeElement(el) {
@@ -1905,7 +2336,9 @@
       };
     }
     function localElementClick() {
-      const el = localFindElement(selector);
+      const found = localFindElement(selector);
+      if (found?.error) return found.error;
+      const el = found?.element;
       if (!el) return { error: `Element not found: ${selector}` };
       if (typeof el.click !== "function") return { error: `Element cannot be clicked directly: ${selector}` };
       const focusBefore = localDescribeElement(document.activeElement);
@@ -1923,7 +2356,9 @@
       };
     }
     function localDomPointerClick() {
-      const el = localFindElement(selector);
+      const found = localFindElement(selector);
+      if (found?.error) return found.error;
+      const el = found?.element;
       if (!el) return { error: `Element not found: ${selector}` };
       const warnings = [...Array.isArray(options?.warnings) ? options.warnings : []];
       const focusBefore = localDescribeElement(document.activeElement);
@@ -2016,8 +2451,16 @@
     function localFindElement(sel) {
       if (!sel) return null;
       try {
-        if (String(sel).startsWith("@e")) return document.querySelector(`[data-agent-id="${sel}"]`);
-        return document.querySelector(sel);
+        if (String(sel).startsWith("@e")) {
+          const runtime = window.__browserControlAgentRef;
+          if (!runtime?.resolve) {
+            return { element: null, error: { error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`, code: "STALE_ELEMENT_REFERENCE", recoverable: true, retryable: true, selector: sel, nextStep: "Take a fresh snapshot and retry with the new @e reference." } };
+          }
+          const resolved = runtime.resolve(String(sel));
+          if (resolved?.error) return { element: null, error: resolved };
+          return { element: resolved.element };
+        }
+        return { element: document.querySelector(sel) };
       } catch {
         return null;
       }
@@ -2066,7 +2509,9 @@
       }
       el2.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
     }
-    const el = localFindElement(selector);
+    const found = localFindElement(selector);
+    if (found?.error) return found.error;
+    const el = found?.element;
     if (!el) return { error: `Element not found: ${selector}` };
     const tag = el.tagName.toLowerCase();
     const isContentEditable = el.isContentEditable || el.getAttribute("contenteditable") === "true";
@@ -2160,8 +2605,16 @@
     function localFindElement(sel) {
       if (!sel) return null;
       try {
-        if (String(sel).startsWith("@e")) return document.querySelector(`[data-agent-id="${sel}"]`);
-        return document.querySelector(sel);
+        if (String(sel).startsWith("@e")) {
+          const runtime = window.__browserControlAgentRef;
+          if (!runtime?.resolve) {
+            return { element: null, error: { error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`, code: "STALE_ELEMENT_REFERENCE", recoverable: true, retryable: true, selector: sel, nextStep: "Take a fresh snapshot and retry with the new @e reference." } };
+          }
+          const resolved = runtime.resolve(String(sel));
+          if (resolved?.error) return { element: null, error: resolved };
+          return { element: resolved.element };
+        }
+        return { element: document.querySelector(sel) };
       } catch {
         return null;
       }
@@ -2179,7 +2632,9 @@
         shiftKey: list.some((m) => /^shift$/i.test(m))
       };
     }
-    const target = selector ? localFindElement(selector) : document.activeElement || document.body;
+    const found = selector ? localFindElement(selector) : null;
+    if (found?.error) return found.error;
+    const target = selector ? found?.element : document.activeElement || document.body;
     if (!target) return { error: selector ? `Element not found: ${selector}` : "No focused element" };
     const focusBefore = localDescribeElement(document.activeElement);
     target.focus?.();
@@ -2263,7 +2718,21 @@
   }
   function selectedTarget(selector, mode) {
     if (!selector) return { target: window, targetKind: "document" };
-    const element = document.querySelector(selector);
+    let element = null;
+    let refError = null;
+    if (String(selector).startsWith("@e")) {
+      const runtime = window.__browserControlAgentRef;
+      if (!runtime?.resolve) {
+        refError = { error: `Agent reference runtime is unavailable for ${selector}. Take a fresh snapshot.`, code: "STALE_ELEMENT_REFERENCE", recoverable: true, retryable: true, selector, nextStep: "Take a fresh snapshot and retry with the new @e reference." };
+      } else {
+        const resolved = runtime.resolve(String(selector));
+        if (resolved?.error) refError = resolved;
+        else element = resolved.element;
+      }
+    } else {
+      element = document.querySelector(selector);
+    }
+    if (refError) return { target: window, targetKind: "document", ...refError };
     if (!element) return { target: window, targetKind: "document", error: `Element not found for scroll selector: ${selector}`, recoverable: true };
     if (mode === "element") return { target: window, targetKind: "element", element };
     const target = findScrollContainer(element);
@@ -2366,13 +2835,21 @@
     function localFindElement(sel) {
       if (!sel) return null;
       try {
-        if (String(sel).startsWith("@e")) return document.querySelector(`[data-agent-id="${sel}"]`);
-        return document.querySelector(sel);
+        if (String(sel).startsWith("@e")) {
+          const runtime = window.__browserControlAgentRef;
+          if (!runtime?.resolve) return { element: null, error: { error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`, code: "STALE_ELEMENT_REFERENCE", recoverable: true, retryable: true, selector: sel, nextStep: "Take a fresh snapshot and retry with the new @e reference." } };
+          const resolved = runtime.resolve(String(sel));
+          if (resolved?.error) return { element: null, error: resolved };
+          return { element: resolved.element };
+        }
+        return { element: document.querySelector(sel) };
       } catch {
         return null;
       }
     }
-    const el = localFindElement(selector);
+    const found = localFindElement(selector);
+    if (found?.error) return found.error;
+    const el = found?.element;
     if (!el) return { error: `Element not found: ${selector}` };
     if (el.tagName.toLowerCase() !== "select") return { error: `Element is not a select: ${selector}` };
     const values = Array.isArray(value) ? value.map(String) : [String(value)];
@@ -2391,13 +2868,21 @@
     function localFindElement(sel) {
       if (!sel) return null;
       try {
-        if (String(sel).startsWith("@e")) return document.querySelector(`[data-agent-id="${sel}"]`);
-        return document.querySelector(sel);
+        if (String(sel).startsWith("@e")) {
+          const runtime = window.__browserControlAgentRef;
+          if (!runtime?.resolve) return { element: null, error: { error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`, code: "STALE_ELEMENT_REFERENCE", recoverable: true, retryable: true, selector: sel, nextStep: "Take a fresh snapshot and retry with the new @e reference." } };
+          const resolved = runtime.resolve(String(sel));
+          if (resolved?.error) return { element: null, error: resolved };
+          return { element: resolved.element };
+        }
+        return { element: document.querySelector(sel) };
       } catch {
         return null;
       }
     }
-    const el = localFindElement(selector);
+    const found = localFindElement(selector);
+    if (found?.error) return found.error;
+    const el = found?.element;
     if (!el) return { error: `Element not found: ${selector}` };
     if (!["checkbox", "radio"].includes((el.type || "").toLowerCase())) return { error: `Element is not checkable: ${selector}` };
     if (el.checked !== checked) {
@@ -2422,8 +2907,14 @@
     function localFindElement(sel) {
       if (!sel) return null;
       try {
-        if (String(sel).startsWith("@e")) return document.querySelector(`[data-agent-id="${sel}"]`);
-        return document.querySelector(sel);
+        if (String(sel).startsWith("@e")) {
+          const runtime = window.__browserControlAgentRef;
+          if (!runtime?.resolve) return { element: null, error: { error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`, code: "STALE_ELEMENT_REFERENCE", recoverable: true, retryable: true, selector: sel, nextStep: "Take a fresh snapshot and retry with the new @e reference." } };
+          const resolved = runtime.resolve(String(sel));
+          if (resolved?.error) return { element: null, error: resolved };
+          return { element: resolved.element };
+        }
+        return { element: document.querySelector(sel) };
       } catch {
         return null;
       }
@@ -2524,7 +3015,9 @@
         return Boolean(new Function(`return (${expression});`)());
       }
       if (hasText) return pageHasVisibleText(textNeedle);
-      const el = selector ? localFindElement(selector) : null;
+      const found = selector ? localFindElement(selector) : null;
+      if (found?.error) throw found.error;
+      const el = found?.element || null;
       if (state === "attached") return Boolean(el);
       if (state === "hidden" || state === "detached") return !visible(el);
       return visible(el);
@@ -2538,7 +3031,7 @@
             return resolve(result);
           }
         } catch (err) {
-          return resolve({ error: err.message });
+          return resolve(err?.code ? err : { error: err.message });
         }
         if (Date.now() - started >= timeoutMs) {
           const target = hasText ? `text: "${truncateText(text)}"` : selector || expression || state;
@@ -2745,6 +3238,45 @@
   });
 
   // src/extension/service-worker/handlers/navigation-actions.ts
+  function tabSummary(tab) {
+    return {
+      id: tab.id,
+      title: tab.title,
+      url: tab.url,
+      active: tab.active,
+      openerTabId: tab.openerTabId,
+      windowId: tab.windowId
+    };
+  }
+  async function beginNewTabWatch() {
+    const tabs = await chrome.tabs.query({});
+    return new Set(tabs.map((tab) => tab.id).filter((id) => typeof id === "number"));
+  }
+  async function attachNewTabsIfAny(session, sourceTabId, beforeIds, args = {}) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const afterTabs = await chrome.tabs.query({});
+    const candidates = afterTabs.filter((tab) => typeof tab.id === "number" && !beforeIds.has(tab.id)).map(tabSummary);
+    const openerMatch = candidates.find((tab) => tab.openerTabId === sourceTabId) || (candidates.length === 1 ? candidates[0] : null);
+    const warnings = [];
+    if (args?.expectNewTab === true && !openerMatch) warnings.push("expectNewTab was requested but no new tab was observed after the action.");
+    if (openerMatch?.id) {
+      await setActiveTab(session, openerMatch.id);
+      await ensureNetworkCapture(session, { tabId: openerMatch.id, auto: true, scope: "session" });
+    }
+    return { openerMatch, candidates, warnings };
+  }
+  function mergeNewTabObservation(result, observed) {
+    const warnings = [...result?.warnings || [], ...observed.warnings || []];
+    if (!observed.openerMatch && !observed.candidates.length && !warnings.length) return result;
+    return {
+      ...result,
+      newTab: observed.openerMatch,
+      newTabs: observed.candidates,
+      observedNewTabs: observed.candidates,
+      suggestedNextStep: observed.openerMatch?.id ? `A new tab opened and Browser Control attached it to this session. Continue with snapshot or wait_for on tab ${observed.openerMatch.id}.` : result?.suggestedNextStep,
+      warnings
+    };
+  }
   async function handleNavigate(args = {}, session) {
     const { url, newTab = true } = args || {};
     if (!url) throw new Error("url is required for navigate");
@@ -2813,12 +3345,11 @@
     const tabId = argTabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
     const strategy = args?.strategy || "auto";
-    const shouldObserveNewTab = args?.observeNewTab === true || args?.expectNewTab === true;
-    const beforeTabs = shouldObserveNewTab ? await chrome.tabs.query({}) : [];
-    const beforeIds = new Set(beforeTabs.map((tab) => tab.id).filter((id) => typeof id === "number"));
+    const beforeIds = await beginNewTabWatch();
     if (strategy === "auto" || strategy === "cdp_mouse") {
       const cdpResult = await performCdpMouseClick(tabId, selector, args || {});
       if (!cdpResult.error) return observeNewTabResult(cdpResult);
+      if (cdpResult.code === "STALE_ELEMENT_REFERENCE") return cdpResult;
       if (strategy === "cdp_mouse") return cdpResult;
       args = {
         ...args,
@@ -2847,18 +3378,8 @@
     if (result?.error) throw new Error(result.error);
     return observeNewTabResult(result);
     async function observeNewTabResult(result2) {
-      if (!shouldObserveNewTab) return result2;
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      const afterTabs = await chrome.tabs.query({});
-      const candidates = afterTabs.filter((tab) => typeof tab.id === "number" && !beforeIds.has(tab.id)).map((tab) => ({ id: tab.id, title: tab.title, url: tab.url, active: tab.active, openerTabId: tab.openerTabId, windowId: tab.windowId }));
-      const openerMatch = candidates.find((tab) => tab.openerTabId === tabId) || candidates[0] || null;
-      const warnings = [...result2?.warnings || []];
-      if (args?.expectNewTab === true && !openerMatch) warnings.push("expectNewTab was requested but no new tab was observed after the click.");
-      if (openerMatch?.id) {
-        await setActiveTab(session, openerMatch.id);
-        await ensureNetworkCapture(session, { tabId: openerMatch.id, auto: true, scope: "session" });
-      }
-      return { ...result2, newTab: openerMatch, observedNewTabs: candidates, warnings };
+      const observed = await attachNewTabsIfAny(session, tabId, beforeIds, args || {});
+      return mergeNewTabObservation(result2, observed);
     }
   }
   async function handleFill(args = {}, session) {
@@ -2875,6 +3396,7 @@
     });
     const result = results[0]?.result;
     if (result == null) throw new Error("Fill script returned no result");
+    if (result?.error && result?.recoverable) return result;
     if (result?.error) throw new Error(result.error);
     return result;
   }
@@ -2884,9 +3406,23 @@
     const tabId = args?.tabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
     const strategy = args?.strategy || "auto";
-    if (strategy === "auto" || strategy === "cdp_keyboard") {
+    const selectorIsAgentRef = typeof selector === "string" && selector.startsWith("@e");
+    const beforeIds = await beginNewTabWatch();
+    if (selectorIsAgentRef && strategy === "cdp_keyboard") {
+      return {
+        pressed: false,
+        key,
+        selector,
+        strategyUsed: "cdp_keyboard",
+        error: "cdp_keyboard does not support @e selectors because stale-reference validation requires DOM target resolution. Use auto or dom_keyboard.",
+        code: "UNSUPPORTED_SELECTOR_STRATEGY",
+        recoverable: true,
+        retryable: true
+      };
+    }
+    if (!selectorIsAgentRef && (strategy === "auto" || strategy === "cdp_keyboard")) {
       const cdpResult = await performCdpKeyboardPress(tabId, key, args || {});
-      if (!cdpResult.error || strategy === "cdp_keyboard") return cdpResult;
+      if (!cdpResult.error || strategy === "cdp_keyboard") return observeNewTabResult(cdpResult);
       args = {
         ...args,
         strategy: "dom_keyboard",
@@ -2903,8 +3439,13 @@
       world: "MAIN"
     });
     const result = results[0]?.result;
+    if (result?.error && result?.recoverable) return result;
     if (result?.error) throw new Error(result.error);
-    return result;
+    return observeNewTabResult(result);
+    async function observeNewTabResult(result2) {
+      const observed = await attachNewTabsIfAny(session, tabId, beforeIds, args || {});
+      return mergeNewTabObservation(result2, observed);
+    }
   }
   async function handleScroll(args = {}, session) {
     const tabId = args?.tabId || getActiveTabId(session);
@@ -2947,6 +3488,7 @@
       world: "MAIN"
     });
     const result = results[0]?.result;
+    if (result?.error && result?.recoverable) return result;
     if (result?.error) throw new Error(result.error);
     return result;
   }
@@ -2963,6 +3505,7 @@
       world: "MAIN"
     });
     const result = results[0]?.result;
+    if (result?.error && result?.recoverable) return result;
     if (result?.error) throw new Error(result.error);
     return result;
   }
@@ -2978,6 +3521,7 @@
     });
     const result = results[0]?.result;
     if (!result) throw new Error("Wait script returned no result");
+    if (result?.error && result?.recoverable) return result;
     if (result?.error) throw new Error(result.error);
     return result;
   }
@@ -3010,11 +3554,13 @@
     if (!code2) throw new Error("code is required for evaluate");
     const tabId = args?.tabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
+    const cdpResult = await performCdpEvaluate(tabId, code2);
+    if (!cdpResult?.recoverable) return cdpResult;
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       func: performEvaluate,
       args: [code2],
-      world: "MAIN"
+      world: "ISOLATED"
     });
     return results[0]?.result;
   }
@@ -3067,7 +3613,28 @@
     const tabMeta = await getTabMetadata(tabId);
     const captureOptions = { format };
     if (quality !== void 0) captureOptions.quality = quality;
+    let restoredActiveTabId = null;
+    let activatedTabForCapture = false;
+    let previousActiveTabId = null;
+    if (tabId && !tabMeta.windowId) {
+      throw new Error(`Tab ${tabId} is not available for screenshot`);
+    }
+    if (tabId && tabMeta.windowId) {
+      const activeTabs = await chrome.tabs.query({ windowId: tabMeta.windowId, active: true });
+      previousActiveTabId = activeTabs[0]?.id || null;
+      if (previousActiveTabId !== tabId) {
+        await chrome.tabs.update(tabId, { active: true });
+        activatedTabForCapture = true;
+      }
+    }
     const dataUrl = tabMeta.windowId ? await chrome.tabs.captureVisibleTab(tabMeta.windowId, captureOptions) : await chrome.tabs.captureVisibleTab(captureOptions);
+    if (activatedTabForCapture && previousActiveTabId && previousActiveTabId !== tabId) {
+      try {
+        await chrome.tabs.update(previousActiveTabId, { active: true });
+        restoredActiveTabId = previousActiveTabId;
+      } catch {
+      }
+    }
     const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, "");
     const mimeType = format === "jpeg" ? "image/jpeg" : "image/png";
     const artifact = createArtifactHint("screenshot", {
@@ -3089,6 +3656,8 @@
       tabId: tabMeta.tabId || tabId || null,
       url: tabMeta.url || null,
       title: tabMeta.title || null,
+      activatedTabForCapture,
+      restoredActiveTabId,
       fullPageSupported: false,
       fullPageRequested: Boolean(fullPage),
       note: fullPage ? "Chrome extension backend currently captures the visible viewport; daemon persists returned base64 as an artifact." : void 0
@@ -3140,15 +3709,21 @@
   function performUpload(selector, files) {
     function localFindElement(sel) {
       if (sel.startsWith("@e")) {
-        return document.querySelector(`[data-agent-id="${sel}"]`);
+        const runtime = window.__browserControlAgentRef;
+        if (!runtime?.resolve) return { element: null, error: { error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`, code: "STALE_ELEMENT_REFERENCE", recoverable: true, retryable: true, selector: sel, nextStep: "Take a fresh snapshot and retry with the new @e reference." } };
+        const resolved = runtime.resolve(String(sel));
+        if (resolved?.error) return { element: null, error: resolved };
+        return { element: resolved.element };
       }
       try {
-        return document.querySelector(sel);
+        return { element: document.querySelector(sel) };
       } catch {
         return null;
       }
     }
-    const el = localFindElement(selector);
+    const found = localFindElement(selector);
+    if (found?.error) return found.error;
+    const el = found?.element;
     if (!el) return { error: `Element not found: ${selector}` };
     if (el.tagName.toLowerCase() !== "input" || el.type !== "file") {
       return { error: "Element is not a file input" };

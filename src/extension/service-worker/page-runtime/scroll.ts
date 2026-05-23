@@ -77,7 +77,21 @@ function findScrollContainer(el: Element | null): Element | Window {
 
 function selectedTarget(selector?: string, mode?: string): { target: Element | Window; targetKind: 'document' | 'element'; element?: Element; error?: string; recoverable?: boolean } {
   if (!selector) return { target: window, targetKind: 'document' };
-  const element = document.querySelector(selector);
+  let element: Element | null = null;
+  let refError: any = null;
+  if (String(selector).startsWith('@e')) {
+    const runtime = (window as any).__browserControlAgentRef;
+    if (!runtime?.resolve) {
+      refError = { error: `Agent reference runtime is unavailable for ${selector}. Take a fresh snapshot.`, code: 'STALE_ELEMENT_REFERENCE', recoverable: true, retryable: true, selector, nextStep: 'Take a fresh snapshot and retry with the new @e reference.' };
+    } else {
+      const resolved = runtime.resolve(String(selector));
+      if (resolved?.error) refError = resolved;
+      else element = resolved.element as Element;
+    }
+  } else {
+    element = document.querySelector(selector);
+  }
+  if (refError) return { target: window, targetKind: 'document', ...refError };
   if (!element) return { target: window, targetKind: 'document', error: `Element not found for scroll selector: ${selector}`, recoverable: true };
   if (mode === 'element') return { target: window, targetKind: 'element', element };
   const target = findScrollContainer(element);

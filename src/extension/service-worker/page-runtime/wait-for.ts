@@ -2,11 +2,17 @@ export function performWaitFor(options: any): Promise<any> {
   const { selector, text, state = 'visible', timeoutMs = 5000, expression } = options || {};
   const textNeedle = normalizeText(text);
   const hasText = text !== undefined && text !== null && textNeedle !== '';
-  function localFindElement(sel: string | null | undefined): Element | null {
+  function localFindElement(sel: string | null | undefined): { element: Element | null; error?: any } | null {
     if (!sel) return null;
     try {
-      if (String(sel).startsWith('@e')) return document.querySelector(`[data-agent-id="${sel}"]`);
-      return document.querySelector(sel);
+      if (String(sel).startsWith('@e')) {
+        const runtime = (window as any).__browserControlAgentRef;
+        if (!runtime?.resolve) return { element: null, error: { error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`, code: 'STALE_ELEMENT_REFERENCE', recoverable: true, retryable: true, selector: sel, nextStep: 'Take a fresh snapshot and retry with the new @e reference.' } };
+        const resolved = runtime.resolve(String(sel));
+        if (resolved?.error) return { element: null, error: resolved };
+        return { element: resolved.element as Element };
+      }
+      return { element: document.querySelector(sel) };
     } catch {
       return null;
     }
@@ -112,7 +118,9 @@ export function performWaitFor(options: any): Promise<any> {
       return Boolean(new Function(`return (${expression});`)());
     }
     if (hasText) return pageHasVisibleText(textNeedle);
-    const el = selector ? localFindElement(selector) : null;
+    const found = selector ? localFindElement(selector) : null;
+    if (found?.error) throw found.error;
+    const el = found?.element || null;
     if (state === 'attached') return Boolean(el);
     if (state === 'hidden' || state === 'detached') return !visible(el);
     return visible(el);
@@ -126,7 +134,7 @@ export function performWaitFor(options: any): Promise<any> {
           return resolve(result);
         }
       } catch (err: any) {
-        return resolve({ error: err.message });
+        return resolve(err?.code ? err : { error: err.message });
       }
       if (Date.now() - started >= timeoutMs) {
         const target = hasText ? `text: "${truncateText(text)}"` : selector || expression || state;

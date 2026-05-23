@@ -204,7 +204,7 @@ function cliRuntimeMetadata() {
   };
 }
 
-function buildRuntimeWarnings(daemon) {
+function buildRuntimeWarnings(daemon, cli = cliRuntimeMetadata()) {
   const warnings = [];
   if (daemon.reachable && !daemon.runtimeSchemaVersion && !daemon.runtime) {
     warnings.push('Daemon health/status shape lacks runtime metadata; daemon may be old. Run: browser-control restart');
@@ -214,6 +214,13 @@ function buildRuntimeWarnings(daemon) {
   }
   if (daemon.extension_connected && !daemon.runtime?.extension) {
     warnings.push('Connected extension has not sent runtime metadata; reload the extension from the current source path for full diagnostics.');
+  }
+  if (daemon.reachable && cli?.version && daemon.version && daemon.version !== cli.version) {
+    warnings.push(`Daemon version (${daemon.version}) differs from CLI version (${cli.version}); restart daemon after upgrade. Run: browser-control restart`);
+  }
+  const extensionVersion = daemon.runtime?.extension?.version;
+  if (daemon.extension_connected && cli?.version && extensionVersion && extensionVersion !== cli.version) {
+    warnings.push(`Extension runtime version (${extensionVersion}) differs from CLI version (${cli.version}); reload the Chrome extension from the current source path.`);
   }
   return warnings;
 }
@@ -377,11 +384,12 @@ async function diagnose(kind, json = false) {
   const chromePath = findChrome();
   const extensionSource = hasExtensionManifest(SOURCE_EXTENSION_DIR) ? SOURCE_EXTENSION_DIR : null;
   const loadedExtension = detectLoadedExtension();
-  const runtimeWarnings = buildRuntimeWarnings(daemon);
+  const cli = cliRuntimeMetadata();
+  const runtimeWarnings = buildRuntimeWarnings(daemon, cli);
   const data = {
     ok: Boolean(daemon.reachable && daemon.extension_connected),
     platform: process.platform,
-    cli: cliRuntimeMetadata(),
+    cli,
     daemon,
     chrome: { installed: !!chromePath, path: chromePath },
     extension: {

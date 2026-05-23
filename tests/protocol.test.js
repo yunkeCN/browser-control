@@ -56,9 +56,10 @@ test('protocol keeps action strategy diagnostics args backward compatible', () =
 
   const press = validateRequest(normalizeRequest({
     command: 'press',
-    args: { key: 'Enter', strategy: 'dom_keyboard', modifiers: ['Control'], expectChange: true }
+    args: { key: 'Enter', strategy: 'dom_keyboard', modifiers: ['Control'], expectChange: true, observeNewTab: true, expectNewTab: false }
   }));
   assert.equal(press.args.strategy, 'dom_keyboard');
+  assert.equal(press.args.observeNewTab, true);
   assert.deepEqual(COMMANDS.press.strategies, ['auto', 'cdp_keyboard', 'dom_keyboard']);
 });
 
@@ -73,7 +74,7 @@ test('protocol docs and TypeScript contracts expose action observe options and n
   for (const option of ['strategy', 'clear', 'commit', 'expectChange', 'observe']) {
     assert.match(contracts, new RegExp(`fill: \\{[^}]*${option}`, 's'));
   }
-  for (const option of ['strategy', 'modifiers', 'expectChange', 'observe']) {
+  for (const option of ['strategy', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab']) {
     assert.match(contracts, new RegExp(`press: \\{[^}]*${option}`, 's'));
   }
   assert.match(contracts, /export interface ObserveOptions/);
@@ -88,6 +89,24 @@ test('protocol docs and TypeScript contracts expose action observe options and n
 test('protocol rejects invalid commands and missing required args with stable error codes', () => {
   assert.throws(() => validateRequest(normalizeRequest({ command: 'bogus' })), err => err instanceof ProtocolError && err.code === 'UNKNOWN_COMMAND');
   assert.throws(() => validateRequest(normalizeRequest({ command: 'navigate', args: {} })), err => err instanceof ProtocolError && err.code === 'VALIDATION_ERROR');
+});
+
+test('protocol rejects unknown args with canonical-name hints', () => {
+  assert.throws(
+    () => validateRequest(normalizeRequest({ command: 'find_tab', args: { urlContains: 'search.bilibili.com' } })),
+    err => err instanceof ProtocolError &&
+      err.code === 'VALIDATION_ERROR' &&
+      err.details?.field === 'urlContains' &&
+      err.details?.suggestion === 'urlIncludes' &&
+      /urlIncludes/.test((err.details?.hints || []).join(' '))
+  );
+  assert.throws(
+    () => validateRequest(normalizeRequest({ command: 'snapshot', args: { maxElementz: 10 } })),
+    err => err instanceof ProtocolError &&
+      err.code === 'VALIDATION_ERROR' &&
+      err.details?.field === 'maxElementz' &&
+      err.details?.suggestion === 'maxElements'
+  );
 });
 
 test('fill validation points agents from text to value', () => {
@@ -193,6 +212,8 @@ test('public docs and contracts stay aligned with current command argument surfa
   assert.match(api, /strategy.*wheel.*x.*y.*deltaY/s);
   assert.match(api, /explicit wheel failures are recoverable/s);
   assert.match(api, /backward-compatible `document`/);
+  assert.match(api, /Unknown fields fail validation/);
+  assert.match(api, /newTab.*newTabs/);
   assert.match(recipes, /first-class `scroll` rather than keyboard keys or an `evaluate` workaround/);
   assert.match(api, /schemaVersion: 2/);
   assert.match(api, /compact-dom-v2/);

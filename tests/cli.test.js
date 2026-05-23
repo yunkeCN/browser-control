@@ -82,10 +82,49 @@ test('doctor warns when reachable daemon has old health/status shape', async (t)
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const parsed = JSON.parse(result.stdout);
   assert.match(parsed.runtimeDiagnostics.warnings.join(' '), /daemon may be old/i);
+  assert.match(parsed.runtimeDiagnostics.warnings.join(' '), /Daemon version .* differs from CLI version/i);
   assert.match(parsed.nextSteps.join(' '), /browser-control restart/);
   assert.equal(parsed.extension.loaded.extensionId, 'lalpaaopaejaejbchhlfggfnlafkcldd');
   assert.equal(parsed.extension.loaded.loadedFrom, 'source');
   assert.equal(parsed.extension.loaded.matchedBy, 'manifest-or-path');
+});
+
+test('doctor warns when extension runtime version differs from cli', async (t) => {
+  const server = http.createServer((req, res) => {
+    if (req.url === '/status') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        running: true,
+        version: require('../package.json').version,
+        extension_connected: true,
+        runtimeSchemaVersion: '2026-05-20',
+        capabilities: ['actionObservation'],
+        runtime: {
+          extension: {
+            version: '0.0.extension-old',
+            capabilities: [],
+            build: { channel: 'source' }
+          }
+        }
+      }));
+      return;
+    }
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end('{}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-control-chrome-profile-'));
+  const profile = path.join(userData, 'Default');
+  fs.mkdirSync(profile, { recursive: true });
+  fs.writeFileSync(path.join(userData, 'Local State'), JSON.stringify({ profile: { last_used: 'Default' } }));
+  fs.writeFileSync(path.join(profile, 'Secure Preferences'), JSON.stringify({ extensions: { settings: {} } }));
+
+  const result = await spawnCli(['doctor', '--json'], { BROWSER_CONTROL_PORT: String(server.address().port), CODEX_CHROME_USER_DATA_DIR: userData });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const parsed = JSON.parse(result.stdout);
+  assert.match(parsed.runtimeDiagnostics.warnings.join(' '), /Extension runtime version .* differs from CLI version/i);
+  assert.match(parsed.nextSteps.join(' '), /reload the Chrome extension/i);
 });
 
 test('command helper posts a typed envelope to /command', async (t) => {

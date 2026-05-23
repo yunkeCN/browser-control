@@ -38,8 +38,26 @@ test('auto action strategies fall back visibly while explicit CDP strategies ret
   assert.match(navigationSource, /cdp_mouse unavailable in auto mode; fell back to dom_pointer/);
   assert.match(navigationSource, /strategy === ['"]cdp_mouse['"]\) return cdpResult/);
   assert.match(navigationSource, /cdp_keyboard unavailable in auto mode; fell back to dom_keyboard/);
-  assert.match(navigationSource, /strategy === ['"]cdp_keyboard['"]\) return cdpResult/);
+  assert.match(navigationSource, /strategy === ['"]cdp_keyboard['"]\) return observeNewTabResult\(cdpResult\)/);
   assert.match(networkCdpSource, /recoverable:\s*true/);
+});
+
+test('press with @e selectors does not bypass stale validation through cdp_keyboard', () => {
+  assert.match(navigationSource, /const selectorIsAgentRef = typeof selector === ['"]string['"] && selector\.startsWith\(['"]@e['"]\)/);
+  assert.match(navigationSource, /selectorIsAgentRef && strategy === ['"]cdp_keyboard['"]/);
+  assert.match(navigationSource, /UNSUPPORTED_SELECTOR_STRATEGY/);
+  assert.match(navigationSource, /!\s*selectorIsAgentRef && \(strategy === ['"]auto['"] \|\| strategy === ['"]cdp_keyboard['"]\)/);
+});
+
+test('evaluate uses CDP Runtime.evaluate before isolated-world fallback', () => {
+  assert.match(networkCdpSource, /export async function performCdpEvaluate/);
+  assert.match(networkCdpSource, /Runtime\.evaluate/);
+  assert.match(networkCdpSource, /returnByValue:\s*true/);
+  assert.match(networkCdpSource, /awaitPromise:\s*true/);
+  assert.match(networkCdpSource, /buildRuntimeEvaluationExpression/);
+  assert.match(navigationSource, /const cdpResult = await performCdpEvaluate\(tabId,\s*code\)/);
+  assert.match(navigationSource, /if \(!cdpResult\?\.recoverable\) return cdpResult/);
+  assert.match(navigationSource, /world:\s*['"]ISOLATED['"]/);
 });
 
 test('find_tab accepts only current Includes filters for new-project protocol clarity', () => {
@@ -74,11 +92,24 @@ test('navigate load wait arms tab update listener before issuing navigation', ()
   assert.match(navigationHelpersSource, /if \(currentUrl !== previousUrl\) return true/);
 });
 
+test('screenshot activates the target tab before captureVisibleTab', () => {
+  const screenshotStart = navigationSource.indexOf('export async function handleScreenshot');
+  assert.notEqual(screenshotStart, -1);
+  const screenshotSource = navigationSource.slice(screenshotStart, navigationSource.indexOf('\n}', screenshotStart) + 2);
+  assert.match(screenshotSource, /chrome\.tabs\.query\(\{\s*windowId:\s*tabMeta\.windowId,\s*active:\s*true\s*\}\)/);
+  assert.match(screenshotSource, /await chrome\.tabs\.update\(tabId,\s*\{\s*active:\s*true\s*\}\)/);
+  assert.match(screenshotSource, /await chrome\.tabs\.captureVisibleTab\(tabMeta\.windowId,\s*captureOptions\)/);
+  assert.match(screenshotSource, /await chrome\.tabs\.update\(previousActiveTabId,\s*\{\s*active:\s*true\s*\}\)/);
+  assert.match(screenshotSource, /activatedTabForCapture/);
+  assert.match(screenshotSource, /restoredActiveTabId/);
+});
+
 test('extension announces runtime metadata and browser-side capabilities', () => {
   assert.match(runtimeMetadataSource, /const EXTENSION_CAPABILITIES = \[/);
   assert.match(runtimeMetadataSource, /['"]navigateFinalMetadata['"]/);
   assert.match(runtimeMetadataSource, /['"]observe_start['"]/);
   assert.match(runtimeMetadataSource, /['"]observe_diff['"]/);
+  assert.match(runtimeMetadataSource, /['"]cdpEvaluate['"]/);
   assert.match(runtimeMetadataSource, /async function getExtensionRuntimeMetadata/);
   assert.match(runtimeMetadataSource, /extensionRuntimeMetadata/);
   assert.match(runtimeMetadataSource, /channel:\s*['"]source['"]/);

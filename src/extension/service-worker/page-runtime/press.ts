@@ -1,11 +1,19 @@
 type PressElement = any;
 
 export function performPress(key: string, selector: string | null, options: any = {}): any {
-  function localFindElement(sel: string | null): PressElement | null {
+  function localFindElement(sel: string | null): { element: PressElement | null; error?: any } | null {
     if (!sel) return null;
     try {
-      if (String(sel).startsWith('@e')) return document.querySelector(`[data-agent-id="${sel}"]`) as PressElement | null;
-      return document.querySelector(sel) as PressElement | null;
+      if (String(sel).startsWith('@e')) {
+        const runtime = (window as any).__browserControlAgentRef;
+        if (!runtime?.resolve) {
+          return { element: null, error: { error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`, code: 'STALE_ELEMENT_REFERENCE', recoverable: true, retryable: true, selector: sel, nextStep: 'Take a fresh snapshot and retry with the new @e reference.' } };
+        }
+        const resolved = runtime.resolve(String(sel));
+        if (resolved?.error) return { element: null, error: resolved };
+        return { element: resolved.element as PressElement };
+      }
+      return { element: document.querySelector(sel) as PressElement | null };
     } catch {
       return null;
     }
@@ -23,7 +31,9 @@ export function performPress(key: string, selector: string | null, options: any 
       shiftKey: list.some(m => /^shift$/i.test(m))
     };
   }
-  const target = selector ? localFindElement(selector) : document.activeElement || document.body;
+  const found = selector ? localFindElement(selector) : null;
+  if (found?.error) return found.error;
+  const target = selector ? found?.element : document.activeElement || document.body;
   if (!target) return { error: selector ? `Element not found: ${selector}` : 'No focused element' };
   const focusBefore = localDescribeElement(document.activeElement);
   target.focus?.();

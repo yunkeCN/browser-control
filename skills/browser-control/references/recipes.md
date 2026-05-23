@@ -64,7 +64,7 @@ Use when clicking controls, opening menus, choosing options, or manipulating vis
 2. Identify the target by role/name/text and use its `@e` reference.
 3. Perform the action:
    ```bash
-   node scripts/browser-control.js command click --session ui-task --args '{"selector":"@e4"}'
+   node scripts/browser-control.js command click --session ui-task --args '{"selector":"@e1jm0sbb_1"}'
    ```
 4. Verify with `snapshot`, `wait_for`, or screenshot.
 5. If the UI changed, do not reuse old `@e` references; snapshot again.
@@ -80,9 +80,9 @@ Use when preparing form fields but not sending the form yet.
 1. Snapshot and identify each input/select/checkbox by `@e`.
 2. Fill fields:
    ```bash
-   node scripts/browser-control.js command fill --session form-draft --args '{"selector":"@e2","value":"example text"}'
-   node scripts/browser-control.js command select_option --session form-draft --args '{"selector":"@e3","value":"standard"}'
-   node scripts/browser-control.js command set_checked --session form-draft --args '{"selector":"@e4","checked":true}'
+   node scripts/browser-control.js command fill --session form-draft --args '{"selector":"@e0field_1","value":"example text"}'
+   node scripts/browser-control.js command select_option --session form-draft --args '{"selector":"@e0select_1","value":"standard"}'
+   node scripts/browser-control.js command set_checked --session form-draft --args '{"selector":"@e1jm0sbb_1","checked":true}'
    ```
 3. Verify values with a fresh snapshot or targeted evaluate.
 4. Stop before clicking Submit/Send/Confirm unless the user explicitly approved submission.
@@ -100,7 +100,7 @@ Use only when the user asked for a submission or final action.
 3. Ask for confirmation unless the current user instruction already explicitly authorizes this exact final action.
 4. Snapshot, click the final control by `@e`, and verify result:
    ```bash
-   node scripts/browser-control.js command click --session submit-task --args '{"selector":"@e9"}'
+   node scripts/browser-control.js command click --session submit-task --args '{"selector":"@e0submit_1"}'
    node scripts/browser-control.js command wait_for --session submit-task --args '{"text":"Success","timeoutMs":10000}'
    ```
 
@@ -115,6 +115,9 @@ Use screenshots for visual evidence, layout checks, or when text snapshots are i
 ```bash
 bash scripts/screenshot.sh -s visual-check -f png
 ```
+
+For a session-bound target tab, screenshot capture may briefly bring that tab to
+the front, then best-effort restore the previously active tab.
 
 Do not call the raw screenshot API in the conversation unless you intentionally want base64 output. Prefer reporting the saved file path.
 
@@ -196,5 +199,9 @@ Avoid shell-escaping large snippets. Put the code in a UTF-8 file and use `--cod
 ```bash
 node scripts/browser-control.js command evaluate --session js-task --code-file ./snippet.js
 ```
+
+`evaluate` is intended to work on pages with strict script policies such as
+Trusted Types. Prefer `get_text`, `wait_for`, and first-class commands when they
+fit the task; reserve custom JavaScript for targeted inspection or extraction.
 
 Use `--args-file` for large JSON command arguments. Browser Control intentionally does not support a `codeBase64` argument.
