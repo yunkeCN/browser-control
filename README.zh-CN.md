@@ -2,7 +2,9 @@
 
 [![skills.sh](https://skills.sh/b/yunkeCN/browser-control)](https://skills.sh/yunkeCN/browser-control)
 
-Browser Control 是一个面向 AI Agent 的本地 Chrome 自动化桥接工具。Agent 通过本地 Skill 脚本连接 localhost daemon，daemon 再通过 WebSocket 连接 Chrome Manifest V3 扩展，从而操作用户真实 Chrome 浏览器中的页面、标签页、下载、截图和网络请求。
+Browser Control 是一个本地 Chrome 自动化桥接工具，供 AI Agent 在用户授权下操作真实的 Chrome 浏览器。
+
+它通过本地 Skill 脚本启动 localhost daemon，再由 daemon 通过 WebSocket 连接 Chrome Manifest V3 扩展。这样 Agent 可以导航页面、读取 DOM、点击和填写表单、截图、下载文件，并查看网络请求，相关通信默认只发生在本机。
 
 ```text
 AI Agent -> Browser Control skill scripts -> localhost HTTP daemon -> WebSocket -> Chrome extension -> Chrome DOM
@@ -15,9 +17,15 @@ AI Agent -> Browser Control skill scripts -> localhost HTTP daemon -> WebSocket 
 - 打开、检查和操作真实 Chrome 标签页。
 - 获取 DOM snapshot 和页面可见文本。
 - 点击、填写输入框、按键、选择下拉项、切换 checkbox/radio。
-- 保存截图、PDF、下载文件等本地 artifacts。
+- 保存截图、PDF、下载文件等本地产物（artifacts）。
 - 查看当前浏览器会话里的网络请求。
 - 复用用户已经登录的 Chrome 会话，同时通信只走 localhost。
+
+## 前置要求
+
+- Chrome 或 Chromium 系浏览器。
+- Node.js 18 或更新版本。
+- 可以加载已解压 Chrome 扩展程序的环境。
 
 ## 安装为 Skill
 
@@ -34,15 +42,6 @@ npx skills add yunkeCN/browser-control --skill browser-control
 ```bash
 npx skills add . --skill browser-control
 ```
-
-## Release 下载
-
-每次 GitHub tag release 会发布两个压缩包：
-
-- `browser-control-skill-<tag>.zip`：完整的 `browser-control/` Skill 目录，包含 `SKILL.md`、`scripts/`、`references/`、`extension/` 和 vendored `ws`。
-- `browser-control-extension-<tag>.zip`：只包含 Chrome `extension/` 目录，适合只想下载安装浏览器插件的用户。
-
-下载地址：<https://github.com/yunkeCN/browser-control/releases>
 
 ## 安装 Chrome 扩展
 
@@ -116,11 +115,20 @@ node scripts/browser-control.js command get_text --session demo --args '{"scope"
 
 ## 安全模型
 
-Browser Control 默认只在本机通信。daemon 监听 `127.0.0.1`，Chrome 扩展连接本地 daemon WebSocket，截图、PDF、下载等 artifacts 也写入用户本地机器。
+Browser Control 默认只在本机通信。daemon 监听 `127.0.0.1`，Chrome 扩展连接本地 daemon WebSocket，截图、PDF、下载文件等本地产物也写入用户本地机器。
 
-Chrome 扩展会请求较宽的权限，包括访问网页、下载、截图和基于 debugger 的浏览器操作。这是浏览器自动化所必需的，但 Agent 在执行高风险操作前仍应向用户确认，例如提交表单、修改账号设置、上传本地文件、处理凭据、购买、删除或其他不可逆操作。具体确认边界写在 `skills/browser-control/SKILL.md`。
+由于 Browser Control 需要完成真实浏览器自动化，Chrome 扩展会请求访问网页、下载、截图和基于 debugger 的浏览器操作等权限。Agent 在执行高风险操作前仍应向用户确认，例如提交表单、修改账号设置、上传本地文件、处理凭据、购买、删除或其他不可逆操作。具体确认边界写在 `skills/browser-control/SKILL.md`。
 
 `snapshot` 和 observation 相关命令会对疑似敏感字段值做脱敏，例如 password、token、cookie、session、API key 等字段。
+
+## Release 下载
+
+每次 GitHub tag release 会发布两个压缩包：
+
+- `browser-control-skill-<tag>.zip`：完整的 `browser-control/` Skill 目录，包含 `SKILL.md`、`scripts/`、`references/`、`extension/` 和 vendored `ws`。
+- `browser-control-extension-<tag>.zip`：只包含 Chrome `extension/` 目录，适合只想下载安装浏览器扩展的用户。
+
+下载地址：<https://github.com/yunkeCN/browser-control/releases>
 
 ## 仓库结构
 

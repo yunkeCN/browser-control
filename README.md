@@ -4,7 +4,9 @@
 
 [中文说明](README.zh-CN.md)
 
-Browser Control is a local Chrome automation bridge for AI agents. It gives an agent a controlled way to operate the user's real Chrome browser through a localhost daemon and a Chrome Manifest V3 extension.
+Browser Control lets AI agents operate the user's real Chrome browser locally.
+
+It runs a localhost daemon that talks to a Chrome Manifest V3 extension over WebSocket. Through that bridge, agents can navigate pages, inspect the DOM, click, fill forms, capture screenshots and downloads, and inspect network requests while keeping browser automation traffic on the local machine.
 
 ```text
 AI Agent -> Browser Control skill scripts -> localhost HTTP daemon -> WebSocket -> Chrome extension -> Chrome DOM
@@ -21,6 +23,12 @@ The published Skill lives in `skills/browser-control/`. That directory is self-c
 - Inspect network requests from the active browser session.
 - Reuse logged-in Chrome sessions while keeping all traffic on localhost.
 
+## Requirements
+
+- Chrome or a Chromium-based browser.
+- Node.js 18 or newer.
+- Permission to load an unpacked Chrome extension.
+
 ## Install As A Skill
 
 Install it with the skills CLI:
@@ -36,15 +44,6 @@ For local development, install from this checkout:
 ```bash
 npx skills add . --skill browser-control
 ```
-
-## Release Downloads
-
-Tagged GitHub releases publish two archives:
-
-- `browser-control-skill-<tag>.zip`: the complete `browser-control/` Skill directory, including `SKILL.md`, `scripts/`, `references/`, `extension/`, and vendored `ws`.
-- `browser-control-extension-<tag>.zip`: only the Chrome `extension/` directory, for users who just want to load the browser extension.
-
-Download release packages from <https://github.com/yunkeCN/browser-control/releases>.
 
 ## Chrome Extension Setup
 
@@ -114,9 +113,18 @@ See `skills/browser-control/references/api.md` for the full CLI and API referenc
 
 Browser Control is intentionally localhost-only by default. The daemon listens on `127.0.0.1`, the extension connects to the local daemon WebSocket, and artifacts are written to the user's local machine.
 
-The Chrome extension requests broad permissions, including access to pages, downloads, screenshots, and debugger-backed browser operations. That is necessary for browser automation, but agents should still ask before risky actions such as submitting forms, changing account settings, uploading local files, handling credentials, or performing destructive operations. The Skill instructions define those confirmation boundaries in `skills/browser-control/SKILL.md`.
+Because Browser Control automates a real browser, the Chrome extension requests permissions for pages, downloads, screenshots, and debugger-backed browser operations. Agents should still ask before risky actions such as submitting forms, changing account settings, uploading local files, handling credentials, making purchases, or performing destructive operations. The Skill instructions define those confirmation boundaries in `skills/browser-control/SKILL.md`.
 
 Snapshot and observation commands redact likely sensitive field values such as password, token, cookie, session, and API-key-like fields.
+
+## Release Downloads
+
+Tagged GitHub releases publish two archives:
+
+- `browser-control-skill-<tag>.zip`: the complete `browser-control/` Skill directory, including `SKILL.md`, `scripts/`, `references/`, `extension/`, and vendored `ws`.
+- `browser-control-extension-<tag>.zip`: only the Chrome `extension/` directory, for users who just want to load the browser extension.
+
+Download release packages from <https://github.com/yunkeCN/browser-control/releases>.
 
 ## Repository Layout
 
