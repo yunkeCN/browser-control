@@ -113,7 +113,7 @@ See `skills/browser-control/references/api.md` for the full CLI and API referenc
 
 Browser Control is intentionally localhost-only by default. The daemon listens on `127.0.0.1`, the extension connects to the local daemon WebSocket, and artifacts are written to the user's local machine.
 
-Because Browser Control automates a real browser, the Chrome extension requests permissions for pages, downloads, screenshots, and debugger-backed browser operations. Agents should still ask before risky actions such as submitting forms, changing account settings, uploading local files, handling credentials, making purchases, or performing destructive operations. The Skill instructions define those confirmation boundaries in `skills/browser-control/SKILL.md`.
+Because Browser Control automates a real browser, the Chrome extension requests permissions to access pages, manage downloads, capture screenshots, and use debugger-backed browser operations. Agents should still ask before risky actions such as submitting forms, changing account settings, uploading local files, handling credentials, making purchases, or performing destructive operations. The Skill instructions define those confirmation boundaries in `skills/browser-control/SKILL.md`.
 
 Snapshot and observation commands redact likely sensitive field values such as password, token, cookie, session, and API-key-like fields.
 
