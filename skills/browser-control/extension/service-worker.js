@@ -3467,7 +3467,28 @@
     const tabMeta = await getTabMetadata(tabId);
     const captureOptions = { format };
     if (quality !== void 0) captureOptions.quality = quality;
+    let restoredActiveTabId = null;
+    let activatedTabForCapture = false;
+    let previousActiveTabId = null;
+    if (tabId && !tabMeta.windowId) {
+      throw new Error(`Tab ${tabId} is not available for screenshot`);
+    }
+    if (tabId && tabMeta.windowId) {
+      const activeTabs = await chrome.tabs.query({ windowId: tabMeta.windowId, active: true });
+      previousActiveTabId = activeTabs[0]?.id || null;
+      if (previousActiveTabId !== tabId) {
+        await chrome.tabs.update(tabId, { active: true });
+        activatedTabForCapture = true;
+      }
+    }
     const dataUrl = tabMeta.windowId ? await chrome.tabs.captureVisibleTab(tabMeta.windowId, captureOptions) : await chrome.tabs.captureVisibleTab(captureOptions);
+    if (activatedTabForCapture && previousActiveTabId && previousActiveTabId !== tabId) {
+      try {
+        await chrome.tabs.update(previousActiveTabId, { active: true });
+        restoredActiveTabId = previousActiveTabId;
+      } catch {
+      }
+    }
     const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, "");
     const mimeType = format === "jpeg" ? "image/jpeg" : "image/png";
     const artifact = createArtifactHint("screenshot", {
@@ -3489,6 +3510,8 @@
       tabId: tabMeta.tabId || tabId || null,
       url: tabMeta.url || null,
       title: tabMeta.title || null,
+      activatedTabForCapture,
+      restoredActiveTabId,
       fullPageSupported: false,
       fullPageRequested: Boolean(fullPage),
       note: fullPage ? "Chrome extension backend currently captures the visible viewport; daemon persists returned base64 as an artifact." : void 0

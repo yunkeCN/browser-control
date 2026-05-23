@@ -81,6 +81,18 @@ test('navigate load wait arms tab update listener before issuing navigation', ()
   assert.match(navigationHelpersSource, /if \(currentUrl !== previousUrl\) return true/);
 });
 
+test('screenshot activates the target tab before captureVisibleTab', () => {
+  const screenshotStart = navigationSource.indexOf('export async function handleScreenshot');
+  assert.notEqual(screenshotStart, -1);
+  const screenshotSource = navigationSource.slice(screenshotStart, navigationSource.indexOf('\n}', screenshotStart) + 2);
+  assert.match(screenshotSource, /chrome\.tabs\.query\(\{\s*windowId:\s*tabMeta\.windowId,\s*active:\s*true\s*\}\)/);
+  assert.match(screenshotSource, /await chrome\.tabs\.update\(tabId,\s*\{\s*active:\s*true\s*\}\)/);
+  assert.match(screenshotSource, /await chrome\.tabs\.captureVisibleTab\(tabMeta\.windowId,\s*captureOptions\)/);
+  assert.match(screenshotSource, /await chrome\.tabs\.update\(previousActiveTabId,\s*\{\s*active:\s*true\s*\}\)/);
+  assert.match(screenshotSource, /activatedTabForCapture/);
+  assert.match(screenshotSource, /restoredActiveTabId/);
+});
+
 test('extension announces runtime metadata and browser-side capabilities', () => {
   assert.match(runtimeMetadataSource, /const EXTENSION_CAPABILITIES = \[/);
   assert.match(runtimeMetadataSource, /['"]navigateFinalMetadata['"]/);

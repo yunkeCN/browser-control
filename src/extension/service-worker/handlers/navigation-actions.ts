@@ -464,11 +464,38 @@ export async function handleScreenshot(args: CommandArgs = {}, session: SessionN
   const captureOptions: any = { format };
   if (quality !== undefined) captureOptions.quality = quality;
 
-  // chrome.tabs.captureVisibleTab captures a window, not a tab. Resolve the tab's
-  // window explicitly so protocol-level tab selection remains compatible with the daemon.
+  let restoredActiveTabId: number | null = null;
+  let activatedTabForCapture = false;
+  let previousActiveTabId: number | null = null;
+
+  // chrome.tabs.captureVisibleTab captures the active tab in a window, not an
+  // arbitrary tab. If a session/tab target is known, briefly activate it before
+  // capture so the returned pixels match the returned tab metadata.
+  if (tabId && !tabMeta.windowId) {
+    throw new Error(`Tab ${tabId} is not available for screenshot`);
+  }
+  if (tabId && tabMeta.windowId) {
+    const activeTabs = await chrome.tabs.query({ windowId: tabMeta.windowId, active: true });
+    previousActiveTabId = activeTabs[0]?.id || null;
+    if (previousActiveTabId !== tabId) {
+      await chrome.tabs.update(tabId, { active: true });
+      activatedTabForCapture = true;
+    }
+  }
+
   const dataUrl = tabMeta.windowId
     ? await chrome.tabs.captureVisibleTab(tabMeta.windowId, captureOptions)
     : await chrome.tabs.captureVisibleTab(captureOptions);
+
+  if (activatedTabForCapture && previousActiveTabId && previousActiveTabId !== tabId) {
+    try {
+      await chrome.tabs.update(previousActiveTabId, { active: true });
+      restoredActiveTabId = previousActiveTabId;
+    } catch {
+      // Best-effort only: the previous active tab may have closed during capture.
+    }
+  }
+
   const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
   const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
   const artifact = createArtifactHint('screenshot', {
@@ -491,6 +518,8 @@ export async function handleScreenshot(args: CommandArgs = {}, session: SessionN
     tabId: tabMeta.tabId || tabId || null,
     url: tabMeta.url || null,
     title: tabMeta.title || null,
+    activatedTabForCapture,
+    restoredActiveTabId,
     fullPageSupported: false,
     fullPageRequested: Boolean(fullPage),
     note: fullPage ? 'Chrome extension backend currently captures the visible viewport; daemon persists returned base64 as an artifact.' : undefined
