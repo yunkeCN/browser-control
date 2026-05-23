@@ -83,7 +83,7 @@ const COMMANDS = {
   network_stop: { required: [] },
   upload: { required: ['selector', 'files'], optional: ['tabId'] },
   download: { required: ['url'], optional: ['filename', 'saveAs'] },
-  get_text: { required: [], optional: ['tabId', 'scope', 'maxChars', 'includeRuns'], example: { scope: 'full', maxChars: 4000, includeRuns: true } },
+  get_text: { required: [], optional: ['tabId', 'scope', 'maxChars', 'includeRuns', 'selector'], example: { scope: 'full', maxChars: 4000, includeRuns: true } },
   list_tabs: { required: [] },
   close_tab: { required: [], optional: ['tabId'] },
   close_session: { required: [] }

@@ -1385,6 +1385,21 @@
     const visibleParts = [];
     let visibleTextChars = 0;
     let truncated = false;
+    const container = options?.selector ? document.querySelector(String(options.selector)) : null;
+    if (options?.selector && !container) {
+      return {
+        error: `selector not found: "${options.selector}"`,
+        url: window.location.href,
+        title: document.title,
+        viewport,
+        visibleText: "",
+        textRuns: [],
+        truncated: false,
+        caps: { maxTextChars, maxTextRuns, selector: options.selector },
+        activeElement: null
+      };
+    }
+    const root = container || document.body;
     let counter = Array.from(document.querySelectorAll('[data-agent-id^="@e"]')).reduce((max, el) => {
       const match = /^@e(\d+)$/.exec(el.getAttribute("data-agent-id") || "");
       return match ? Math.max(max, Number(match[1])) : max;
@@ -1511,7 +1526,7 @@
         truncated = true;
       }
     }
-    const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT, {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         const text = normalizeText(node.nodeValue);
         if (!text) return NodeFilter.FILTER_REJECT;
@@ -1533,7 +1548,10 @@
         break;
       }
     }
-    const controls = Array.from(document.querySelectorAll("input, textarea, select, img, [aria-label], [placeholder]"));
+    const controls = Array.from((container || document).querySelectorAll("input, textarea, select, img, [aria-label], [placeholder]"));
+    if (container && container.nodeType === Node.ELEMENT_NODE && container.matches?.("input, textarea, select, img, [aria-label], [placeholder]")) {
+      controls.push(container);
+    }
     for (const el of controls) {
       if (textRuns.length >= maxTextRuns) {
         truncated = true;
@@ -1586,6 +1604,18 @@
     const seen = /* @__PURE__ */ new Set();
     let totalTextChars = 0;
     let runLimited = false;
+    const container = options?.selector ? document.querySelector(String(options.selector)) : null;
+    if (options?.selector && !container) {
+      return {
+        text: "",
+        truncated: false,
+        error: `selector not found: "${options.selector}"`,
+        caps: { maxChars, maxTextRuns, maxArtifactChars, scope, selector: options.selector },
+        url: window.location.href,
+        title: document.title
+      };
+    }
+    const root = container || document.body;
     const blockedTags = /* @__PURE__ */ new Set(["script", "style", "template", "noscript", "svg", "canvas"]);
     const controlSelector = 'input, textarea, select, button, img, [aria-label], [role="button"], [role="link"]';
     const scrollingElement = document.scrollingElement || document.documentElement;
@@ -1745,7 +1775,7 @@
       if (!rect) return;
       addRun(text2, rect, el, "control");
     }
-    const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT, {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         if (!node.nodeValue || !normalize(node.nodeValue)) return NodeFilter.FILTER_REJECT;
         return hasHiddenAncestor(node) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
@@ -1755,7 +1785,8 @@
       if (totalTextChars >= maxArtifactChars) break;
       addTextNode(walker.currentNode);
     }
-    for (const el of Array.from(document.querySelectorAll(controlSelector))) addControl(el);
+    for (const el of Array.from((container || document).querySelectorAll(controlSelector))) addControl(el);
+    if (container && container.nodeType === Node.ELEMENT_NODE && container.matches?.(controlSelector)) addControl(container);
     entries.sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x || a.id.localeCompare(b.id));
     runs.sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x || a.id.localeCompare(b.id));
     const sortedText = entries.map((run) => run.text).join("\n");
@@ -1779,7 +1810,8 @@
         totalTextChars,
         textChars: Math.min(text.length, maxChars),
         scope,
-        iframeBehavior: "top-frame-only"
+        iframeBehavior: "top-frame-only",
+        selector: options?.selector || null
       },
       url: window.location.href,
       title: document.title
@@ -1789,7 +1821,20 @@
     const maxChars = Number.isFinite(options?.maxChars) ? Math.max(0, Math.min(Number(options.maxChars), 2e5)) : 12e3;
     const maxArtifactChars = Number.isFinite(options?.maxArtifactChars) ? Math.max(maxChars, Math.min(Number(options.maxArtifactChars), 2e5)) : Math.max(maxChars, 2e5);
     const includeRuns = options?.includeRuns === true;
-    const raw = (document.body?.innerText || document.documentElement?.innerText || "").replace(/\s+\n/g, "\n").trim();
+    const container = options?.selector ? document.querySelector(String(options.selector)) : null;
+    if (options?.selector && !container) {
+      return {
+        text: "",
+        truncated: false,
+        error: `selector not found: "${options.selector}"`,
+        caps: { maxChars, maxArtifactChars, scope: "document", selector: options.selector },
+        url: window.location.href,
+        title: document.title
+      };
+    }
+    const source2 = container || document.body;
+    const rawText = container ? source2.innerText ?? source2.textContent ?? "" : document.body?.innerText || document.documentElement?.innerText || "";
+    const raw = rawText.replace(/\s+\n/g, "\n").trim();
     const text = raw.slice(0, maxChars);
     const truncated = raw.length > maxChars || raw.length > maxArtifactChars;
     const textRuns = includeRuns ? [] : void 0;
@@ -1808,8 +1853,9 @@
         totalTextRunCount: 0,
         textRunsTruncated: false,
         scope: "document",
-        extraction: "body.innerText",
-        iframeBehavior: "top-frame-only"
+        extraction: container ? "selector.innerText" : "body.innerText",
+        iframeBehavior: "top-frame-only",
+        selector: options?.selector || null
       },
       url: window.location.href,
       title: document.title
@@ -2977,11 +3023,13 @@
     if (!tabId) throw new Error("No active tab in session");
     const scope = args?.scope === "document" ? "document" : args?.scope === "full" ? "full" : "viewport";
     const maxChars = Number.isFinite(args?.maxChars) ? Math.max(0, Math.min(Number(args.maxChars), 2e5)) : 12e3;
+    const selector = args?.selector || null;
     if (scope === "viewport") {
       const observed = await handleObserveCapture({
         tabId,
         maxTextChars: maxChars,
-        maxTextRuns: args?.includeRuns === true ? 1e3 : 300
+        maxTextRuns: args?.includeRuns === true ? 1e3 : 300,
+        selector
       }, session);
       const textRuns = args?.includeRuns ? observed.textRuns || [] : void 0;
       return {
@@ -2991,14 +3039,16 @@
         url: observed.url || null,
         title: observed.title || "",
         textRuns,
-        runs: textRuns
+        runs: textRuns,
+        error: observed.error || void 0,
+        selector
       };
     }
     if (scope === "document") {
       const results2 = await chrome.scripting.executeScript({
         target: { tabId },
         func: getDocumentTextSnapshot,
-        args: [{ maxChars, includeRuns: args?.includeRuns === true }],
+        args: [{ maxChars, includeRuns: args?.includeRuns === true, selector }],
         world: "MAIN"
       });
       return results2[0]?.result || { text: "", truncated: false, caps: { maxChars, scope: "document" }, url: null, title: "" };
@@ -3006,7 +3056,7 @@
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       func: getTextSnapshot,
-      args: [{ scope, maxChars, includeRuns: args?.includeRuns === true, maxTextRuns: args?.includeRuns === true ? 1e3 : 300 }],
+      args: [{ scope, maxChars, includeRuns: args?.includeRuns === true, maxTextRuns: args?.includeRuns === true ? 1e3 : 300, selector }],
       world: "MAIN"
     });
     return results[0]?.result || { text: "", truncated: false, caps: { maxChars, scope }, url: null, title: "" };
@@ -3050,7 +3100,8 @@
     const options = {
       mode: args?.mode || "viewport_text",
       maxTextChars: Number.isFinite(args?.maxTextChars) ? args.maxTextChars : 12e3,
-      maxTextRuns: Number.isFinite(args?.maxTextRuns) ? args.maxTextRuns : 300
+      maxTextRuns: Number.isFinite(args?.maxTextRuns) ? args.maxTextRuns : 300,
+      selector: args?.selector || null
     };
     const results = await chrome.scripting.executeScript({
       target: { tabId },

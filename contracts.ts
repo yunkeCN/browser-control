@@ -52,7 +52,7 @@ export interface CommandArgs {
   network_stop: Record<string, never>;
   upload: { selector: string; files: string[]; tabId?: number };
   download: { url: string; filename?: string; saveAs?: boolean };
-  get_text: { tabId?: number; scope?: 'viewport' | 'document' | 'full'; maxChars?: number; includeRuns?: boolean };
+  get_text: { tabId?: number; scope?: 'viewport' | 'document' | 'full'; maxChars?: number; includeRuns?: boolean; selector?: string };
   list_tabs: Record<string, never>;
   close_tab: { tabId?: number };
   close_session: Record<string, never>;

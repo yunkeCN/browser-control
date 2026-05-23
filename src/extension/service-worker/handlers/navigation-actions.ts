@@ -347,12 +347,14 @@ export async function handleGetText(args: CommandArgs = {}, session: SessionName
   if (!tabId) throw new Error('No active tab in session');
   const scope = args?.scope === 'document' ? 'document' : args?.scope === 'full' ? 'full' : 'viewport';
   const maxChars = Number.isFinite(args?.maxChars) ? Math.max(0, Math.min(Number(args.maxChars), 200000)) : 12000;
+  const selector = args?.selector || null;
 
   if (scope === 'viewport') {
     const observed = await handleObserveCapture({
       tabId,
       maxTextChars: maxChars,
-      maxTextRuns: args?.includeRuns === true ? 1000 : 300
+      maxTextRuns: args?.includeRuns === true ? 1000 : 300,
+      selector
     }, session);
     const textRuns = args?.includeRuns ? observed.textRuns || [] : undefined;
     return {
@@ -362,7 +364,9 @@ export async function handleGetText(args: CommandArgs = {}, session: SessionName
       url: observed.url || null,
       title: observed.title || '',
       textRuns,
-      runs: textRuns
+      runs: textRuns,
+      error: observed.error || undefined,
+      selector
     };
   }
 
@@ -370,7 +374,7 @@ export async function handleGetText(args: CommandArgs = {}, session: SessionName
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       func: getDocumentTextSnapshot,
-      args: [{ maxChars, includeRuns: args?.includeRuns === true }],
+      args: [{ maxChars, includeRuns: args?.includeRuns === true, selector }],
       world: 'MAIN'
     });
     return results[0]?.result || { text: '', truncated: false, caps: { maxChars, scope: 'document' }, url: null, title: '' };
@@ -379,7 +383,7 @@ export async function handleGetText(args: CommandArgs = {}, session: SessionName
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: getTextSnapshot,
-    args: [{ scope, maxChars, includeRuns: args?.includeRuns === true, maxTextRuns: args?.includeRuns === true ? 1000 : 300 }],
+    args: [{ scope, maxChars, includeRuns: args?.includeRuns === true, maxTextRuns: args?.includeRuns === true ? 1000 : 300, selector }],
     world: 'MAIN'
   });
   return results[0]?.result || { text: '', truncated: false, caps: { maxChars, scope }, url: null, title: '' };
@@ -431,7 +435,8 @@ export async function handleObserveCapture(args: CommandArgs = {}, session: Sess
   const options = {
     mode: args?.mode || 'viewport_text',
     maxTextChars: Number.isFinite(args?.maxTextChars) ? args.maxTextChars : 12000,
-    maxTextRuns: Number.isFinite(args?.maxTextRuns) ? args.maxTextRuns : 300
+    maxTextRuns: Number.isFinite(args?.maxTextRuns) ? args.maxTextRuns : 300,
+    selector: args?.selector || null
   };
   const results = await chrome.scripting.executeScript({
     target: { tabId },

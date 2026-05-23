@@ -47,11 +47,26 @@ function createTextSandbox({ count = 5 } = {}) {
       this.style = { display: 'block', visibility: 'visible', opacity: '1', ...style };
       this.children = [];
       this.childNodes = [];
+      this.innerText = '';
+      this.textContent = '';
+      this.value = '';
+      this.rects = [];
     }
     get id() { return this.attrs.id || ''; }
     get className() { return this.attrs.class || ''; }
     getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attrs, name) ? this.attrs[name] : null; }
-    getClientRects() { return []; }
+    getClientRects() { return this.rects; }
+    querySelectorAll() { return []; }
+    matches(selector) {
+      const tag = this.tagName.toLowerCase();
+      return selector.split(',').map(part => part.trim()).some(part => {
+        if (part === tag) return true;
+        if (part === '[aria-label]') return this.getAttribute('aria-label') !== null;
+        if (part === '[role="button"]') return this.getAttribute('role') === 'button';
+        if (part === '[role="link"]') return this.getAttribute('role') === 'link';
+        return false;
+      });
+    }
   }
   function makeText(text, y, parent) {
     return {
@@ -63,10 +78,19 @@ function createTextSandbox({ count = 5 } = {}) {
   }
   const body = new FakeElement('body');
   body.innerText = 'Legacy body text without layout rects';
+  body.textContent = body.innerText;
   const visibleParent = new FakeElement('article', { 'data-testid': 'visible' });
   visibleParent.parentElement = body;
   const hiddenParent = new FakeElement('div', {}, { display: 'none' });
   hiddenParent.parentElement = body;
+  const emptyRegion = new FakeElement('section', { id: 'empty-region' });
+  emptyRegion.parentElement = body;
+  emptyRegion.innerText = '';
+  emptyRegion.textContent = '';
+  const input = new FakeElement('input', { id: 'email', type: 'email', placeholder: 'Email address' });
+  input.parentElement = body;
+  input.value = 'agent@example.test';
+  input.rects = [{ left: 20, top: 40, right: 220, bottom: 60, width: 200, height: 20 }];
   const textNodes = Array.from({ length: count }, (_, index) => makeText(`Item ${index + 1}`, 20 + index * 30, visibleParent));
   textNodes.push(makeText('Hidden Item Must Not Appear', 10, hiddenParent));
   textNodes.push({ nodeType: 3, nodeValue: 'Zero Rect Must Not Appear', parentElement: visibleParent, rects: [{ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }] });
@@ -76,6 +100,11 @@ function createTextSandbox({ count = 5 } = {}) {
     body,
     documentElement: { scrollWidth: 1000, scrollHeight: 5000, innerText: body.innerText },
     scrollingElement: { scrollWidth: 1000, scrollHeight: 5000 },
+    querySelector(selector) {
+      if (selector === '#empty-region') return emptyRegion;
+      if (selector === '#email') return input;
+      return null;
+    },
     querySelectorAll() { return []; },
     createTreeWalker() {
       let index = -1;
@@ -147,6 +176,29 @@ test('getDocumentTextSnapshot preserves legacy body.innerText semantics', async 
   assert.equal(result.textRuns.length, 0);
   assert.equal(result.runs, result.textRuns);
   assert.equal(result.caps.extraction, 'body.innerText');
+});
+
+test('getDocumentTextSnapshot with empty selector does not fall back to document body text', async () => {
+  const sandbox = createTextSandbox({ count: 0 });
+  vm.createContext(sandbox);
+  const getDocumentTextSnapshot = vm.runInContext(`(${extractFunction(serviceWorker, 'getDocumentTextSnapshot')})`, sandbox);
+  const result = await getDocumentTextSnapshot({ selector: '#empty-region', maxChars: 1000 });
+  assert.equal(result.text, '');
+  assert.equal(result.caps.extraction, 'selector.innerText');
+  assert.equal(result.caps.selector, '#empty-region');
+  assert.doesNotMatch(result.text, /Legacy body text/);
+});
+
+test('getTextSnapshot includes selector element itself when the selector targets a control', async () => {
+  const sandbox = createTextSandbox({ count: 0 });
+  vm.createContext(sandbox);
+  const getTextSnapshot = vm.runInContext(`(${extractFunction(serviceWorker, 'getTextSnapshot')})`, sandbox);
+  const result = await getTextSnapshot({ scope: 'full', selector: '#email', maxChars: 1000, includeRuns: true });
+  assert.equal(result.text, 'agent@example.test');
+  assert.equal(result.textRuns.length, 1);
+  assert.equal(result.textRuns[0].source, 'control');
+  assert.equal(result.textRuns[0].selector, '#email');
+  assert.equal(result.caps.selector, '#email');
 });
 
 function createScrollSandbox() {

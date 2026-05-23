@@ -11,6 +11,20 @@ export function captureViewportTextObservation(options: any = {}) {
   const visibleParts: string[] = [];
   let visibleTextChars = 0;
   let truncated = false;
+
+  const container = options?.selector ? document.querySelector(String(options.selector)) : null;
+  if (options?.selector && !container) {
+    return {
+      error: `selector not found: "${options.selector}"`,
+      url: window.location.href, title: document.title, viewport,
+      visibleText: '', textRuns: [], truncated: false,
+      caps: { maxTextChars, maxTextRuns, selector: options.selector },
+      activeElement: null
+    };
+  }
+  const root = (container as Element) || document.body;
+  // Always scan the full document for existing @e IDs so scoped extraction does
+  // not produce duplicate IDs from a narrower counter starting point.
   let counter = Array.from(document.querySelectorAll('[data-agent-id^="@e"]')).reduce((max, el) => {
     const match = /^@e(\d+)$/.exec(el.getAttribute('data-agent-id') || '');
     return match ? Math.max(max, Number(match[1])) : max;
@@ -146,7 +160,7 @@ export function captureViewportTextObservation(options: any = {}) {
     }
   }
 
-  const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT, {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       const text = normalizeText(node.nodeValue);
       if (!text) return NodeFilter.FILTER_REJECT;
@@ -170,7 +184,10 @@ export function captureViewportTextObservation(options: any = {}) {
     }
   }
 
-  const controls = Array.from(document.querySelectorAll('input, textarea, select, img, [aria-label], [placeholder]'));
+  const controls = Array.from((container || document).querySelectorAll('input, textarea, select, img, [aria-label], [placeholder]'));
+  if (container && container.nodeType === Node.ELEMENT_NODE && (container as Element).matches?.('input, textarea, select, img, [aria-label], [placeholder]')) {
+    controls.push(container as Element);
+  }
   for (const el of controls) {
     if (textRuns.length >= maxTextRuns) {
       truncated = true;

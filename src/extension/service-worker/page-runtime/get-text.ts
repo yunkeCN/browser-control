@@ -13,6 +13,18 @@ export function getTextSnapshot(options: any = {}) {
   let totalTextChars = 0;
   let runLimited = false;
 
+  // Resolve selector-scoped container
+  const container = options?.selector ? document.querySelector(String(options.selector)) : null;
+  if (options?.selector && !container) {
+    return {
+      text: '', truncated: false,
+      error: `selector not found: "${options.selector}"`,
+      caps: { maxChars, maxTextRuns, maxArtifactChars, scope, selector: options.selector },
+      url: window.location.href, title: document.title
+    };
+  }
+  const root = (container as Element) || document.body;
+
   const blockedTags = new Set(['script', 'style', 'template', 'noscript', 'svg', 'canvas']);
   const controlSelector = 'input, textarea, select, button, img, [aria-label], [role="button"], [role="link"]';
   const scrollingElement = document.scrollingElement || document.documentElement;
@@ -177,7 +189,7 @@ export function getTextSnapshot(options: any = {}) {
     addRun(text, rect, el, 'control');
   }
 
-  const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT, {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node: Node) {
       if (!node.nodeValue || !normalize(node.nodeValue)) return NodeFilter.FILTER_REJECT;
       return hasHiddenAncestor(node) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
@@ -185,7 +197,8 @@ export function getTextSnapshot(options: any = {}) {
   });
   while (walker.nextNode()) { if (totalTextChars >= maxArtifactChars) break; addTextNode(walker.currentNode as Text); }
 
-  for (const el of Array.from(document.querySelectorAll(controlSelector))) addControl(el);
+  for (const el of Array.from((container || document).querySelectorAll(controlSelector))) addControl(el);
+  if (container && container.nodeType === Node.ELEMENT_NODE && (container as Element).matches?.(controlSelector)) addControl(container as Element);
 
   entries.sort((a, b) => (a.rect.y - b.rect.y) || (a.rect.x - b.rect.x) || a.id.localeCompare(b.id));
   runs.sort((a, b) => (a.rect.y - b.rect.y) || (a.rect.x - b.rect.x) || a.id.localeCompare(b.id));
@@ -211,7 +224,8 @@ export function getTextSnapshot(options: any = {}) {
       totalTextChars,
       textChars: Math.min(text.length, maxChars),
       scope,
-      iframeBehavior: 'top-frame-only'
+      iframeBehavior: 'top-frame-only',
+      selector: options?.selector || null
     },
     url: window.location.href,
     title: document.title
@@ -223,7 +237,21 @@ export function getDocumentTextSnapshot(options: any = {}) {
   const maxChars = Number.isFinite(options?.maxChars) ? Math.max(0, Math.min(Number(options.maxChars), 200000)) : 12000;
   const maxArtifactChars = Number.isFinite(options?.maxArtifactChars) ? Math.max(maxChars, Math.min(Number(options.maxArtifactChars), 200000)) : Math.max(maxChars, 200000);
   const includeRuns = options?.includeRuns === true;
-  const raw = (document.body?.innerText || document.documentElement?.innerText || '').replace(/\s+\n/g, '\n').trim();
+
+  const container = options?.selector ? document.querySelector(String(options.selector)) : null;
+  if (options?.selector && !container) {
+    return {
+      text: '', truncated: false,
+      error: `selector not found: "${options.selector}"`,
+      caps: { maxChars, maxArtifactChars, scope: 'document', selector: options.selector },
+      url: window.location.href, title: document.title
+    };
+  }
+  const source = (container as HTMLElement & Element) || document.body;
+  const rawText = container
+    ? ((source as HTMLElement).innerText ?? source.textContent ?? '')
+    : (document.body?.innerText || document.documentElement?.innerText || '');
+  const raw = rawText.replace(/\s+\n/g, '\n').trim();
   const text = raw.slice(0, maxChars);
   const truncated = raw.length > maxChars || raw.length > maxArtifactChars;
   const textRuns = includeRuns ? [] : undefined;
@@ -242,8 +270,9 @@ export function getDocumentTextSnapshot(options: any = {}) {
       totalTextRunCount: 0,
       textRunsTruncated: false,
       scope: 'document',
-      extraction: 'body.innerText',
-      iframeBehavior: 'top-frame-only'
+      extraction: container ? 'selector.innerText' : 'body.innerText',
+      iframeBehavior: 'top-frame-only',
+      selector: options?.selector || null
     },
     url: window.location.href,
     title: document.title

@@ -275,12 +275,17 @@ Prefer explicit `return ...` for multi-statement snippets to avoid accidental `u
 
 Return capped page text without writing custom JavaScript.
 
-Arguments: optional `tabId`, `scope` (`viewport` default, backward-compatible `document`, or rendered/reachable `full`), `maxChars`, and `includeRuns`. The default viewport scope reuses the same visible-text extraction semantics as observation. Document scope preserves the legacy coarse `body.innerText` behavior. Full scope traverses rendered layout text and filters hidden/zero-size/off-layout decoys. Responses include `text`, `truncated`, `caps`, `url`, and `title`; canonical `textRuns` are returned only when requested, with `runs` retained as a compatibility alias. Truncated large observations may be stored as `observation` artifacts.
+Arguments: optional `tabId`, `scope` (`viewport` default, backward-compatible `document`, or rendered/reachable `full`), `maxChars`, `includeRuns`, and `selector`.
+
+When `selector` is provided, text extraction is scoped to the first element matching the CSS selector. If no element matches, the response includes an `error` field instead of returning empty text. This is the recommended way to extract text from a specific region (e.g., `".search-results"`, `"article"`, `"main"`) without noise from navigation, sidebars, or footers.
+
+The default viewport scope reuses the same visible-text extraction semantics as observation. Document scope preserves the legacy coarse `body.innerText` behavior. Full scope traverses rendered layout text and filters hidden/zero-size/off-layout decoys. Responses include `text`, `truncated`, `caps`, `url`, and `title`; canonical `textRuns` are returned only when requested, with `runs` retained as a compatibility alias. Truncated large observations may be stored as `observation` artifacts.
 
 ```json
 {"command":"get_text","args":{"scope":"viewport","maxChars":4000}}
 {"command":"get_text","args":{"scope":"document","maxChars":12000}}
 {"command":"get_text","args":{"scope":"full","maxChars":12000,"includeRuns":true}}
+{"command":"get_text","args":{"scope":"full","maxChars":5000,"selector":".search-results"}}
 ```
 
 ### `screenshot`

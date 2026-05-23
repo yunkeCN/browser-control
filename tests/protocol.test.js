@@ -234,6 +234,7 @@ test('protocol exposes usability optimization commands without codeBase64', () =
   for (const command of ['get_text', 'find_tab']) {
     assert.ok(COMMANDS[command], `${command} should be protocol-visible`);
   }
+  assert.equal(COMMANDS.get_text.optional.includes('selector'), true, 'get_text selector should be protocol-visible');
   assert.equal(COMMANDS.attach_tab, undefined);
   const legacyAttach = validateRequest(normalizeRequest({ command: 'attach_tab', args: { urlIncludes: 'example.com' } }));
   assert.equal(legacyAttach.command, 'find_tab');
