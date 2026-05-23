@@ -89,6 +89,7 @@
         "observe_start",
         "observe_diff",
         "network",
+        "cdpEvaluate",
         "cdpMouse",
         "cdpKeyboard",
         "cdpWheelScroll",

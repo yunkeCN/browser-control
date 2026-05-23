@@ -116,6 +116,9 @@ Use screenshots for visual evidence, layout checks, or when text snapshots are i
 bash scripts/screenshot.sh -s visual-check -f png
 ```
 
+For a session-bound target tab, screenshot capture may briefly bring that tab to
+the front, then best-effort restore the previously active tab.
+
 Do not call the raw screenshot API in the conversation unless you intentionally want base64 output. Prefer reporting the saved file path.
 
 Verification evidence: screenshot file path and, when relevant, a snapshot describing the page state.
@@ -196,5 +199,9 @@ Avoid shell-escaping large snippets. Put the code in a UTF-8 file and use `--cod
 ```bash
 node scripts/browser-control.js command evaluate --session js-task --code-file ./snippet.js
 ```
+
+`evaluate` is intended to work on pages with strict script policies such as
+Trusted Types. Prefer `get_text`, `wait_for`, and first-class commands when they
+fit the task; reserve custom JavaScript for targeted inspection or extraction.
 
 Use `--args-file` for large JSON command arguments. Browser Control intentionally does not support a `codeBase64` argument.

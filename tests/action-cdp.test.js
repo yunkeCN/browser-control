@@ -109,6 +109,7 @@ test('extension announces runtime metadata and browser-side capabilities', () =>
   assert.match(runtimeMetadataSource, /['"]navigateFinalMetadata['"]/);
   assert.match(runtimeMetadataSource, /['"]observe_start['"]/);
   assert.match(runtimeMetadataSource, /['"]observe_diff['"]/);
+  assert.match(runtimeMetadataSource, /['"]cdpEvaluate['"]/);
   assert.match(runtimeMetadataSource, /async function getExtensionRuntimeMetadata/);
   assert.match(runtimeMetadataSource, /extensionRuntimeMetadata/);
   assert.match(runtimeMetadataSource, /channel:\s*['"]source['"]/);

@@ -14,7 +14,7 @@ Override host and port with `BROWSER_CONTROL_HOST` and `BROWSER_CONTROL_PORT`. O
 
 - CLI expected protocol/runtime schema and CLI-known capabilities.
 - Daemon version, runtime schema, and daemon-owned capabilities such as `actionObservation`.
-- Extension manifest/build metadata and browser-side capabilities such as `navigateFinalMetadata`, observation primitives, CDP input, and DOM pointer fallback.
+- Extension manifest/build metadata and browser-side capabilities such as `navigateFinalMetadata`, observation primitives, CDP-backed actions, and DOM pointer fallback.
 
 Missing legacy extension metadata is a warning rather than a global command blocker. A command fails with `UNSUPPORTED` only when it explicitly requests a feature that the connected runtime metadata shows is unavailable, for example `expectChange`/`observe` without extension observation primitives.
 
@@ -258,7 +258,10 @@ For selector waits, `state` defaults to `visible`; supported values are `visible
 
 ### `evaluate`
 
-Evaluate JavaScript in the page context.
+Evaluate JavaScript in the page context. `evaluate` is designed to work on pages
+with strict script policies such as Trusted Types. If browser debugger support
+is unavailable, Browser Control may fall back to an isolated extension world;
+DOM access still works there, but page-defined JavaScript globals may not be shared.
 
 Arguments: `code` required, optional `tabId`.
 
@@ -297,6 +300,11 @@ Capture a viewport screenshot.
 Arguments: optional `tabId`, `format` (`png` or `jpeg`), `quality`, `fullPage`.
 
 `fullPage:true` is accepted for forward compatibility, but the current Chrome extension backend still captures the visible viewport. Responses expose `fullPageSupported:false`, `fullPageRequested`, and a note when full-page capture was requested.
+
+When Browser Control knows the target session tab, it may briefly bring that tab
+to the front so the screenshot matches the returned tab metadata, then
+best-effort restores the previously active tab. Responses may include
+`activatedTabForCapture` and `restoredActiveTabId` diagnostics.
 
 Use `bash skills/browser-control/scripts/screenshot.sh` for routine screenshots so the agent receives a file path instead of large image data.
 
