@@ -7,15 +7,15 @@ type DebuggerSource = chrome.debugger.Debuggee;
 type DebuggerParams = Record<string, any>;
 
 export async function handleNetwork(args: CommandArgs = {}, session: SessionName): Promise<any> {
-  const { cmd, filter, requestId, includeResources = false, sinceTimestampMs, limit, tabId, scope } = args || {};
+  const { cmd, filter, requestId, sinceTimestampMs, limit, tabId, scope, method, statusCode, type } = args || {};
 
   switch (cmd) {
     case 'start':
-      return startNetworkCapture(session, filter, includeResources, { tabId, scope });
+      return startNetworkCapture(session, filter, { tabId, scope });
     case 'stop':
       return stopNetworkCapture(session);
     case 'list':
-      return listNetworkRequests(session, filter, { sinceTimestampMs, limit });
+      return listNetworkRequests(session, filter, { sinceTimestampMs, limit, tabId, method, statusCode, type });
     case 'detail':
       return getNetworkRequestDetail(session, requestId);
     default:
@@ -62,7 +62,6 @@ async function loadPersistedNetworkCapture(session: SessionName): Promise<Networ
       tabIds: Array.isArray(value.tabIds) ? value.tabIds : (value.tabId ? [value.tabId] : []),
       scope: value.scope || (value.tabId ? 'tab' : 'session'),
       auto: Boolean(value.auto),
-      includeResources: Boolean(value.includeResources),
       persistedAt: value.persistedAt || null
     };
   } catch {
@@ -86,7 +85,6 @@ function persistNetworkCaptureSoon(session: SessionName, capture: NetworkCapture
           tabIds: capture.tabIds || [],
           scope: capture.scope || 'session',
           auto: Boolean(capture.auto),
-          includeResources: Boolean(capture.includeResources),
           persistedAt: nowIso(),
           requests: capture.requests.slice(-NETWORK_CAPTURE_LIMIT)
         }
@@ -97,7 +95,12 @@ function persistNetworkCaptureSoon(session: SessionName, capture: NetworkCapture
   }, 250));
 }
 
-async function clearPersistedNetworkCapture(session: SessionName): Promise<void> {
+export async function clearPersistedNetworkCapture(session: SessionName): Promise<void> {
+  const pending = networkPersistTimers.get(session);
+  if (pending) {
+    clearTimeout(pending);
+    networkPersistTimers.delete(session);
+  }
   try {
     await chrome.storage.local.remove(networkStorageKey(session));
   } catch {
@@ -137,7 +140,6 @@ export function removeNetworkTab(tabId: number): void {
 
 function shouldCaptureRequest(capture: NetworkCapture, url: unknown, type: unknown): boolean {
   if (!shouldCaptureUrl(capture, url)) return false;
-  if (capture.includeResources) return true;
   return isApiResourceType(type);
 }
 
@@ -276,7 +278,6 @@ export async function ensureNetworkCapture(session: SessionName, options: any = 
   if (!capture) capture = { requests: [], filter: null, tabId: null, tabIds: [], scope, auto: false };
 
   capture.filter = options.filter !== undefined ? (options.filter || null) : (capture.filter || null);
-  capture.includeResources = Boolean(options.includeResources || capture.includeResources);
   capture.scope = scope;
   const tracked = scope === 'tab' ? (tabId ? [tabId] : []) : [...new Set([...getTrackedTabIds(session), ...(tabId ? [tabId] : []), ...(capture.tabIds || [])])];
   capture.tabIds = tracked;
@@ -298,20 +299,20 @@ export async function ensureNetworkCapture(session: SessionName, options: any = 
     captureScope: capture.scope || 'session',
     trackedTabIds: capture.tabIds || [],
     auto: Boolean(capture.auto),
-    mode: capture.includeResources ? 'all' : 'api-only',
+    mode: 'api-only',
     stored: capture.requests.length,
     webRequest,
     debugger: debuggerStatus
   };
 }
 
-export async function startNetworkCapture(session: SessionName, filter: string | null | undefined, includeResources = false, options: any = {}): Promise<any> {
+export async function startNetworkCapture(session: SessionName, filter: string | null | undefined, options: any = {}): Promise<any> {
   const existing = networkCaptures.get(session);
   for (const id of debuggerTabIds(existing as any)) {
     try { await chrome.debugger.detach({ tabId: id }); } catch { /* Ignore detach failures before reset. */ }
   }
   await clearPersistedNetworkCapture(session);
-  return ensureNetworkCapture(session, { filter, includeResources, reset: true, tabId: options.tabId, scope: options.scope });
+  return ensureNetworkCapture(session, { filter, reset: true, tabId: options.tabId, scope: options.scope });
 }
 
 export async function stopNetworkCapture(session: SessionName): Promise<any> {
@@ -449,6 +450,186 @@ export async function performCdpMouseClick(tabId: number, selector: string, opti
   };
 }
 
+function captureWheelScrollMetrics(point: { x: number; y: number }): any {
+  function metricsFor(target: Element | Window): any {
+    if (target === window) {
+      const root = document.scrollingElement || document.documentElement;
+      return {
+        scrollX: Math.round(window.scrollX || window.pageXOffset || 0),
+        scrollY: Math.round(window.scrollY || window.pageYOffset || 0),
+        scrollWidth: Math.round(root?.scrollWidth || document.documentElement.scrollWidth || 0),
+        scrollHeight: Math.round(root?.scrollHeight || document.documentElement.scrollHeight || 0),
+        clientWidth: Math.round(window.innerWidth || document.documentElement.clientWidth || 0),
+        clientHeight: Math.round(window.innerHeight || document.documentElement.clientHeight || 0)
+      };
+    }
+    const el = target as HTMLElement;
+    return {
+      scrollX: Math.round(el.scrollLeft || 0),
+      scrollY: Math.round(el.scrollTop || 0),
+      scrollWidth: Math.round(el.scrollWidth || 0),
+      scrollHeight: Math.round(el.scrollHeight || 0),
+      clientWidth: Math.round(el.clientWidth || 0),
+      clientHeight: Math.round(el.clientHeight || 0)
+    };
+  }
+
+  function isScrollable(el: Element): boolean {
+    const style = window.getComputedStyle(el);
+    const overflowY = `${style.overflowY} ${style.overflow}`;
+    const overflowX = `${style.overflowX} ${style.overflow}`;
+    const node = el as HTMLElement;
+    const canY = /(auto|scroll|overlay)/.test(overflowY) && node.scrollHeight > node.clientHeight + 1;
+    const canX = /(auto|scroll|overlay)/.test(overflowX) && node.scrollWidth > node.clientWidth + 1;
+    return canY || canX;
+  }
+
+  function findScrollContainer(el: Element | null): Element | Window {
+    let current: Element | null = el;
+    while (current && current !== document.documentElement && current !== document.body) {
+      if (isScrollable(current)) return current;
+      current = current.parentElement;
+    }
+    return window;
+  }
+
+  const element = document.elementFromPoint(point.x, point.y);
+  const target = findScrollContainer(element);
+  return {
+    target: target === window ? 'document' : 'element',
+    metrics: metricsFor(target)
+  };
+}
+
+function canScrollFurther(metrics: any, dx: number, dy: number): boolean {
+  const maxX = Math.max(0, Number(metrics?.scrollWidth || 0) - Number(metrics?.clientWidth || 0));
+  const maxY = Math.max(0, Number(metrics?.scrollHeight || 0) - Number(metrics?.clientHeight || 0));
+  if (dx < 0 && Number(metrics?.scrollX || 0) > 0) return true;
+  if (dx > 0 && Number(metrics?.scrollX || 0) < maxX) return true;
+  if (dy < 0 && Number(metrics?.scrollY || 0) > 0) return true;
+  if (dy > 0 && Number(metrics?.scrollY || 0) < maxY) return true;
+  return false;
+}
+
+function finiteNumber(value: unknown, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+export async function performCdpWheelScroll(tabId: number, options: any = {}): Promise<any> {
+  const region = options?.region || null;
+  const regionX = finiteNumber(region?.x, 0);
+  const regionY = finiteNumber(region?.y, 0);
+  const regionWidth = finiteNumber(region?.width, 0);
+  const regionHeight = finiteNumber(region?.height, 0);
+  const x = Number.isFinite(options?.x) ? Number(options.x) : region ? regionX + regionWidth / 2 : 1;
+  const y = Number.isFinite(options?.y) ? Number(options.y) : region ? regionY + regionHeight / 2 : 1;
+  const deltaX = Number.isFinite(options?.deltaX) ? Number(options.deltaX) : 0;
+  const deltaY = Number.isFinite(options?.deltaY) ? Number(options.deltaY) : 0;
+  const steps = Math.max(1, Math.min(Math.floor(Number(options?.steps || 1)), 20));
+  const waitMs = Math.max(0, Math.min(finiteNumber(options?.waitMs, 50), 5000));
+
+  const beforeResults = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: captureWheelScrollMetrics,
+    args: [{ x, y }],
+    world: 'MAIN'
+  });
+  const beforeSnapshot = beforeResults[0]?.result as any;
+  const before = beforeSnapshot?.metrics || null;
+  const target = beforeSnapshot?.target || 'document';
+
+  const lease = await acquireActionDebugger(tabId);
+  if (lease.error) {
+    return {
+      ok: false,
+      target,
+      strategyUsed: 'wheel',
+      before,
+      after: before,
+      movedX: 0,
+      movedY: 0,
+      attemptedDeltaX: deltaX,
+      attemptedDeltaY: deltaY,
+      atBoundary: before ? !canScrollFurther(before, deltaX, deltaY) : undefined,
+      error: lease.error,
+      recoverable: true,
+      warnings: lease.warnings || []
+    };
+  }
+
+  const warnings = [...(lease.warnings || [])];
+  const debuggee = lease.debuggee as any;
+
+  try {
+    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x,
+      y,
+      button: 'none'
+    });
+    for (let i = 0; i < steps; i += 1) {
+      await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+        type: 'mouseWheel',
+        x,
+        y,
+        deltaX: deltaX / steps,
+        deltaY: deltaY / steps,
+        button: 'none'
+      });
+    }
+  } catch (err: any) {
+    return {
+      ok: false,
+      target,
+      strategyUsed: 'wheel',
+      before,
+      after: before,
+      movedX: 0,
+      movedY: 0,
+      attemptedDeltaX: deltaX,
+      attemptedDeltaY: deltaY,
+      atBoundary: before ? !canScrollFurther(before, deltaX, deltaY) : undefined,
+      error: `CDP wheel dispatch failed: ${err?.message || String(err)}`,
+      recoverable: true,
+      warnings
+    };
+  } finally {
+    const detachWarning = await releaseActionDebugger(lease);
+    if (detachWarning) warnings.push(detachWarning);
+  }
+
+  if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
+  const afterResults = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: captureWheelScrollMetrics,
+    args: [{ x, y }],
+    world: 'MAIN'
+  });
+  const afterSnapshot = afterResults[0]?.result as any;
+  const after = afterSnapshot?.metrics || before;
+  const movedX = Number(after?.scrollX || 0) - Number(before?.scrollX || 0);
+  const movedY = Number(after?.scrollY || 0) - Number(before?.scrollY || 0);
+  const ok = movedX !== 0 || movedY !== 0;
+  const atBoundary = after ? !canScrollFurther(after, deltaX, deltaY) : undefined;
+  if (!ok) warnings.push('Wheel event dispatched but measured scroll position did not change.');
+
+  return {
+    ok,
+    target: afterSnapshot?.target || target,
+    strategyUsed: 'wheel',
+    before,
+    after,
+    movedX,
+    movedY,
+    attemptedDeltaX: deltaX,
+    attemptedDeltaY: deltaY,
+    atBoundary,
+    point: { x, y },
+    warnings: warnings.length ? warnings : undefined
+  };
+}
+
 export async function performCdpKeyboardPress(tabId: number, key: string, options: any = {}): Promise<any> {
   const lease = await acquireActionDebugger(tabId);
   if (lease.error) {
@@ -571,6 +752,18 @@ function capturedRequestTimestampMs(r: NetworkRequest): number | null {
   return null;
 }
 
+function clampNetworkListLimit(value: unknown): number {
+  if (!Number.isFinite(value)) return NETWORK_LIST_LIMIT;
+  return Math.max(1, Math.min(Math.floor(Number(value)), NETWORK_LIST_LIMIT));
+}
+
+function matchesNetworkListFilters(r: NetworkRequest, options: any): boolean {
+  if (options.method && String(r.method || '').toUpperCase() !== String(options.method).toUpperCase()) return false;
+  if (options.type && String(r.type || '').toLowerCase() !== String(options.type).toLowerCase()) return false;
+  if (Number.isFinite(options.statusCode) && Number(r.statusCode) !== Number(options.statusCode)) return false;
+  return true;
+}
+
 async function listNetworkRequests(session: SessionName, filter: string | null | undefined, options: any = {}): Promise<any> {
   let capture: NetworkCapture | null | undefined = networkCaptures.get(session);
   if (!capture) {
@@ -581,31 +774,35 @@ async function listNetworkRequests(session: SessionName, filter: string | null |
 
   let requests = capture.requests;
   if (filter) requests = requests.filter(r => String(r.url || '').includes(filter));
-  if (Number.isFinite(options.sinceTimestampMs)) {
+  requests = requests.filter(r => matchesNetworkListFilters(r, options));
+  const requestedTabId = Number(options.tabId);
+  const hasTabIdFilter = Number.isFinite(requestedTabId);
+  if (hasTabIdFilter) requests = requests.filter(r => Number(r.tabId) === requestedTabId);
+
+  const sinceTimestampMs = Number.isFinite(options.sinceTimestampMs) ? Number(options.sinceTimestampMs) : null;
+  let omittedUntimestamped = 0;
+  if (sinceTimestampMs !== null) {
     requests = requests.filter(r => {
       const timestampMs = capturedRequestTimestampMs(r);
-      return timestampMs === null || timestampMs >= options.sinceTimestampMs;
+      if (timestampMs === null) {
+        omittedUntimestamped += 1;
+        return false;
+      }
+      return timestampMs >= sinceTimestampMs;
     });
   }
-  const limit = Number.isFinite(options.limit) ? options.limit : NETWORK_LIST_LIMIT;
-  return {
-    session,
-    tabId: capture.tabId || null,
-    captureScope: capture.scope || 'session',
-    trackedTabIds: capture.tabIds || [],
-    auto: Boolean(capture.auto),
-    mode: capture.includeResources ? 'all' : 'api-only',
-    stored: capture.requests.length,
-    limit: NETWORK_CAPTURE_LIMIT,
-    sinceTimestampMs: Number.isFinite(options.sinceTimestampMs) ? options.sinceTimestampMs : null,
-    requests: requests.slice(-limit).map(r => ({
+  const requestLimit = clampNetworkListLimit(options.limit);
+  const responseRequests = requests.slice(-requestLimit).map(r => {
+    const timestampMs = capturedRequestTimestampMs(r);
+    return {
       id: r.id,
       webRequestId: r.webRequestId || null,
       cdpRequestId: r.cdpRequestId || null,
       url: r.url,
       method: r.method,
       timestamp: r.timestamp,
-      timestampMs: capturedRequestTimestampMs(r),
+      timestampMs,
+      timestampMissing: timestampMs === null,
       type: r.type,
       source: r.source,
       tabId: r.tabId,
@@ -619,7 +816,27 @@ async function listNetworkRequests(session: SessionName, filter: string | null |
       hasBody: typeof r.body === 'string',
       bodyError: r.bodyError || null,
       json: r.json
-    }))
+    };
+  });
+  return {
+    session,
+    tabId: capture.tabId || null,
+    tabIdFilter: hasTabIdFilter ? requestedTabId : null,
+    captureScope: capture.scope || 'session',
+    trackedTabIds: capture.tabIds || [],
+    auto: Boolean(capture.auto),
+    mode: 'api-only',
+    methodFilter: options.method ? String(options.method).toUpperCase() : null,
+    statusCodeFilter: Number.isFinite(options.statusCode) ? Number(options.statusCode) : null,
+    typeFilter: options.type ? String(options.type).toLowerCase() : null,
+    totalStored: capture.requests.length,
+    matched: requests.length,
+    returned: responseRequests.length,
+    requestLimit,
+    storageLimit: NETWORK_CAPTURE_LIMIT,
+    sinceTimestampMs,
+    omittedUntimestamped,
+    requests: responseRequests
   };
 }
 

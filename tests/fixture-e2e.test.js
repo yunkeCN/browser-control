@@ -75,11 +75,12 @@ test('fixture E2E: daemon validates commands and dispatches through extension We
       select_option: { ...base, selected: true, value: [msg.args.value] },
       set_checked: { ...base, checked: msg.args.checked },
       press: { ...base, pressed: true, key: msg.args.key },
+      scroll: { ...base, ok: true, target: 'document', strategyUsed: msg.args.strategy || 'dom', before: { scrollX: 0, scrollY: 0, scrollWidth: 800, scrollHeight: 2000, clientWidth: 800, clientHeight: 600 }, after: { scrollX: 0, scrollY: msg.args.deltaY || 0, scrollWidth: 800, scrollHeight: 2000, clientWidth: 800, clientHeight: 600 }, movedX: 0, movedY: msg.args.deltaY || 0, atBoundary: false },
       wait_for: { ...base, waited: true },
       screenshot: { ...base, format: 'png', data: Buffer.from('fake-png').toString('base64'), dataLength: 12 },
       save_as_pdf: { ...base, format: 'pdf', data: Buffer.from('fake-pdf').toString('base64'), dataLength: 12 },
       get_text: { ...base, text: 'Fixture text', truncated: false, caps: { maxChars: 12000 }, url: 'http://fixture.local', title: 'Fixture' },
-      attach_tab: { session: msg.session, attached: 101, tab: { id: 101, title: 'Fixture', url: 'http://fixture.local' }, tabs: [{ id: 101, title: 'Fixture' }] },
+      find_tab: { session: msg.session, tab: { id: 101, title: 'Fixture', url: 'http://fixture.local' }, tabs: [{ id: 101, title: 'Fixture' }] },
       list_tabs: { session: msg.session, tabs: [{ id: 101, title: 'Fixture' }] },
       close_session: { closed: msg.session, tabCount: 1 }
     };
@@ -106,10 +107,11 @@ test('fixture E2E: daemon validates commands and dispatches through extension We
     ['select_option', { selector: '#role', value: 'admin' }],
     ['set_checked', { selector: '#active', checked: true }],
     ['press', { key: 'Enter' }],
+    ['scroll', { strategy: 'dom', deltaY: 600 }],
     ['wait_for', { selector: '#done' }],
     ['wait_for', { text: 'Done' }],
     ['get_text', { maxChars: 1000 }],
-    ['attach_tab', { urlIncludes: 'fixture.local' }],
+    ['find_tab', { urlIncludes: 'fixture.local' }],
     ['list_tabs', {}]
   ]) {
     const res = await request('POST', '/command', { command, args, session: 'fixture' });

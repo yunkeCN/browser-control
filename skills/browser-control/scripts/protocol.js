@@ -10,7 +10,8 @@ const CLI_CAPABILITIES = [
   'actionObservationRequest',
   'navigateFinalMetadata',
   'argsFile',
-  'codeFile'
+  'codeFile',
+  'scroll'
 ];
 
 const DAEMON_CAPABILITIES = [
@@ -22,7 +23,6 @@ const DAEMON_CAPABILITIES = [
   'artifactStore',
   'navigateFinalMetadataPassthrough',
   'get_text',
-  'attach_tab',
   'sessionNetworkCapture',
   'snapshotFilters'
 ];
@@ -35,9 +35,10 @@ const EXTENSION_CAPABILITY_HINTS = [
   'network',
   'cdpMouse',
   'cdpKeyboard',
+  'cdpWheelScroll',
   'domPointer',
+  'scroll',
   'get_text',
-  'attach_tab',
   'sessionNetworkCapture',
   'snapshotFilters'
 ];
@@ -62,6 +63,12 @@ const COMMANDS = {
     optional: ['tabId', 'selector', 'strategy', 'modifiers', 'expectChange', 'observe'],
     strategies: ['auto', 'cdp_keyboard', 'dom_keyboard']
   },
+  scroll: {
+    required: [],
+    optional: ['tabId', 'selector', 'strategy', 'deltaX', 'deltaY', 'x', 'y', 'region', 'steps', 'block', 'behavior', 'waitMs'],
+    example: { deltaY: 800, strategy: 'dom' },
+    strategies: ['auto', 'dom', 'wheel']
+  },
   select_option: { required: ['selector', 'value'], optional: ['tabId'] },
   set_checked: { required: ['selector', 'checked'], optional: ['tabId'] },
   wait_for: { required: [], optional: ['selector', 'text', 'state', 'timeoutMs', 'tabId', 'expression'] },
@@ -70,15 +77,13 @@ const COMMANDS = {
   save_as_pdf: { required: [], optional: ['tabId', 'paper_format', 'landscape', 'scale', 'print_background', 'file_name'] },
   observe_start: { required: [], optional: ['tabId', 'mode', 'baselineId', 'includeNetworkMarker', 'maxTextChars', 'maxTextRuns'], example: { includeNetworkMarker: true } },
   observe_diff: { required: ['baselineId'], optional: ['tabId', 'includeCurrent', 'includeNetwork', 'maxAdded', 'maxRemoved', 'maxSummaryChars', 'allowStaleNavigationDiff'], example: { baselineId: 'obs_...', includeNetwork: true } },
-  network: { required: ['cmd'], optional: ['filter', 'requestId', 'includeResources', 'tabId', 'scope', 'sinceTimestampMs', 'limit'], example: { cmd: 'detail', requestId: '<id>' } },
-  network_start: { required: [], optional: ['filter', 'includeResources', 'tabId', 'scope'], example: { scope: 'session', includeResources: false } },
-  network_list: { required: [], optional: ['filter', 'sinceTimestampMs', 'limit'], example: { filter: '/api/' } },
+  network_start: { required: [], optional: ['filter', 'tabId', 'scope'], example: { scope: 'session' } },
+  network_list: { required: [], optional: ['filter', 'sinceTimestampMs', 'limit', 'tabId', 'method', 'statusCode', 'type'], example: { filter: '/api/' } },
   network_detail: { required: ['requestId'], optional: [], example: { requestId: '<id from network_list>' } },
   network_stop: { required: [] },
   upload: { required: ['selector', 'files'], optional: ['tabId'] },
   download: { required: ['url'], optional: ['filename', 'saveAs'] },
-  get_text: { required: [], optional: ['tabId', 'scope', 'maxChars', 'includeRuns'], example: { scope: 'viewport', maxChars: 4000 } },
-  attach_tab: { required: [], optional: ['tabId', 'urlIncludes', 'titleIncludes', 'active'], example: { urlIncludes: 'example.com' } },
+  get_text: { required: [], optional: ['tabId', 'scope', 'maxChars', 'includeRuns'], example: { scope: 'full', maxChars: 4000, includeRuns: true } },
   list_tabs: { required: [] },
   close_tab: { required: [], optional: ['tabId'] },
   close_session: { required: [] }
@@ -90,7 +95,6 @@ const LEGACY_ACTION_ALIASES = {
   setChecked: 'set_checked',
   waitFor: 'wait_for',
   findTab: 'find_tab',
-  attachTab: 'attach_tab',
   getText: 'get_text',
   networkStart: 'network_start',
   networkList: 'network_list',
@@ -113,15 +117,21 @@ function normalizeCommand(command) {
 }
 
 function normalizeRequest(body = {}) {
-  const command = normalizeCommand(body.command || body.action);
+  const rawCommand = body.command || body.action;
+  let command = normalizeCommand(rawCommand);
   const args = body.args && typeof body.args === 'object' ? body.args : {};
+  const normalizedArgs = { ...args };
+  if (rawCommand === 'attach_tab' || rawCommand === 'attachTab') {
+    command = 'find_tab';
+    normalizedArgs.attach = true;
+  }
   return {
     id: body.id || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     version: body.version || PROTOCOL_VERSION,
     session: body.session || 'default',
     command,
     action: command,
-    args,
+    args: normalizedArgs,
     timeoutMs: Number.isFinite(body.timeoutMs) ? body.timeoutMs : 30000
   };
 }
@@ -149,7 +159,6 @@ function validateRequest(request) {
     throw new ProtocolError('VALIDATION_ERROR', 'files must be an array for command \'upload\'', { field: 'files' });
   }
   validateOptionalStringArg(request, spec, 'filter', [
-    'network',
     'network_start',
     'network_list'
   ]);

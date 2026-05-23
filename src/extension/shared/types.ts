@@ -13,6 +13,7 @@ export type CommandAction =
   | 'click'
   | 'fill'
   | 'press'
+  | 'scroll'
   | 'select_option'
   | 'set_checked'
   | 'wait_for'
@@ -98,7 +99,6 @@ export interface NetworkCapture {
   tabIds?: number[];
   scope?: 'session' | 'tab';
   auto?: boolean;
-  includeResources?: boolean;
   persistedAt?: string | null;
   debuggerAttachedTabId?: number | null;
   debuggerAttachedTabIds?: number[];

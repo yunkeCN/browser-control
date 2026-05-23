@@ -33,9 +33,10 @@ export const EXTENSION_CAPABILITIES = [
   'network',
   'cdpMouse',
   'cdpKeyboard',
+  'cdpWheelScroll',
   'domPointer',
+  'scroll',
   'get_text',
-  'attach_tab',
   'sessionNetworkCapture',
   'snapshotFilters'
 ];

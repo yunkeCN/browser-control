@@ -44,7 +44,13 @@ Use when the user asks you to inspect, summarize, or extract visible content fro
    ```bash
    node scripts/browser-control.js command get_text --session read-page --args '{"scope":"viewport","maxChars":4000}'
    ```
-5. Report content with the source URL/session context. Close with `close_session` unless the user wants the tab left open.
+5. For below-fold content or scrollable result regions, use first-class `scroll` rather than keyboard keys or an `evaluate` workaround, then read text again:
+   ```bash
+   node scripts/browser-control.js command scroll --session read-page --args '{"deltaY":800,"strategy":"dom"}'
+   node scripts/browser-control.js command scroll --session read-page --args '{"strategy":"wheel","x":400,"y":500,"deltaY":800}'
+   node scripts/browser-control.js command get_text --session read-page --args '{"scope":"full","maxChars":12000,"includeRuns":true}'
+   ```
+6. Report content with the source URL/session context. Close with `close_session` unless the user wants the tab left open.
 
 Verification evidence: URL loaded, snapshot/get_text contains the content used in the answer.
 
@@ -137,7 +143,7 @@ Use when the user asks which API a page calls or why data appears.
    ```bash
    node scripts/browser-control.js command network_start --session net-task --args '{"filter":"api"}'
    ```
-   `filter` is a URL substring string; omit it for no filtering. Use `{"includeResources":true}` when non-XHR/fetch resources are relevant.
+   `filter` is a URL substring string; omit it for no filtering. Network capture is API-focused and intentionally excludes non-XHR/fetch resources such as images, CSS, fonts, scripts, and document loads.
 2. Navigate or perform the triggering UI action.
 3. List requests:
    ```bash

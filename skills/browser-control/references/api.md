@@ -45,6 +45,7 @@ Browser command helper examples:
 ```bash
 node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{}'
 node skills/browser-control/scripts/browser-control.js command click --session demo --args '{"selector":"@e4"}'
+node skills/browser-control/scripts/browser-control.js command scroll --session demo --args '{"deltaY":800,"strategy":"dom"}'
 node skills/browser-control/scripts/browser-control.js command evaluate --session demo --code-file ./snippet.js
 ```
 
@@ -119,7 +120,7 @@ Stable response fields:
 
 Find an existing tab by URL, title, or active state.
 
-Arguments: optional `urlIncludes`, `titleIncludes`, `active`, `tabId`, and `attach`. By default the first match is attached to the session; pass `attach:false` for lookup-only behavior. Use `attach_tab` when the intent is explicitly to associate an existing tab with the session.
+Arguments: optional `urlIncludes`, `titleIncludes`, `active`, `tabId`, and `attach`. By default the first match is attached to the session and session-scoped network capture is extended to that tab; pass `attach:false` for lookup-only behavior. Older `attach_tab` calls are accepted as a compatibility alias for `find_tab` with `attach:true`, but new agent code should use `find_tab`.
 
 ### `snapshot`
 
@@ -205,6 +206,26 @@ Press diagnostics may include key/code/modifier data, focused target before and 
 
 `observe` options are intentionally small and stable: optional `baselineId`, `includeNetwork`, `waitMs`, and the `observe_diff` caps such as `maxAdded`, `maxRemoved`, and `maxSummaryChars`. Command result shapes for browser actions remain intentionally loose because pages and fallback strategies produce dynamic diagnostics; stable fields are the result envelope, documented action diagnostics, and optional `actionObservation`.
 
+
+### `scroll`
+
+Scroll the document, a selected scroll container, or a viewport point/region without relying on keyboard keys. Use this for pages where `Space`, `PageDown`, or `End` may be intercepted by a focused media/player area.
+
+Arguments: optional `tabId`, `selector`, `strategy` (`auto`, `dom`, or `wheel`), `deltaX`, `deltaY`, `x`, `y`, `region`, `steps`, `block`, `behavior`, and `waitMs`.
+
+Strategies:
+
+- `auto` default: use wheel input when `x`, `y`, or `region` is provided; otherwise use DOM document/container scrolling. If wheel/CDP input is unavailable in auto mode, Browser Control falls back to DOM scrolling with a warning.
+- `dom`: scroll `document.scrollingElement` or the nearest scrollable container inferred from `selector`. Mode is inferred from arguments: selector-only means `scrollIntoView`; `x`/`y` means absolute offsets; `deltaX`/`deltaY` means relative scrolling. A legacy `mode` override is still accepted for compatibility but is no longer part of the recommended command surface.
+- `wheel`: dispatch Chrome debugger mouse-wheel input at viewport coordinates. For wheel, `x` and `y` are CSS-pixel viewport coordinates; explicit wheel failures are recoverable instead of silently falling back.
+
+Responses include `ok`, `target`, `strategyUsed`, `before`, `after`, `movedX`, `movedY`, optional `attemptedDeltaX`/`attemptedDeltaY` for wheel input, optional `atBoundary`, and optional `warnings`. `movedX`/`movedY` are measured movement, not requested delta.
+
+```json
+{"command":"scroll","args":{"deltaY":800,"strategy":"dom"}}
+{"command":"scroll","args":{"strategy":"wheel","x":400,"y":500,"deltaY":800}}
+```
+
 ### `select_option`
 
 Set a native `<select>` value.
@@ -254,10 +275,12 @@ Prefer explicit `return ...` for multi-statement snippets to avoid accidental `u
 
 Return capped page text without writing custom JavaScript.
 
-Arguments: optional `tabId`, `scope` (`viewport` default or `document`), `maxChars`, and `includeRuns`. The default viewport scope reuses the same visible-text extraction semantics as observation. Document scope is opt-in and capped. Responses include `text`, `truncated`, `caps`, `url`, and `title`; `runs` are returned only when requested.
+Arguments: optional `tabId`, `scope` (`viewport` default, backward-compatible `document`, or rendered/reachable `full`), `maxChars`, and `includeRuns`. The default viewport scope reuses the same visible-text extraction semantics as observation. Document scope preserves the legacy coarse `body.innerText` behavior. Full scope traverses rendered layout text and filters hidden/zero-size/off-layout decoys. Responses include `text`, `truncated`, `caps`, `url`, and `title`; canonical `textRuns` are returned only when requested, with `runs` retained as a compatibility alias. Truncated large observations may be stored as `observation` artifacts.
 
 ```json
 {"command":"get_text","args":{"scope":"viewport","maxChars":4000}}
+{"command":"get_text","args":{"scope":"document","maxChars":12000}}
+{"command":"get_text","args":{"scope":"full","maxChars":12000,"includeRuns":true}}
 ```
 
 ### `screenshot`
@@ -280,8 +303,8 @@ Arguments: optional `tabId`, `paper_format`, `landscape`, `scale`, `print_backgr
 
 ### Network commands
 
-- `network_start`: start or reset capture; optional args `filter`, `includeResources`, `tabId`, and `scope` (`session` or `tab`). `filter`, when provided, must be a URL substring string. Session-scoped capture tracks tabs associated with the session and extends when `navigate` or `attach_tab` adds a tab.
-- `network_list`: list captured requests; optional args `filter`, `sinceTimestampMs`, and `limit`. `filter`, when provided, must be a URL substring string; omit it for no filtering.
+- `network_start`: start or reset API-focused capture; optional args `filter`, `tabId`, and `scope` (`session` or `tab`). `filter`, when provided, must be a URL substring string. Session-scoped capture tracks tabs associated with the session and extends when `navigate` or attached `find_tab` adds a tab. Resource loads such as images, CSS, fonts, scripts, and documents are intentionally excluded to keep the buffer focused on XHR/fetch API traffic.
+- `network_list`: list captured requests; optional args `filter`, `sinceTimestampMs`, `limit`, `tabId`, `method`, `statusCode`, and `type`. `filter`, when provided, must be a URL substring string; omit it for no filtering. `method`, `statusCode`, and `type` narrow by request metadata; `tabId` narrows session-scoped capture to one tab. `limit` is clamped to 1..100 (`NETWORK_LIST_LIMIT`). When `sinceTimestampMs` is used, requests without a comparable timestamp are excluded and counted in `omittedUntimestamped`.
 - `network_detail`: fetch request/response detail by `requestId`. Detail responses may merge matching webRequest and CDP records and expose `ids` plus `mergeConfidence`; ambiguous records are not silently merged.
 - `network_stop`: stop capture and clear persisted capture state.
 
@@ -356,7 +379,6 @@ Constraints:
 
 - `upload`: args `selector`, `files`, optional `tabId`. Browser security may require user cooperation.
 - `download`: args `url` required, optional `filename` and `saveAs`. The extension currently waits up to 30 seconds for Chrome download completion/interruption metadata.
-- `attach_tab`: explicitly associate an existing tab with the session; args optional `tabId`, `urlIncludes`, `titleIncludes`, `active`.
 - `list_tabs`: list tabs known to the session.
 - `close_tab`: close the current tab, or pass optional `tabId` to close a specific session tab.
 - `close_session`: close all tabs in the session and remove session state; no arguments.

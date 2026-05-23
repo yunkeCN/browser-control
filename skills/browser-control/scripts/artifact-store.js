@@ -111,6 +111,18 @@ function extractArtifacts(command, result, store = new ArtifactStore()) {
     data.bodyArtifact = artifact;
   }
 
+  if (command === 'get_text' && typeof result.artifactText === 'string') {
+    const artifact = store.writeText('observation', result.artifactText, {
+      ext: 'txt',
+      name: 'get-text-full',
+      mimeType: 'text/plain'
+    });
+    if (artifact) artifacts.push(artifact);
+    delete data.artifactText;
+    data.artifactPath = artifact?.path;
+    data.artifact = artifact;
+  }
+
   if (command === 'download' && result.path) {
     artifacts.push({
       id: `download-${path.basename(result.path)}`,

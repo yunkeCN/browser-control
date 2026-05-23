@@ -91,9 +91,10 @@
         "network",
         "cdpMouse",
         "cdpKeyboard",
+        "cdpWheelScroll",
         "domPointer",
+        "scroll",
         "get_text",
-        "attach_tab",
         "sessionNetworkCapture",
         "snapshotFilters"
       ];
@@ -218,14 +219,14 @@
 
   // src/extension/service-worker/handlers/network-cdp.ts
   async function handleNetwork(args = {}, session) {
-    const { cmd, filter, requestId, includeResources = false, sinceTimestampMs, limit, tabId, scope } = args || {};
+    const { cmd, filter, requestId, sinceTimestampMs, limit, tabId, scope, method, statusCode, type } = args || {};
     switch (cmd) {
       case "start":
-        return startNetworkCapture(session, filter, includeResources, { tabId, scope });
+        return startNetworkCapture(session, filter, { tabId, scope });
       case "stop":
         return stopNetworkCapture(session);
       case "list":
-        return listNetworkRequests(session, filter, { sinceTimestampMs, limit });
+        return listNetworkRequests(session, filter, { sinceTimestampMs, limit, tabId, method, statusCode, type });
       case "detail":
         return getNetworkRequestDetail(session, requestId);
       default:
@@ -264,7 +265,6 @@
         tabIds: Array.isArray(value.tabIds) ? value.tabIds : value.tabId ? [value.tabId] : [],
         scope: value.scope || (value.tabId ? "tab" : "session"),
         auto: Boolean(value.auto),
-        includeResources: Boolean(value.includeResources),
         persistedAt: value.persistedAt || null
       };
     } catch {
@@ -287,7 +287,6 @@
             tabIds: capture.tabIds || [],
             scope: capture.scope || "session",
             auto: Boolean(capture.auto),
-            includeResources: Boolean(capture.includeResources),
             persistedAt: nowIso(),
             requests: capture.requests.slice(-NETWORK_CAPTURE_LIMIT)
           }
@@ -298,6 +297,11 @@
     }, 250));
   }
   async function clearPersistedNetworkCapture(session) {
+    const pending = networkPersistTimers.get(session);
+    if (pending) {
+      clearTimeout(pending);
+      networkPersistTimers.delete(session);
+    }
     try {
       await chrome.storage.local.remove(networkStorageKey(session));
     } catch {
@@ -330,7 +334,6 @@
   }
   function shouldCaptureRequest(capture, url, type) {
     if (!shouldCaptureUrl(capture, url)) return false;
-    if (capture.includeResources) return true;
     return isApiResourceType(type);
   }
   function removeCapturedRequest(capture, requestId) {
@@ -456,7 +459,6 @@
     if (!capture && !reset) capture = await loadPersistedNetworkCapture(session);
     if (!capture) capture = { requests: [], filter: null, tabId: null, tabIds: [], scope, auto: false };
     capture.filter = options.filter !== void 0 ? options.filter || null : capture.filter || null;
-    capture.includeResources = Boolean(options.includeResources || capture.includeResources);
     capture.scope = scope;
     const tracked = scope === "tab" ? tabId ? [tabId] : [] : [.../* @__PURE__ */ new Set([...getTrackedTabIds(session), ...tabId ? [tabId] : [], ...capture.tabIds || []])];
     capture.tabIds = tracked;
@@ -476,13 +478,13 @@
       captureScope: capture.scope || "session",
       trackedTabIds: capture.tabIds || [],
       auto: Boolean(capture.auto),
-      mode: capture.includeResources ? "all" : "api-only",
+      mode: "api-only",
       stored: capture.requests.length,
       webRequest,
       debugger: debuggerStatus
     };
   }
-  async function startNetworkCapture(session, filter, includeResources = false, options = {}) {
+  async function startNetworkCapture(session, filter, options = {}) {
     const existing = networkCaptures.get(session);
     for (const id of debuggerTabIds(existing)) {
       try {
@@ -491,7 +493,7 @@
       }
     }
     await clearPersistedNetworkCapture(session);
-    return ensureNetworkCapture(session, { filter, includeResources, reset: true, tabId: options.tabId, scope: options.scope });
+    return ensureNetworkCapture(session, { filter, reset: true, tabId: options.tabId, scope: options.scope });
   }
   async function stopNetworkCapture(session) {
     const capture = networkCaptures.get(session);
@@ -618,6 +620,173 @@
       warnings
     };
   }
+  function captureWheelScrollMetrics(point) {
+    function metricsFor2(target2) {
+      if (target2 === window) {
+        const root = document.scrollingElement || document.documentElement;
+        return {
+          scrollX: Math.round(window.scrollX || window.pageXOffset || 0),
+          scrollY: Math.round(window.scrollY || window.pageYOffset || 0),
+          scrollWidth: Math.round(root?.scrollWidth || document.documentElement.scrollWidth || 0),
+          scrollHeight: Math.round(root?.scrollHeight || document.documentElement.scrollHeight || 0),
+          clientWidth: Math.round(window.innerWidth || document.documentElement.clientWidth || 0),
+          clientHeight: Math.round(window.innerHeight || document.documentElement.clientHeight || 0)
+        };
+      }
+      const el = target2;
+      return {
+        scrollX: Math.round(el.scrollLeft || 0),
+        scrollY: Math.round(el.scrollTop || 0),
+        scrollWidth: Math.round(el.scrollWidth || 0),
+        scrollHeight: Math.round(el.scrollHeight || 0),
+        clientWidth: Math.round(el.clientWidth || 0),
+        clientHeight: Math.round(el.clientHeight || 0)
+      };
+    }
+    function isScrollable2(el) {
+      const style = window.getComputedStyle(el);
+      const overflowY = `${style.overflowY} ${style.overflow}`;
+      const overflowX = `${style.overflowX} ${style.overflow}`;
+      const node = el;
+      const canY = /(auto|scroll|overlay)/.test(overflowY) && node.scrollHeight > node.clientHeight + 1;
+      const canX = /(auto|scroll|overlay)/.test(overflowX) && node.scrollWidth > node.clientWidth + 1;
+      return canY || canX;
+    }
+    function findScrollContainer2(el) {
+      let current = el;
+      while (current && current !== document.documentElement && current !== document.body) {
+        if (isScrollable2(current)) return current;
+        current = current.parentElement;
+      }
+      return window;
+    }
+    const element = document.elementFromPoint(point.x, point.y);
+    const target = findScrollContainer2(element);
+    return {
+      target: target === window ? "document" : "element",
+      metrics: metricsFor2(target)
+    };
+  }
+  function canScrollFurther(metrics, dx, dy) {
+    const maxX = Math.max(0, Number(metrics?.scrollWidth || 0) - Number(metrics?.clientWidth || 0));
+    const maxY = Math.max(0, Number(metrics?.scrollHeight || 0) - Number(metrics?.clientHeight || 0));
+    if (dx < 0 && Number(metrics?.scrollX || 0) > 0) return true;
+    if (dx > 0 && Number(metrics?.scrollX || 0) < maxX) return true;
+    if (dy < 0 && Number(metrics?.scrollY || 0) > 0) return true;
+    if (dy > 0 && Number(metrics?.scrollY || 0) < maxY) return true;
+    return false;
+  }
+  function finiteNumber(value, fallback) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  async function performCdpWheelScroll(tabId, options = {}) {
+    const region = options?.region || null;
+    const regionX = finiteNumber(region?.x, 0);
+    const regionY = finiteNumber(region?.y, 0);
+    const regionWidth = finiteNumber(region?.width, 0);
+    const regionHeight = finiteNumber(region?.height, 0);
+    const x = Number.isFinite(options?.x) ? Number(options.x) : region ? regionX + regionWidth / 2 : 1;
+    const y = Number.isFinite(options?.y) ? Number(options.y) : region ? regionY + regionHeight / 2 : 1;
+    const deltaX = Number.isFinite(options?.deltaX) ? Number(options.deltaX) : 0;
+    const deltaY = Number.isFinite(options?.deltaY) ? Number(options.deltaY) : 0;
+    const steps = Math.max(1, Math.min(Math.floor(Number(options?.steps || 1)), 20));
+    const waitMs = Math.max(0, Math.min(finiteNumber(options?.waitMs, 50), 5e3));
+    const beforeResults = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: captureWheelScrollMetrics,
+      args: [{ x, y }],
+      world: "MAIN"
+    });
+    const beforeSnapshot = beforeResults[0]?.result;
+    const before = beforeSnapshot?.metrics || null;
+    const target = beforeSnapshot?.target || "document";
+    const lease = await acquireActionDebugger(tabId);
+    if (lease.error) {
+      return {
+        ok: false,
+        target,
+        strategyUsed: "wheel",
+        before,
+        after: before,
+        movedX: 0,
+        movedY: 0,
+        attemptedDeltaX: deltaX,
+        attemptedDeltaY: deltaY,
+        atBoundary: before ? !canScrollFurther(before, deltaX, deltaY) : void 0,
+        error: lease.error,
+        recoverable: true,
+        warnings: lease.warnings || []
+      };
+    }
+    const warnings = [...lease.warnings || []];
+    const debuggee = lease.debuggee;
+    try {
+      await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        x,
+        y,
+        button: "none"
+      });
+      for (let i = 0; i < steps; i += 1) {
+        await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
+          type: "mouseWheel",
+          x,
+          y,
+          deltaX: deltaX / steps,
+          deltaY: deltaY / steps,
+          button: "none"
+        });
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        target,
+        strategyUsed: "wheel",
+        before,
+        after: before,
+        movedX: 0,
+        movedY: 0,
+        attemptedDeltaX: deltaX,
+        attemptedDeltaY: deltaY,
+        atBoundary: before ? !canScrollFurther(before, deltaX, deltaY) : void 0,
+        error: `CDP wheel dispatch failed: ${err?.message || String(err)}`,
+        recoverable: true,
+        warnings
+      };
+    } finally {
+      const detachWarning = await releaseActionDebugger(lease);
+      if (detachWarning) warnings.push(detachWarning);
+    }
+    if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    const afterResults = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: captureWheelScrollMetrics,
+      args: [{ x, y }],
+      world: "MAIN"
+    });
+    const afterSnapshot = afterResults[0]?.result;
+    const after = afterSnapshot?.metrics || before;
+    const movedX = Number(after?.scrollX || 0) - Number(before?.scrollX || 0);
+    const movedY = Number(after?.scrollY || 0) - Number(before?.scrollY || 0);
+    const ok = movedX !== 0 || movedY !== 0;
+    const atBoundary = after ? !canScrollFurther(after, deltaX, deltaY) : void 0;
+    if (!ok) warnings.push("Wheel event dispatched but measured scroll position did not change.");
+    return {
+      ok,
+      target: afterSnapshot?.target || target,
+      strategyUsed: "wheel",
+      before,
+      after,
+      movedX,
+      movedY,
+      attemptedDeltaX: deltaX,
+      attemptedDeltaY: deltaY,
+      atBoundary,
+      point: { x, y },
+      warnings: warnings.length ? warnings : void 0
+    };
+  }
   async function performCdpKeyboardPress(tabId, key, options = {}) {
     const lease = await acquireActionDebugger(tabId);
     if (lease.error) {
@@ -731,6 +900,16 @@
     if (Number.isFinite(timestamp)) return timestamp > 1e12 ? timestamp : Math.round(timestamp * 1e3);
     return null;
   }
+  function clampNetworkListLimit(value) {
+    if (!Number.isFinite(value)) return NETWORK_LIST_LIMIT;
+    return Math.max(1, Math.min(Math.floor(Number(value)), NETWORK_LIST_LIMIT));
+  }
+  function matchesNetworkListFilters(r, options) {
+    if (options.method && String(r.method || "").toUpperCase() !== String(options.method).toUpperCase()) return false;
+    if (options.type && String(r.type || "").toLowerCase() !== String(options.type).toLowerCase()) return false;
+    if (Number.isFinite(options.statusCode) && Number(r.statusCode) !== Number(options.statusCode)) return false;
+    return true;
+  }
   async function listNetworkRequests(session, filter, options = {}) {
     let capture = networkCaptures.get(session);
     if (!capture) {
@@ -740,31 +919,34 @@
     if (!capture) return { requests: [] };
     let requests = capture.requests;
     if (filter) requests = requests.filter((r) => String(r.url || "").includes(filter));
-    if (Number.isFinite(options.sinceTimestampMs)) {
+    requests = requests.filter((r) => matchesNetworkListFilters(r, options));
+    const requestedTabId = Number(options.tabId);
+    const hasTabIdFilter = Number.isFinite(requestedTabId);
+    if (hasTabIdFilter) requests = requests.filter((r) => Number(r.tabId) === requestedTabId);
+    const sinceTimestampMs = Number.isFinite(options.sinceTimestampMs) ? Number(options.sinceTimestampMs) : null;
+    let omittedUntimestamped = 0;
+    if (sinceTimestampMs !== null) {
       requests = requests.filter((r) => {
         const timestampMs = capturedRequestTimestampMs(r);
-        return timestampMs === null || timestampMs >= options.sinceTimestampMs;
+        if (timestampMs === null) {
+          omittedUntimestamped += 1;
+          return false;
+        }
+        return timestampMs >= sinceTimestampMs;
       });
     }
-    const limit = Number.isFinite(options.limit) ? options.limit : NETWORK_LIST_LIMIT;
-    return {
-      session,
-      tabId: capture.tabId || null,
-      captureScope: capture.scope || "session",
-      trackedTabIds: capture.tabIds || [],
-      auto: Boolean(capture.auto),
-      mode: capture.includeResources ? "all" : "api-only",
-      stored: capture.requests.length,
-      limit: NETWORK_CAPTURE_LIMIT,
-      sinceTimestampMs: Number.isFinite(options.sinceTimestampMs) ? options.sinceTimestampMs : null,
-      requests: requests.slice(-limit).map((r) => ({
+    const requestLimit = clampNetworkListLimit(options.limit);
+    const responseRequests = requests.slice(-requestLimit).map((r) => {
+      const timestampMs = capturedRequestTimestampMs(r);
+      return {
         id: r.id,
         webRequestId: r.webRequestId || null,
         cdpRequestId: r.cdpRequestId || null,
         url: r.url,
         method: r.method,
         timestamp: r.timestamp,
-        timestampMs: capturedRequestTimestampMs(r),
+        timestampMs,
+        timestampMissing: timestampMs === null,
         type: r.type,
         source: r.source,
         tabId: r.tabId,
@@ -778,7 +960,27 @@
         hasBody: typeof r.body === "string",
         bodyError: r.bodyError || null,
         json: r.json
-      }))
+      };
+    });
+    return {
+      session,
+      tabId: capture.tabId || null,
+      tabIdFilter: hasTabIdFilter ? requestedTabId : null,
+      captureScope: capture.scope || "session",
+      trackedTabIds: capture.tabIds || [],
+      auto: Boolean(capture.auto),
+      mode: "api-only",
+      methodFilter: options.method ? String(options.method).toUpperCase() : null,
+      statusCodeFilter: Number.isFinite(options.statusCode) ? Number(options.statusCode) : null,
+      typeFilter: options.type ? String(options.type).toLowerCase() : null,
+      totalStored: capture.requests.length,
+      matched: requests.length,
+      returned: responseRequests.length,
+      requestLimit,
+      storageLimit: NETWORK_CAPTURE_LIMIT,
+      sinceTimestampMs,
+      omittedUntimestamped,
+      requests: responseRequests
     };
   }
   async function getNetworkRequestDetail(session, requestId) {
@@ -1371,6 +1573,254 @@
     }
   });
 
+  // src/extension/service-worker/page-runtime/get-text.ts
+  function getTextSnapshot(options = {}) {
+    const scope = options?.scope === "viewport" ? "viewport" : "full";
+    const maxChars = Number.isFinite(options?.maxChars) ? Math.max(0, Math.min(Number(options.maxChars), 2e5)) : 12e3;
+    const maxTextRuns = Number.isFinite(options?.maxTextRuns) ? Math.max(0, Math.min(Number(options.maxTextRuns), 5e3)) : 1e3;
+    const maxArtifactChars = Number.isFinite(options?.maxArtifactChars) ? Math.max(maxChars, Math.min(Number(options.maxArtifactChars), 2e5)) : Math.max(maxChars, 2e5);
+    const includeRuns = options?.includeRuns === true;
+    const viewportOnly = scope === "viewport";
+    const entries = [];
+    const runs = [];
+    const seen = /* @__PURE__ */ new Set();
+    let totalTextChars = 0;
+    let runLimited = false;
+    const blockedTags = /* @__PURE__ */ new Set(["script", "style", "template", "noscript", "svg", "canvas"]);
+    const controlSelector = 'input, textarea, select, button, img, [aria-label], [role="button"], [role="link"]';
+    const scrollingElement = document.scrollingElement || document.documentElement;
+    const docBounds = {
+      minX: -Math.max(window.innerWidth, 1),
+      minY: -Math.max(window.innerHeight, 1),
+      maxX: Math.max(scrollingElement?.scrollWidth || 0, document.documentElement.scrollWidth || 0, document.body?.scrollWidth || 0, window.innerWidth),
+      maxY: Math.max(scrollingElement?.scrollHeight || 0, document.documentElement.scrollHeight || 0, document.body?.scrollHeight || 0, window.innerHeight)
+    };
+    function normalize(value) {
+      return String(value || "").replace(/\s+/g, " ").trim();
+    }
+    function rectFromDomRect(rect) {
+      const docX = window.scrollX || window.pageXOffset || 0;
+      const docY = window.scrollY || window.pageYOffset || 0;
+      return {
+        x: Math.round(rect.left + docX),
+        y: Math.round(rect.top + docY),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      };
+    }
+    function viewportIntersects(rect) {
+      return rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.right >= 0 && rect.top <= window.innerHeight && rect.left <= window.innerWidth;
+    }
+    function reachableRect(rect) {
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      if (viewportOnly && !viewportIntersects(rect)) return false;
+      const x = rect.left + (window.scrollX || window.pageXOffset || 0);
+      const y = rect.top + (window.scrollY || window.pageYOffset || 0);
+      const right = x + rect.width;
+      const bottom = y + rect.height;
+      return right >= docBounds.minX && bottom >= docBounds.minY && x <= docBounds.maxX && y <= docBounds.maxY;
+    }
+    function firstReachableRect(rects) {
+      for (const rect of Array.from(rects || [])) {
+        if (reachableRect(rect)) return rect;
+      }
+      return null;
+    }
+    function isSensitiveControl(el) {
+      const type = String(el.getAttribute?.("type") || "").toLowerCase();
+      const autocomplete = String(el.getAttribute?.("autocomplete") || "").toLowerCase();
+      const name = `${el.getAttribute?.("name") || ""} ${el.getAttribute?.("id") || ""} ${el.getAttribute?.("aria-label") || ""}`.toLowerCase();
+      return type === "password" || autocomplete === "current-password" || autocomplete === "one-time-code" || /\b(password|passwd|token|secret|api[-_ ]?key|session|cookie|otp)\b/.test(name);
+    }
+    function isHiddenElement(el) {
+      if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+      const tag = el.tagName?.toLowerCase?.() || "";
+      if (blockedTags.has(tag)) return true;
+      if (el.hidden || el.getAttribute("hidden") !== null || el.getAttribute("aria-hidden") === "true") return true;
+      const style = window.getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return true;
+      return false;
+    }
+    function hasHiddenAncestor(node) {
+      let current = node && node.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement || null;
+      while (current && current !== document) {
+        if (current.nodeType === Node.ELEMENT_NODE && isHiddenElement(current)) return true;
+        current = current.parentElement;
+      }
+      return false;
+    }
+    function nearestElement(node) {
+      return node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+    }
+    function inferRole(el) {
+      const explicit = el.getAttribute?.("role");
+      if (explicit) return explicit;
+      const tag = el.tagName?.toLowerCase?.() || "";
+      const type = String(el.getAttribute?.("type") || "").toLowerCase();
+      const roleMap = {
+        a: "link",
+        button: "button",
+        select: "combobox",
+        textarea: "textbox",
+        img: "img",
+        h1: "heading",
+        h2: "heading",
+        h3: "heading",
+        h4: "heading",
+        h5: "heading",
+        h6: "heading",
+        li: "listitem",
+        ul: "list",
+        ol: "list",
+        table: "table"
+      };
+      if (tag === "input") return type === "checkbox" ? "checkbox" : type === "radio" ? "radio" : type === "submit" || type === "button" ? "button" : "textbox";
+      return roleMap[tag] || null;
+    }
+    function selectorFor(el) {
+      if (!el?.tagName) return null;
+      const tag = el.tagName.toLowerCase();
+      if (el.id) return `#${CSS.escape(el.id)}`;
+      const testId = el.getAttribute("data-testid") || el.getAttribute("data-test-id");
+      if (testId) return `${tag}[data-testid="${CSS.escape(testId)}"]`;
+      if (typeof el.className === "string") {
+        const cls = el.className.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((c) => CSS.escape(c)).join(".");
+        if (cls) return `${tag}.${cls}`;
+      }
+      return tag;
+    }
+    function addRun(text2, rect, el, source2 = "text") {
+      const normalizedText = normalize(text2);
+      if (!normalizedText) return;
+      const keyText = normalizedText.length > 500 ? normalizedText.slice(0, 500) : normalizedText;
+      const outRect = rectFromDomRect(rect);
+      const key = `${keyText}|${outRect.x}|${outRect.y}|${outRect.width}|${outRect.height}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      totalTextChars += normalizedText.length;
+      const entry = {
+        id: `t${entries.length + 1}`,
+        text: normalizedText,
+        normalizedText,
+        rect: outRect,
+        tag: el?.tagName?.toLowerCase?.() || null,
+        role: el ? inferRole(el) : null,
+        selector: el ? selectorFor(el) : null,
+        source: source2
+      };
+      entries.push(entry);
+      if (runs.length < maxTextRuns) {
+        runs.push(entry);
+      } else {
+        runLimited = true;
+      }
+    }
+    function addTextNode(node) {
+      if (totalTextChars >= maxArtifactChars) return;
+      if (hasHiddenAncestor(node)) return;
+      const normalizedText = normalize(node.nodeValue || "");
+      if (!normalizedText) return;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rect = firstReachableRect(range.getClientRects());
+      range.detach?.();
+      if (!rect) return;
+      addRun(normalizedText, rect, nearestElement(node), "text");
+    }
+    function controlText(el) {
+      const tag = el.tagName?.toLowerCase?.() || "";
+      if (tag === "input" || tag === "textarea") {
+        if (isSensitiveControl(el)) return el.getAttribute("placeholder") || (el.value ? "[redacted]" : "");
+        return el.value || el.getAttribute("placeholder") || el.getAttribute("aria-label") || "";
+      }
+      if (tag === "select") return el.options?.[el.selectedIndex]?.text || el.getAttribute("aria-label") || "";
+      if (tag === "img") return el.getAttribute("alt") || el.getAttribute("aria-label") || "";
+      return el.getAttribute("aria-label") || el.getAttribute("title") || "";
+    }
+    function addControl(el) {
+      if (hasHiddenAncestor(el)) return;
+      const text2 = controlText(el);
+      if (!text2) return;
+      const rect = firstReachableRect(el.getClientRects());
+      if (!rect) return;
+      addRun(text2, rect, el, "control");
+    }
+    const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (!node.nodeValue || !normalize(node.nodeValue)) return NodeFilter.FILTER_REJECT;
+        return hasHiddenAncestor(node) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    while (walker.nextNode()) {
+      if (totalTextChars >= maxArtifactChars) break;
+      addTextNode(walker.currentNode);
+    }
+    for (const el of Array.from(document.querySelectorAll(controlSelector))) addControl(el);
+    entries.sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x || a.id.localeCompare(b.id));
+    runs.sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x || a.id.localeCompare(b.id));
+    const sortedText = entries.map((run) => run.text).join("\n");
+    const text = sortedText.slice(0, maxChars);
+    const artifactText = sortedText.length > maxChars ? sortedText.slice(0, maxArtifactChars) : void 0;
+    const truncated = sortedText.length > maxChars || sortedText.length > maxArtifactChars;
+    const textRuns = includeRuns ? runs : void 0;
+    return {
+      text,
+      textRuns,
+      runs: textRuns,
+      truncated,
+      artifactText: truncated ? artifactText || sortedText.slice(0, maxArtifactChars) : void 0,
+      caps: {
+        maxChars,
+        maxTextRuns,
+        maxArtifactChars,
+        textRunCount: runs.length,
+        totalTextRunCount: entries.length,
+        textRunsTruncated: runLimited,
+        totalTextChars,
+        textChars: Math.min(text.length, maxChars),
+        scope,
+        iframeBehavior: "top-frame-only"
+      },
+      url: window.location.href,
+      title: document.title
+    };
+  }
+  function getDocumentTextSnapshot(options = {}) {
+    const maxChars = Number.isFinite(options?.maxChars) ? Math.max(0, Math.min(Number(options.maxChars), 2e5)) : 12e3;
+    const maxArtifactChars = Number.isFinite(options?.maxArtifactChars) ? Math.max(maxChars, Math.min(Number(options.maxArtifactChars), 2e5)) : Math.max(maxChars, 2e5);
+    const includeRuns = options?.includeRuns === true;
+    const raw = (document.body?.innerText || document.documentElement?.innerText || "").replace(/\s+\n/g, "\n").trim();
+    const text = raw.slice(0, maxChars);
+    const truncated = raw.length > maxChars || raw.length > maxArtifactChars;
+    const textRuns = includeRuns ? [] : void 0;
+    return {
+      text,
+      textRuns,
+      runs: textRuns,
+      truncated,
+      artifactText: truncated ? raw.slice(0, maxArtifactChars) : void 0,
+      caps: {
+        maxChars,
+        maxArtifactChars,
+        textChars: Math.min(raw.length, maxChars),
+        totalTextChars: raw.length,
+        textRunCount: 0,
+        totalTextRunCount: 0,
+        textRunsTruncated: false,
+        scope: "document",
+        extraction: "body.innerText",
+        iframeBehavior: "top-frame-only"
+      },
+      url: window.location.href,
+      title: document.title
+    };
+  }
+  var init_get_text = __esm({
+    "src/extension/service-worker/page-runtime/get-text.ts"() {
+      "use strict";
+    }
+  });
+
   // src/extension/service-worker/page-runtime/click.ts
   function performClick(selector, options = {}) {
     function localFindElement(sel) {
@@ -1714,6 +2164,153 @@
   }
   var init_press = __esm({
     "src/extension/service-worker/page-runtime/press.ts"() {
+      "use strict";
+    }
+  });
+
+  // src/extension/service-worker/page-runtime/scroll.ts
+  function numeric(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  function clampStepCount(value) {
+    const n = Math.floor(numeric(value, 1));
+    return Math.max(1, Math.min(n, 20));
+  }
+  function metricsFor(target) {
+    if (target === window) {
+      const root = document.scrollingElement || document.documentElement;
+      return {
+        scrollX: Math.round(window.scrollX),
+        scrollY: Math.round(window.scrollY),
+        scrollWidth: Math.round(root?.scrollWidth || document.documentElement.scrollWidth || 0),
+        scrollHeight: Math.round(root?.scrollHeight || document.documentElement.scrollHeight || 0),
+        clientWidth: Math.round(window.innerWidth || document.documentElement.clientWidth || 0),
+        clientHeight: Math.round(window.innerHeight || document.documentElement.clientHeight || 0)
+      };
+    }
+    const el = target;
+    return {
+      scrollX: Math.round(el.scrollLeft || 0),
+      scrollY: Math.round(el.scrollTop || 0),
+      scrollWidth: Math.round(el.scrollWidth || 0),
+      scrollHeight: Math.round(el.scrollHeight || 0),
+      clientWidth: Math.round(el.clientWidth || 0),
+      clientHeight: Math.round(el.clientHeight || 0)
+    };
+  }
+  function isScrollable(el) {
+    const style = window.getComputedStyle(el);
+    const overflowY = `${style.overflowY} ${style.overflow}`;
+    const overflowX = `${style.overflowX} ${style.overflow}`;
+    const canY = /(auto|scroll|overlay)/.test(overflowY) && el.scrollHeight > el.clientHeight + 1;
+    const canX = /(auto|scroll|overlay)/.test(overflowX) && el.scrollWidth > el.clientWidth + 1;
+    return canY || canX;
+  }
+  function findScrollContainer(el) {
+    let current = el;
+    while (current && current !== document.documentElement && current !== document.body) {
+      if (isScrollable(current)) return current;
+      current = current.parentElement;
+    }
+    return window;
+  }
+  function selectedTarget(selector, mode) {
+    if (!selector) return { target: window, targetKind: "document" };
+    const element = document.querySelector(selector);
+    if (!element) return { target: window, targetKind: "document", error: `Element not found for scroll selector: ${selector}`, recoverable: true };
+    if (mode === "element") return { target: window, targetKind: "element", element };
+    const target = findScrollContainer(element);
+    return { target, targetKind: target === window ? "document" : "element", element };
+  }
+  function canMove(metrics, dx, dy) {
+    const maxX = Math.max(0, metrics.scrollWidth - metrics.clientWidth);
+    const maxY = Math.max(0, metrics.scrollHeight - metrics.clientHeight);
+    if (dx < 0 && metrics.scrollX > 0) return true;
+    if (dx > 0 && metrics.scrollX < maxX) return true;
+    if (dy < 0 && metrics.scrollY > 0) return true;
+    if (dy > 0 && metrics.scrollY < maxY) return true;
+    return false;
+  }
+  function inferScrollMode(options, hasDelta) {
+    if (options.mode === "by" || options.mode === "to" || options.mode === "element") return options.mode;
+    if (options.x !== void 0 || options.y !== void 0) return "to";
+    if (hasDelta) return "by";
+    if (options.selector) return "element";
+    return "by";
+  }
+  async function performDomScroll(options = {}) {
+    const warnings = [...options.warnings || []];
+    const deltaX = numeric(options.deltaX, 0);
+    const deltaY = numeric(options.deltaY, 0);
+    const hasDelta = deltaX !== 0 || deltaY !== 0;
+    const mode = inferScrollMode(options, hasDelta);
+    const resolved = selectedTarget(options.selector, mode);
+    if (resolved.error) return { ok: false, error: resolved.error, recoverable: resolved.recoverable, warnings };
+    const target = resolved.target;
+    const targetKind = resolved.targetKind;
+    const before = metricsFor(target);
+    const steps = clampStepCount(options.steps);
+    const behavior = options.behavior || "instant";
+    if (mode === "element") {
+      if (!resolved.element) return { ok: false, error: "selector is required for scroll mode element", recoverable: true, warnings };
+      const elBefore = resolved.element.getBoundingClientRect();
+      resolved.element.scrollIntoView({ block: options.block || "center", inline: "nearest", behavior });
+      const waitMs2 = Math.max(0, Math.min(numeric(options.waitMs, 0), 5e3));
+      if (waitMs2) await new Promise((resolve) => setTimeout(resolve, waitMs2));
+      const elAfter = resolved.element.getBoundingClientRect();
+      const after2 = metricsFor(target);
+      const movedX2 = Math.round(elAfter.x - elBefore.x);
+      const movedY2 = Math.round(elAfter.y - elBefore.y);
+      const ok2 = movedX2 !== 0 || movedY2 !== 0;
+      if (!ok2 && warnings.length === 0) warnings.push("Scroll completed but target position did not change.");
+      return {
+        ok: ok2,
+        target: targetKind,
+        strategyUsed: "dom",
+        before,
+        after: after2,
+        movedX: movedX2,
+        movedY: movedY2,
+        atBoundary: false,
+        warnings: warnings.length ? warnings : void 0
+      };
+    } else if (mode === "to") {
+      const x = numeric(options.x, before.scrollX);
+      const y = numeric(options.y, before.scrollY);
+      if (target === window) window.scrollTo({ left: x, top: y, behavior });
+      else target.scrollTo({ left: x, top: y, behavior });
+    } else {
+      if (!canMove(before, deltaX, deltaY)) warnings.push("Scroll target is already at the requested boundary or is not scrollable in that direction.");
+      for (let i = 0; i < steps; i += 1) {
+        const left = deltaX / steps;
+        const top = deltaY / steps;
+        if (target === window) window.scrollBy({ left, top, behavior });
+        else target.scrollBy({ left, top, behavior });
+      }
+    }
+    const waitMs = Math.max(0, Math.min(numeric(options.waitMs, 0), 5e3));
+    if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    const after = metricsFor(target);
+    const movedX = after.scrollX - before.scrollX;
+    const movedY = after.scrollY - before.scrollY;
+    const atBoundary = !canMove(after, deltaX || movedX, deltaY || movedY);
+    const ok = movedX !== 0 || movedY !== 0;
+    if (!ok && warnings.length === 0) warnings.push("Scroll completed but target position did not change.");
+    return {
+      ok,
+      target: targetKind,
+      strategyUsed: "dom",
+      before,
+      after,
+      movedX,
+      movedY,
+      atBoundary,
+      warnings: warnings.length ? warnings : void 0
+    };
+  }
+  var init_scroll = __esm({
+    "src/extension/service-worker/page-runtime/scroll.ts"() {
       "use strict";
     }
   });
@@ -2263,6 +2860,34 @@
     if (result?.error) throw new Error(result.error);
     return result;
   }
+  async function handleScroll(args = {}, session) {
+    const tabId = args?.tabId || getActiveTabId(session);
+    if (!tabId) throw new Error("No active tab in session");
+    const strategy = args?.strategy || "auto";
+    if (strategy === "wheel" || strategy === "auto" && (args?.x !== void 0 || args?.y !== void 0 || args?.region)) {
+      const cdpResult = await performCdpWheelScroll(tabId, args || {});
+      if (!cdpResult.error || strategy === "wheel") return cdpResult;
+      args = {
+        ...args,
+        strategy: "dom",
+        warnings: [
+          ...args?.warnings || [],
+          `wheel unavailable in auto mode; fell back to dom: ${cdpResult.error}`
+        ]
+      };
+    }
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: performDomScroll,
+      args: [args || {}],
+      world: "MAIN"
+    });
+    const result = results[0]?.result;
+    if (!result) throw new Error("Scroll script returned no result");
+    if (result?.error && result?.recoverable) return result;
+    if (result?.error) throw new Error(result.error);
+    return result;
+  }
   async function handleSelectOption(args = {}, session) {
     const { selector, value } = args || {};
     if (!selector) throw new Error("selector is required for select_option");
@@ -2323,14 +2948,15 @@
       return true;
     }).map((tab) => ({ id: tab.id, title: tab.title, url: tab.url, active: tab.active, windowId: tab.windowId }));
     if (query.attach !== false && candidates[0]) {
-      await setActiveTab(session, candidates[0].id);
+      const tabId = candidates[0].id;
+      await setActiveTab(session, tabId);
+      await ensureNetworkCapture(session, { tabId, auto: true, extend: true, scope: "session" });
     }
     return { session, tabs: candidates, tab: candidates[0] || null };
   }
   async function handleAttachTab(args = {}, session) {
     const result = await handleFindTab({ ...args, attach: true }, session);
     if (!result.tab) throw new Error("No matching tab found to attach");
-    await ensureNetworkCapture(session, { tabId: result.tab.id, auto: true, extend: true, scope: "session" });
     return { session, attached: result.tab.id, tab: result.tab, tabs: result.tabs };
   }
   async function handleEvaluate(args = {}, session) {
@@ -2349,7 +2975,7 @@
   async function handleGetText(args = {}, session) {
     const tabId = args?.tabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
-    const scope = args?.scope === "document" ? "document" : "viewport";
+    const scope = args?.scope === "document" ? "document" : args?.scope === "full" ? "full" : "viewport";
     const maxChars = Number.isFinite(args?.maxChars) ? Math.max(0, Math.min(Number(args.maxChars), 2e5)) : 12e3;
     if (scope === "viewport") {
       const observed = await handleObserveCapture({
@@ -2357,31 +2983,33 @@
         maxTextChars: maxChars,
         maxTextRuns: args?.includeRuns === true ? 1e3 : 300
       }, session);
+      const textRuns = args?.includeRuns ? observed.textRuns || [] : void 0;
       return {
         text: observed.visibleText || "",
         truncated: Boolean(observed.truncated),
         caps: observed.caps || { maxTextChars: maxChars },
         url: observed.url || null,
         title: observed.title || "",
-        runs: args?.includeRuns ? observed.textRuns || [] : void 0
+        textRuns,
+        runs: textRuns
       };
+    }
+    if (scope === "document") {
+      const results2 = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: getDocumentTextSnapshot,
+        args: [{ maxChars, includeRuns: args?.includeRuns === true }],
+        world: "MAIN"
+      });
+      return results2[0]?.result || { text: "", truncated: false, caps: { maxChars, scope: "document" }, url: null, title: "" };
     }
     const results = await chrome.scripting.executeScript({
       target: { tabId },
-      func: (limit) => {
-        const raw = (document.body?.innerText || document.documentElement?.innerText || "").replace(/\s+\n/g, "\n").trim();
-        return {
-          text: raw.slice(0, limit),
-          truncated: raw.length > limit,
-          caps: { maxChars: limit, textChars: Math.min(raw.length, limit), totalTextChars: raw.length },
-          url: window.location.href,
-          title: document.title
-        };
-      },
-      args: [maxChars],
+      func: getTextSnapshot,
+      args: [{ scope, maxChars, includeRuns: args?.includeRuns === true, maxTextRuns: args?.includeRuns === true ? 1e3 : 300 }],
       world: "MAIN"
     });
-    return results[0]?.result || { text: "", truncated: false, caps: { maxChars }, url: null, title: "" };
+    return results[0]?.result || { text: "", truncated: false, caps: { maxChars, scope }, url: null, title: "" };
   }
   async function handleScreenshot(args = {}, session) {
     const { format = "png", quality, fullPage = false, file_name, fileName } = args || {};
@@ -2445,9 +3073,11 @@
       init_network_cdp();
       init_snapshot();
       init_observation();
+      init_get_text();
       init_click();
       init_fill();
       init_press();
+      init_scroll();
       init_select_check();
       init_wait_for();
       init_evaluate();
@@ -2631,6 +3261,7 @@
     }
     sessionTabs.delete(session);
     activeSessions.delete(session);
+    await clearPersistedNetworkCapture(session);
     networkCaptures.delete(session);
     return { closed: session, tabCount: tabs.size };
   }
@@ -2688,6 +3319,9 @@
           break;
         case "press":
           result = await handlePress(args, session);
+          break;
+        case "scroll":
+          result = await handleScroll(args, session);
           break;
         case "select_option":
           result = await handleSelectOption(args, session);

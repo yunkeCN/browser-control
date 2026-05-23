@@ -9,6 +9,7 @@ const root = path.resolve(__dirname, '..');
 const serviceWorker = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'extension', 'service-worker.js'), 'utf8');
 const networkCdpSource = fs.readFileSync(path.join(root, 'src', 'extension', 'service-worker', 'handlers', 'network-cdp.ts'), 'utf8');
 const navigationSource = fs.readFileSync(path.join(root, 'src', 'extension', 'service-worker', 'handlers', 'navigation-actions.ts'), 'utf8');
+const artifactTabsSource = fs.readFileSync(path.join(root, 'src', 'extension', 'service-worker', 'handlers', 'artifacts-tabs.ts'), 'utf8');
 const navigationHelpersSource = fs.readFileSync(path.join(root, 'src', 'extension', 'service-worker', 'navigation-helpers.ts'), 'utf8');
 const runtimeMetadataSource = fs.readFileSync(path.join(root, 'src', 'extension', 'service-worker', 'runtime-metadata.ts'), 'utf8');
 const transportSource = fs.readFileSync(path.join(root, 'src', 'extension', 'service-worker', 'transport.ts'), 'utf8');
@@ -91,7 +92,65 @@ test('session network capture and detail merge are represented in service-worker
   assert.match(networkCdpSource, /function mergeNetworkRequest/);
   assert.match(networkCdpSource, /mergeConfidence/);
   assert.match(networkCdpSource, /same method \+ URL|r\.url !== known\.url/);
+  assert.match(networkCdpSource, /NETWORK_API_RESOURCE_TYPES/);
+  assert.doesNotMatch(networkCdpSource, /includeResources/);
+  const listStart = networkCdpSource.indexOf('async function listNetworkRequests');
+  const listEnd = networkCdpSource.indexOf('async function getNetworkRequestDetail', listStart);
+  const listNetworkRequestsSource = networkCdpSource.slice(listStart, listEnd);
+  assert.match(networkCdpSource, /function clampNetworkListLimit/);
+  assert.match(networkCdpSource, /function matchesNetworkListFilters/);
+  assert.match(listNetworkRequestsSource, /requests = requests\.filter\(r => matchesNetworkListFilters\(r, options\)\)/);
+  assert.match(networkCdpSource, /Math\.max\(1,\s*Math\.min\(Math\.floor\(Number\(value\)\),\s*NETWORK_LIST_LIMIT\)\)/);
+  assert.match(listNetworkRequestsSource, /if \(hasTabIdFilter\) requests = requests\.filter\(r => Number\(r\.tabId\) === requestedTabId\)/);
+  assert.match(listNetworkRequestsSource, /omittedUntimestamped \+= 1/);
+  assert.match(listNetworkRequestsSource, /timestampMissing:\s*timestampMs === null/);
+  assert.match(listNetworkRequestsSource, /methodFilter:\s*options\.method/);
+  assert.match(listNetworkRequestsSource, /statusCodeFilter:\s*Number\.isFinite\(options\.statusCode\)/);
+  assert.match(listNetworkRequestsSource, /typeFilter:\s*options\.type/);
+  assert.match(listNetworkRequestsSource, /totalStored:\s*capture\.requests\.length/);
+  assert.match(listNetworkRequestsSource, /requestLimit,\s*\n\s*storageLimit:\s*NETWORK_CAPTURE_LIMIT/);
+  assert.doesNotMatch(listNetworkRequestsSource, /stored:\s*capture\.requests\.length/);
+  assert.doesNotMatch(listNetworkRequestsSource, /limit:\s*NETWORK_CAPTURE_LIMIT/);
   assert.match(navigationSource, /case|handleAttachTab|export async function handleAttachTab/);
+});
+
+test('close_session clears persisted session network capture before dropping memory state', () => {
+  assert.match(artifactTabsSource, /import\s+\{[^}]*clearPersistedNetworkCapture[^}]*networkCaptures[^}]*removeNetworkTab[^}]*\}\s+from\s+['"]\.\/network-cdp['"]/s);
+  const closeSessionStart = artifactTabsSource.indexOf('export async function handleCloseSession');
+  assert.notEqual(closeSessionStart, -1);
+  const closeSession = artifactTabsSource.slice(closeSessionStart, artifactTabsSource.indexOf('\n}', closeSessionStart) + 2);
+  assert.ok(
+    closeSession.indexOf('await clearPersistedNetworkCapture(session)') < closeSession.indexOf('networkCaptures.delete(session)'),
+    'persistent storage should be cleared before in-memory capture state is deleted'
+  );
+  assert.match(networkCdpSource, /export async function clearPersistedNetworkCapture/);
+  assert.match(networkCdpSource, /const pending = networkPersistTimers\.get\(session\)/);
+  assert.match(networkCdpSource, /clearTimeout\(pending\)/);
+  assert.match(networkCdpSource, /networkPersistTimers\.delete\(session\)/);
+  assert.match(networkCdpSource, /chrome\.storage\.local\.remove\(networkStorageKey\(session\)\)/);
+});
+
+
+
+test('scroll command is routed through DOM runtime and CDP wheel fallback semantics', () => {
+  const scrollSource = fs.readFileSync(path.join(root, 'src', 'extension', 'service-worker', 'page-runtime', 'scroll.ts'), 'utf8');
+  assert.match(navigationSource, /export async function handleScroll/);
+  assert.match(navigationSource, /performCdpWheelScroll/);
+  assert.match(navigationSource, /wheel unavailable in auto mode; fell back to dom/);
+  assert.match(navigationSource, /func:\s*performDomScroll/);
+  assert.match(networkCdpSource, /async function performCdpWheelScroll/);
+  assert.match(networkCdpSource, /type:\s*['"]mouseWheel['"]/);
+  assert.match(networkCdpSource, /recoverable:\s*true/);
+  assert.match(networkCdpSource, /captureWheelScrollMetrics/);
+  assert.match(networkCdpSource, /attemptedDeltaY/);
+  assert.match(networkCdpSource, /movedY\s*=\s*Number\(after\?\.scrollY/);
+  assert.doesNotMatch(networkCdpSource, /before:\s*null/);
+  assert.doesNotMatch(networkCdpSource, /movedY:\s*deltaY/);
+  assert.match(scrollSource, /function findScrollContainer/);
+  assert.match(scrollSource, /document\.scrollingElement/);
+  assert.match(serviceWorker, /case\s+['"]scroll['"]:/);
+  assert.match(serviceWorker, /Input\.dispatchMouseEvent/);
+  assert.match(serviceWorker, /mouseWheel/);
 });
 
 test('snapshot filters and get_text are wired through navigation handlers', () => {
