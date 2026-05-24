@@ -27,6 +27,22 @@ export async function handleNetwork(args: CommandArgs = {}, session: SessionName
 export const networkCaptures = new Map<SessionName, NetworkCapture>(); // session -> { requests: [], filter, tabId, auto }
 let debuggerListenerInstalled = false;
 let networkPersistTimers = new Map<SessionName, ReturnType<typeof setTimeout>>();
+const actionDebuggerOwners = new Map<number, { owner: string; warnings?: string[] }>();
+
+const CLICK_PROBE_DEFAULT_WAIT_MS = 1000;
+const CLICK_PROBE_DEFAULT_MAX_REQUESTS = 100;
+const CLICK_PROBE_API_RESOURCE_TYPES = new Set(['fetch', 'xhr', 'xmlhttprequest']);
+const SENSITIVE_FIELD_PATTERN = /(^|[-_.])(cookie|authorization|proxy-authorization|x-api-key|api-key|token|access_token|refresh_token|secret|password|session|csrf|jwt)([-_.]|$)/i;
+
+export interface ClickProbeCapture {
+  blocked: true;
+  mode: 'cdp-fetch-request';
+  waitMs: number;
+  filter: string | null;
+  interceptedCount: number;
+  requests: any[];
+  warnings: string[];
+}
 
 export function networkStorageKey(session: SessionName | null | undefined): string {
   return `${NETWORK_STORAGE_PREFIX}${session || 'default'}`;
@@ -339,6 +355,16 @@ export async function acquireActionDebugger(tabId: number): Promise<ActionDebugg
     return { error: 'chrome.debugger API is unavailable', recoverable: true };
   }
 
+  const actionOwner = actionDebuggerOwners.get(tabId);
+  if (actionOwner) {
+    return {
+      debuggee: { tabId },
+      temporary: false,
+      owner: actionOwner.owner,
+      warnings: actionOwner.warnings || []
+    };
+  }
+
   const networkOwner = findNetworkDebuggerCapture(tabId);
   if (networkOwner) {
     return {
@@ -361,6 +387,19 @@ export async function acquireActionDebugger(tabId: number): Promise<ActionDebugg
   }
 }
 
+export async function acquireNamedActionDebugger(tabId: number, owner: string, warnings: string[] = []): Promise<ActionDebuggerLease> {
+  const lease = await acquireActionDebugger(tabId);
+  if (!lease.error) {
+    actionDebuggerOwners.set(tabId, { owner, warnings });
+  }
+  return lease;
+}
+
+export async function releaseNamedActionDebugger(tabId: number, lease: ActionDebuggerLease): Promise<string | null> {
+  actionDebuggerOwners.delete(tabId);
+  return releaseActionDebugger(lease);
+}
+
 export async function releaseActionDebugger(lease: ActionDebuggerLease): Promise<string | null> {
   if (!lease?.temporary || !lease.debuggee) return null;
   try {
@@ -368,6 +407,182 @@ export async function releaseActionDebugger(lease: ActionDebuggerLease): Promise
     return null;
   } catch (err: any) {
     return `Failed to detach temporary debugger session: ${err?.message || String(err)}`;
+  }
+}
+
+function normalizeClickProbeWaitMs(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return CLICK_PROBE_DEFAULT_WAIT_MS;
+  return Math.max(0, Math.min(10_000, Math.round(numeric)));
+}
+
+function normalizeClickProbeMaxRequests(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return CLICK_PROBE_DEFAULT_MAX_REQUESTS;
+  return Math.max(1, Math.min(500, Math.round(numeric)));
+}
+
+function clickProbeIncludesHeaders(options: any): boolean {
+  return options?.includeHeaders !== false;
+}
+
+function clickProbeIncludesBody(options: any): boolean {
+  return options?.includeBody !== false;
+}
+
+function clickProbeRedactsSensitive(options: any): boolean {
+  return options?.redactSensitive !== false;
+}
+
+function isSensitiveFieldName(name: unknown): boolean {
+  return SENSITIVE_FIELD_PATTERN.test(String(name || ''));
+}
+
+function redactObject(value: any): any {
+  if (Array.isArray(value)) return value.map(item => redactObject(item));
+  if (!value || typeof value !== 'object') return value;
+  const redacted: Record<string, any> = {};
+  for (const [key, child] of Object.entries(value)) {
+    redacted[key] = isSensitiveFieldName(key) ? '[REDACTED]' : redactObject(child);
+  }
+  return redacted;
+}
+
+function maybeRedactHeaders(headers: any, redactSensitive: boolean): any {
+  if (!headers || !redactSensitive) return headers || {};
+  const redacted: Record<string, any> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    redacted[key] = isSensitiveFieldName(key) ? '[REDACTED]' : value;
+  }
+  return redacted;
+}
+
+function parseRequestBody(body: unknown, redactSensitive: boolean): unknown {
+  if (typeof body !== 'string') return body ?? null;
+  const trimmed = body.trim();
+  if (!trimmed) return '';
+  try {
+    const parsed = JSON.parse(trimmed);
+    return redactSensitive ? redactObject(parsed) : parsed;
+  } catch {
+    return redactSensitive ? redactStringBody(trimmed) : trimmed;
+  }
+}
+
+function redactStringBody(value: string): string {
+  const params = new URLSearchParams(value);
+  let matched = false;
+  for (const key of [...params.keys()]) {
+    if (isSensitiveFieldName(key)) {
+      params.set(key, '[REDACTED]');
+      matched = true;
+    }
+  }
+  return matched ? params.toString() : value;
+}
+
+function shouldBlockProbeRequest(params: any, filter: string | null): boolean {
+  const url = String(params?.request?.url || '');
+  if (filter && !url.includes(filter)) return false;
+  const resourceType = String(params?.resourceType || params?.type || '').toLowerCase();
+  return CLICK_PROBE_API_RESOURCE_TYPES.has(resourceType);
+}
+
+function buildProbeRequest(params: any, options: any): any {
+  const request = params?.request || {};
+  const redactSensitive = clickProbeRedactsSensitive(options);
+  const includeBody = clickProbeIncludesBody(options);
+  const includeHeaders = clickProbeIncludesHeaders(options);
+  const body = typeof request.postData === 'string' ? request.postData : null;
+  const result: any = {
+    id: String(params?.requestId || ''),
+    url: String(request.url || ''),
+    method: request.method || null,
+    type: params?.resourceType || params?.type || null,
+    blockedReason: 'probe',
+    redacted: redactSensitive
+  };
+  if (includeHeaders) result.requestHeaders = maybeRedactHeaders(request.headers || {}, redactSensitive);
+  if (includeBody) {
+    result.requestBody = parseRequestBody(body, redactSensitive);
+    result.requestBodyLength = typeof body === 'string' ? body.length : 0;
+  }
+  return result;
+}
+
+export async function runClickProbeCapture<T>(
+  tabId: number,
+  args: any,
+  action: () => Promise<T>
+): Promise<{ result: T; probe: ClickProbeCapture }> {
+  const waitMs = normalizeClickProbeWaitMs(args?.waitMs);
+  const maxRequests = normalizeClickProbeMaxRequests(args?.maxRequests);
+  const filter = typeof args?.filter === 'string' && args.filter ? args.filter : null;
+  const warnings: string[] = [];
+  const requests: any[] = [];
+  let totalIntercepted = 0;
+  let fetchEnabled = false;
+  let listenerInstalled = false;
+
+  const lease = await acquireNamedActionDebugger(tabId, 'click_probe', ['Reusing debugger session owned by click_probe.']);
+  if (lease.error || !lease.debuggee) {
+    throw new Error(`click_probe could not enable CDP request interception: ${lease.error || 'debugger unavailable'}`);
+  }
+
+  const debuggee = lease.debuggee as any;
+  const listener = (source: chrome.debugger.Debuggee, method: string, params: any) => {
+    if (source.tabId !== tabId || method !== 'Fetch.requestPaused') return;
+    const requestId = params?.requestId;
+    if (!requestId) return;
+    const shouldBlock = shouldBlockProbeRequest(params, filter);
+    if (shouldBlock) {
+      totalIntercepted += 1;
+      if (requests.length < maxRequests) requests.push(buildProbeRequest(params, args));
+      chrome.debugger.sendCommand(debuggee, 'Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' }).catch((err: any) => {
+        warnings.push(`Failed to block probed request ${requestId}: ${err?.message || String(err)}`);
+      });
+      return;
+    }
+    chrome.debugger.sendCommand(debuggee, 'Fetch.continueRequest', { requestId }).catch((err: any) => {
+      warnings.push(`Failed to continue nonmatching request ${requestId}: ${err?.message || String(err)}`);
+    });
+  };
+
+  try {
+    chrome.debugger.onEvent.addListener(listener);
+    listenerInstalled = true;
+    await chrome.debugger.sendCommand(debuggee, 'Fetch.enable', {
+      patterns: [{ urlPattern: '*', requestStage: 'Request' }]
+    });
+    fetchEnabled = true;
+
+    const result = await action();
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+    if (totalIntercepted > requests.length) {
+      warnings.push(`click_probe captured ${requests.length} of ${totalIntercepted} intercepted requests; increase maxRequests for more detail.`);
+    }
+
+    return {
+      result,
+      probe: {
+        blocked: true,
+        mode: 'cdp-fetch-request',
+        waitMs,
+        filter,
+        interceptedCount: totalIntercepted,
+        requests,
+        warnings
+      }
+    };
+  } finally {
+    if (fetchEnabled) {
+      try { await chrome.debugger.sendCommand(debuggee, 'Fetch.disable'); } catch (err: any) { warnings.push(`Failed to disable Fetch interception: ${err?.message || String(err)}`); }
+    }
+    if (listenerInstalled) {
+      try { chrome.debugger.onEvent.removeListener(listener); } catch { /* Ignore listener cleanup failures. */ }
+    }
+    const detachWarning = await releaseNamedActionDebugger(tabId, lease);
+    if (detachWarning) warnings.push(detachWarning);
   }
 }
 

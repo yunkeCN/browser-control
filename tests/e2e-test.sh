@@ -92,6 +92,7 @@ write_fixture() {
     <select id="role"><option value="user">User</option><option value="admin">Admin</option></select>
     <label><input id="active" type="checkbox"> Active</label>
     <button id="submit" type="button">Submit</button>
+    <button id="probe" type="button">Probe Create</button>
   </form>
   <pre id="state">not-submitted</pre>
   <a id="download" href="/download.txt" download="browser-control-live-download.txt">Download</a>
@@ -110,6 +111,17 @@ write_fixture() {
         active: document.getElementById('active').checked,
         api: payload.ok
       });
+    });
+    document.getElementById('probe').addEventListener('click', async () => {
+      try {
+        await fetch('/probe-write', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer should-redact' },
+          body: JSON.stringify({ name: 'probe draft', token: 'should-redact' })
+        });
+      } catch (err) {
+        document.getElementById('state').textContent = 'probe-blocked';
+      }
     });
   </script>
 </body>
@@ -188,8 +200,10 @@ info "  Elements found: $ELEMENT_COUNT"
 # Find the input and button elements
 INPUT_REF=$(echo "$SNAP_RESULT" | jq -r '.data.elements[]? | select(.tag=="input" and .attributes.type=="email") | .id' | head -1)
 BUTTON_REF=$(echo "$SNAP_RESULT" | jq -r '.data.elements[]? | select(.tag=="button" and (.visibleText // "" | contains("Submit"))) | .id' | head -1)
+PROBE_REF=$(echo "$SNAP_RESULT" | jq -r '.data.elements[]? | select(.tag=="button" and (.visibleText // "" | contains("Probe Create"))) | .id' | head -1)
 info "  Input @ref: $INPUT_REF"
 info "  Button @ref: $BUTTON_REF"
+info "  Probe @ref: $PROBE_REF"
 
 if [[ -z "$INPUT_REF" || "$INPUT_REF" == "null" ]]; then
   red "  Could not find input element. Snapshot may not contain expected elements."
@@ -207,6 +221,18 @@ if [[ -n "$INPUT_REF" && "$INPUT_REF" != "null" ]]; then
   FILL_MODE=$(echo "$FILL_RESULT" | jq -r '.data.mode // "unknown"')
   check "fill ok" "true" "$FILL_OK"
   info "  Fill mode: $FILL_MODE"
+fi
+
+# ─── Test 5b: Click probe blocks write-like API request ───────────────
+
+if [[ -n "$PROBE_REF" && "$PROBE_REF" != "null" ]]; then
+  info "Test 5b: Probe click captures and blocks API request"
+  PROBE_RESULT=$(api_call "click_probe" "{\"selector\":\"$PROBE_REF\",\"filter\":\"/probe-write\",\"waitMs\":500}")
+  check "click_probe ok" "true" "$(echo "$PROBE_RESULT" | jq -r '.ok // false')"
+  check "click_probe intercepted one request" "1" "$(echo "$PROBE_RESULT" | jq -r '.data.probe.interceptedCount // 0')"
+  check "click_probe method" "POST" "$(echo "$PROBE_RESULT" | jq -r '.data.probe.requests[0].method // ""')"
+  check "click_probe redacts authorization" "[REDACTED]" "$(echo "$PROBE_RESULT" | jq -r '.data.probe.requests[0].requestHeaders.Authorization // .data.probe.requests[0].requestHeaders.authorization // ""')"
+  check "click_probe redacts body token" "[REDACTED]" "$(echo "$PROBE_RESULT" | jq -r '.data.probe.requests[0].requestBody.token // ""')"
 fi
 
 # ─── Test 6: Select, check, wait, press, click ────────────────────────

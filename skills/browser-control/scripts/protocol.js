@@ -11,7 +11,8 @@ const CLI_CAPABILITIES = [
   'navigateFinalMetadata',
   'argsFile',
   'codeFile',
-  'scroll'
+  'scroll',
+  'clickProbe'
 ];
 
 const DAEMON_CAPABILITIES = [
@@ -24,7 +25,8 @@ const DAEMON_CAPABILITIES = [
   'navigateFinalMetadataPassthrough',
   'get_text',
   'sessionNetworkCapture',
-  'snapshotFilters'
+  'snapshotFilters',
+  'clickProbe'
 ];
 
 const EXTENSION_CAPABILITY_HINTS = [
@@ -33,6 +35,7 @@ const EXTENSION_CAPABILITY_HINTS = [
   'observe_start',
   'observe_diff',
   'network',
+  'clickProbe',
   'cdpMouse',
   'cdpKeyboard',
   'cdpWheelScroll',
@@ -51,6 +54,12 @@ const COMMANDS = {
     required: ['selector'],
     optional: ['tabId', 'strategy', 'force', 'button', 'clickCount', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab'],
     example: { selector: '@e1jm0sbb_1', strategy: 'auto', expectChange: true },
+    strategies: ['auto', 'cdp_mouse', 'dom_pointer', 'element_click']
+  },
+  click_probe: {
+    required: ['selector'],
+    optional: ['tabId', 'strategy', 'force', 'button', 'clickCount', 'modifiers', 'observeNewTab', 'expectNewTab', 'waitMs', 'filter', 'includeHeaders', 'includeBody', 'redactSensitive', 'maxRequests'],
+    example: { selector: '@e1jm0sbb_1', strategy: 'auto', filter: '/api/' },
     strategies: ['auto', 'cdp_mouse', 'dom_pointer', 'element_click']
   },
   fill: {
@@ -96,6 +105,7 @@ const LEGACY_ACTION_ALIASES = {
   waitFor: 'wait_for',
   findTab: 'find_tab',
   getText: 'get_text',
+  clickProbe: 'click_probe',
   networkStart: 'network_start',
   networkList: 'network_list',
   networkDetail: 'network_detail',
@@ -160,9 +170,12 @@ function validateRequest(request) {
     throw new ProtocolError('VALIDATION_ERROR', 'files must be an array for command \'upload\'', { field: 'files' });
   }
   validateOptionalStringArg(request, spec, 'filter', [
+    'click_probe',
     'network_start',
     'network_list'
   ]);
+  validateOptionalBooleanArgs(request, ['force', 'observeNewTab', 'expectNewTab', 'includeHeaders', 'includeBody', 'redactSensitive']);
+  validateOptionalNumberArgs(request, ['tabId', 'clickCount', 'waitMs', 'maxRequests']);
   return request;
 }
 
@@ -244,6 +257,34 @@ function validateOptionalStringArg(request, spec, field, commands) {
     actualType: Array.isArray(value) ? 'array' : typeof value,
     hint: `Use args.${field} as a URL substring string, for example {"${field}":"/api/"}, or omit it for no filtering.`
   });
+}
+
+function validateOptionalBooleanArgs(request, fields) {
+  for (const field of fields) {
+    if (!Object.prototype.hasOwnProperty.call(request.args || {}, field)) continue;
+    const value = request.args[field];
+    if (typeof value === 'boolean') continue;
+    throw new ProtocolError('VALIDATION_ERROR', `${field} must be a boolean for command '${request.command}'`, {
+      field,
+      command: request.command,
+      expectedType: 'boolean',
+      actualType: Array.isArray(value) ? 'array' : typeof value
+    });
+  }
+}
+
+function validateOptionalNumberArgs(request, fields) {
+  for (const field of fields) {
+    if (!Object.prototype.hasOwnProperty.call(request.args || {}, field)) continue;
+    const value = request.args[field];
+    if (typeof value === 'number' && Number.isFinite(value)) continue;
+    throw new ProtocolError('VALIDATION_ERROR', `${field} must be a finite number for command '${request.command}'`, {
+      field,
+      command: request.command,
+      expectedType: 'number',
+      actualType: Array.isArray(value) ? 'array' : typeof value
+    });
+  }
 }
 
 function validationDetails(request, spec, field) {

@@ -27,11 +27,27 @@ test('cdp_mouse and cdp_keyboard strategies use Chrome debugger input dispatch',
 
 test('CDP action debugger reuses network capture ownership and only detaches temporary action leases', () => {
   assert.match(networkCdpSource, /function findNetworkDebuggerCapture/);
+  assert.match(networkCdpSource, /actionDebuggerOwners/);
   assert.match(networkCdpSource, /owner:\s*'network_capture'/);
+  assert.match(networkCdpSource, /owner:\s*actionOwner\.owner/);
   assert.match(networkCdpSource, /temporary:\s*false/);
   assert.match(networkCdpSource, /will not detach it after the action/);
   assert.match(networkCdpSource, /if \(!lease\?\.temporary \|\| !lease\.debuggee\) return null/);
   assert.match(networkCdpSource, /temporary:\s*true/);
+});
+
+test('click_probe is represented as a CDP Fetch-blocking click action', () => {
+  assert.match(networkCdpSource, /export async function runClickProbeCapture/);
+  assert.match(networkCdpSource, /Fetch\.enable/);
+  assert.match(networkCdpSource, /Fetch\.failRequest/);
+  assert.match(networkCdpSource, /Fetch\.continueRequest/);
+  assert.match(networkCdpSource, /Fetch\.disable/);
+  assert.match(networkCdpSource, /BlockedByClient/);
+  assert.match(networkCdpSource, /SENSITIVE_FIELD_PATTERN/);
+  assert.match(navigationSource, /export async function handleClickProbe/);
+  assert.match(navigationSource, /performObservedClick\(args,\s*session,\s*tabId\)/);
+  assert.match(runtimeMetadataSource, /['"]clickProbe['"]/);
+  assert.match(serviceWorker, /click_probe/);
 });
 
 test('auto action strategies fall back visibly while explicit CDP strategies return recoverable errors', () => {

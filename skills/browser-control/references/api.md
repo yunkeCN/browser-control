@@ -45,6 +45,7 @@ Browser command helper examples:
 ```bash
 node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{}'
 node skills/browser-control/scripts/browser-control.js command click --session demo --args '{"selector":"@e1jm0sbb_1"}'
+node skills/browser-control/scripts/browser-control.js command click_probe --session demo --args '{"selector":"@e1jm0sbb_1","filter":"/api/"}'
 node skills/browser-control/scripts/browser-control.js command scroll --session demo --args '{"deltaY":800,"strategy":"dom"}'
 node skills/browser-control/scripts/browser-control.js command evaluate --session demo --code-file ./snippet.js
 ```
@@ -166,6 +167,20 @@ Diagnostics may include `strategyUsed`, `target`, `hitTest`, `focusBefore`, `foc
 
 ```json
 {"command":"click","args":{"selector":"@e1jm0sbb_1","strategy":"auto","expectChange":true}}
+```
+
+### `click_probe`
+
+Click an element while blocking matching API requests before they reach the server. Use this to inspect write-like request URLs and parameters during exploration without intentionally creating server-side data.
+
+Arguments: `selector` required, optional `tabId`, `strategy`, `force`, `button`, `clickCount`, `modifiers`, `observeNewTab`, `expectNewTab`, `waitMs`, `filter`, `includeHeaders`, `includeBody`, `redactSensitive`, and `maxRequests`.
+
+Defaults: `waitMs:1000`, `includeHeaders:true`, `includeBody:true`, `redactSensitive:true`, and `maxRequests:100`. By default Browser Control blocks and returns fetch/XHR/XMLHttpRequest requests; when `filter` is set, only API requests whose URL includes the filter are blocked and returned. Nonmatching requests continue normally.
+
+`click_probe` is not a full dry run. The page click still happens and may change frontend state, storage, dialogs, route state, or newly opened tabs. The v1 guarantee is limited to matching requests intercepted on the current tab before reaching the server. If a click opens a new tab, Browser Control warns that the new tab's first requests may not be blocked.
+
+```json
+{"command":"click_probe","args":{"selector":"@e1jm0sbb_1","filter":"/api/","waitMs":1000}}
 ```
 
 ### `fill`

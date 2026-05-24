@@ -31,6 +31,7 @@ export const EXTENSION_CAPABILITIES = [
   'observe_start',
   'observe_diff',
   'network',
+  'clickProbe',
   'cdpEvaluate',
   'cdpMouse',
   'cdpKeyboard',
