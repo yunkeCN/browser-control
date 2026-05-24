@@ -11,7 +11,7 @@
     "test": "npm run build:extension && node --test --test-concurrency=1 tests/*.test.js",
     "lint": "node skills/browser-control/scripts/lint.js",
     "e2e:fixture": "npm run build:extension && node tests/fixture-e2e.test.js",
-    "e2e:live": "bash tests/e2e-test.sh",
+    "e2e:live": "node tests/e2e-test.js",
     "build": "npm run build:extension",
     "build:extension": "node scripts/build-extension.mjs",
     "check:extension-build": "node scripts/check-extension-build-drift.mjs && node tests/extension-build.test.js"

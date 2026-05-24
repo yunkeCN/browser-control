@@ -230,7 +230,7 @@ test('public docs and contracts stay aligned with current command argument surfa
   const contracts = fs.readFileSync(path.join(root, 'contracts.ts'), 'utf8');
   const api = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'references', 'api.md'), 'utf8');
   const recipes = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'references', 'recipes.md'), 'utf8');
-  const screenshotHelper = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'scripts', 'screenshot.sh'), 'utf8');
+  const screenshotHelper = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'scripts', 'screenshot.js'), 'utf8');
 
   assert.match(api, /--args-file <path>/);
   assert.match(api, /--code-file <path>/);

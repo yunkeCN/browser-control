@@ -51,7 +51,7 @@ Live E2E requires Chrome with the generated extension loaded.
 
 The live script starts a local fixture server and covers navigation, snapshot, fill, select, checkbox, keypress, wait, click, evaluate, screenshot artifacts, PDF artifacts when debugger permission is available, network list/detail, direct downloads, multi-tab session metadata, and session cleanup.
 
-If the extension is not loaded, `tests/e2e-test.sh` exits with code `2` and prints recovery steps. Treat that state as an environment blocker, not a product assertion failure.
+If the extension is not loaded, `tests/e2e-test.js` exits with code `2` and prints recovery steps. Treat that state as an environment blocker, not a product assertion failure.
 
 ## Reload Matrix
 

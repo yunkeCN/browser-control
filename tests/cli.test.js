@@ -9,6 +9,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const cli = path.join(__dirname, '..', 'skills', 'browser-control', 'scripts', 'browser-control.js');
+const support = require('../skills/browser-control/scripts/support');
 
 function spawnCli(args, env) {
   return new Promise((resolve) => {
@@ -51,6 +52,49 @@ test('doctor --json returns daemon/chrome/extension sections', () => {
   assert.equal(typeof parsed.ok, 'boolean');
 });
 
+test('support defaults Chrome user-data paths per operating system', () => {
+  assert.match(support.defaultChromeUserDataDir('win32'), /Google[\\/]Chrome[\\/]User Data$/);
+  assert.match(support.defaultChromeUserDataDir('darwin'), /Library[\\/]Application Support[\\/]Google[\\/]Chrome$/);
+  assert.match(support.defaultChromeUserDataDir('linux'), /\.config[\\/]google-chrome$/);
+});
+
+test('support detects Browser Control extension installed in a non-default Chrome profile', () => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-control-chrome-profile-'));
+  const defaultProfile = path.join(userData, 'Default');
+  const installedProfile = path.join(userData, 'Profile 2');
+  const extensionPath = path.join(path.resolve(__dirname, '..'), 'skills', 'browser-control', 'extension');
+  fs.mkdirSync(defaultProfile, { recursive: true });
+  fs.mkdirSync(installedProfile, { recursive: true });
+  fs.writeFileSync(path.join(userData, 'Local State'), JSON.stringify({
+    profile: {
+      last_used: 'Default',
+      last_active_profiles: ['Default', 'Profile 2']
+    }
+  }));
+  fs.writeFileSync(path.join(defaultProfile, 'Secure Preferences'), JSON.stringify({ extensions: { settings: {} } }));
+  fs.writeFileSync(path.join(installedProfile, 'Secure Preferences'), JSON.stringify({
+    extensions: {
+      settings: {
+        lalpaaopaejaejbchhlfggfnlafkcldd: {
+          state: 1,
+          path: extensionPath,
+          manifest: { name: 'Browser Control', version: '1.2.0' }
+        }
+      }
+    }
+  }));
+
+  const matches = support.detectLoadedExtensions({ userData, sourceDirs: [extensionPath] });
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].profileName, 'Profile 2');
+  assert.equal(matches[0].loadedFrom, 'source');
+  assert.equal(matches[0].matchedBy, 'manifest-or-path');
+
+  const selected = support.detectLoadedExtension({ userData, sourceDirs: [extensionPath] });
+  assert.equal(selected.installed, true);
+  assert.equal(selected.profileName, 'Profile 2');
+});
+
 test('doctor warns when reachable daemon has old health/status shape', async (t) => {
   const server = http.createServer((req, res) => {
     if (req.url === '/status') {
@@ -87,6 +131,7 @@ test('doctor warns when reachable daemon has old health/status shape', async (t)
   assert.equal(parsed.extension.loaded.extensionId, 'lalpaaopaejaejbchhlfggfnlafkcldd');
   assert.equal(parsed.extension.loaded.loadedFrom, 'source');
   assert.equal(parsed.extension.loaded.matchedBy, 'manifest-or-path');
+  assert.equal(parsed.extension.loadedProfiles.length, 1);
 });
 
 test('doctor warns when extension runtime version differs from cli', async (t) => {

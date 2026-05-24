@@ -28,8 +28,8 @@ Repository support paths:
 
 ## For AI agents
 
-- Before browser operations, verify readiness with `node skills/browser-control/scripts/browser-control.js doctor --json` or `bash skills/browser-control/scripts/health-check.sh`.
-- Use `skills/browser-control/scripts/screenshot.sh` for screenshots; do not paste raw screenshot/PDF base64 into context.
+- Before browser operations, verify readiness with `node skills/browser-control/scripts/browser-control.js doctor --json` or `node skills/browser-control/scripts/health-check.js --json`.
+- Use `node skills/browser-control/scripts/screenshot.js` for screenshots; do not paste raw screenshot/PDF base64 into context.
 - Take a `snapshot` before `@e` interactions; prefer `@e` references over ad-hoc CSS selectors.
 - Use separate sessions for independent tasks and call `close_session` when done.
 - All communication is localhost-only by design; confirm before submitting sensitive, destructive, purchase, or account-affecting actions.

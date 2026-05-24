@@ -14,7 +14,9 @@ test('root package exposes required verification scripts', () => {
     assert.equal(typeof pkg.scripts[script], 'string', `${script} script is required`);
   }
   assert.match(pkg.scripts.build, /build:extension/);
-  assert.match(pkg.scripts['build:extension'], /scripts\/build-extension\.mjs/);
+  assert.match(pkg.scripts['build:extension'], /scripts[\\/]build-extension\.mjs/);
+  assert.match(pkg.scripts['e2e:live'], /node tests[\\/]e2e-test\.js/);
+  assert.doesNotMatch(pkg.scripts['e2e:live'], /bash|\.sh/);
   assert.equal(pkg.bin['browser-control'], './skills/browser-control/scripts/browser-control.js');
 });
 
@@ -42,15 +44,23 @@ test('skill-local script package points at browser-control.js', () => {
 });
 
 test('screenshot helper is syntactically valid and handles artifact-backed responses', () => {
-  const script = path.join(root, 'skills', 'browser-control', 'scripts', 'screenshot.sh');
-  const syntax = spawnSync('bash', ['-n', script], { encoding: 'utf8' });
+  const script = path.join(root, 'skills', 'browser-control', 'scripts', 'screenshot.js');
+  const syntax = spawnSync(process.execPath, ['--check', script], { encoding: 'utf8' });
   assert.equal(syntax.status, 0, syntax.stderr || syntax.stdout);
 
   const source = fs.readFileSync(script, 'utf8');
-  assert.match(source, /command: \$command/);
-  assert.match(source, /data\.artifact\.path/);
-  assert.match(source, /artifacts\[0\]\.path/);
-  assert.match(source, /cp "\$ARTIFACT_PATH" "\$OUTPUT_PATH"/);
+  assert.match(source, /command: 'screenshot'/);
+  assert.match(source, /data\?\.artifact\?\.path/);
+  assert.match(source, /artifacts\?\.\[0\]\?\.path/);
+  assert.match(source, /fs\.copyFileSync\(artifactPath, targetPath\)/);
+});
+
+test('published helper scripts use JavaScript entrypoints, not shell helpers', () => {
+  const scriptsDir = path.join(root, 'skills', 'browser-control', 'scripts');
+  for (const helper of ['health-check', 'check-daemon', 'check-extension', 'open-chrome', 'screenshot', 'session-cleanup']) {
+    assert.equal(fs.existsSync(path.join(scriptsDir, `${helper}.js`)), true, `${helper}.js should exist`);
+    assert.equal(fs.existsSync(path.join(scriptsDir, `${helper}.sh`)), false, `${helper}.sh should not be published`);
+  }
 });
 
 

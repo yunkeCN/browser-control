@@ -321,9 +321,9 @@ to the front so the screenshot matches the returned tab metadata, then
 best-effort restores the previously active tab. Responses may include
 `activatedTabForCapture` and `restoredActiveTabId` diagnostics.
 
-Use `bash skills/browser-control/scripts/screenshot.sh` for routine screenshots so the agent receives a file path instead of large image data.
+Use `node skills/browser-control/scripts/screenshot.js` for routine screenshots so the agent receives a file path instead of large image data.
 
-The daemon persists returned screenshot base64 into an artifact and strips the raw payload from the normal envelope. Consumers should use `data.artifact.path` or `artifacts[0].path`; `scripts/screenshot.sh` accepts both artifact-backed and raw-base64 response shapes.
+The daemon persists returned screenshot base64 into an artifact and strips the raw payload from the normal envelope. Consumers should use `data.artifact.path` or `artifacts[0].path`; `scripts/screenshot.js` accepts both artifact-backed and raw-base64 response shapes.
 
 ### `save_as_pdf`
 
@@ -427,10 +427,14 @@ skills/browser-control/
 │   ├── daemon.js
 │   ├── protocol.js
 │   ├── artifact-store.js
+│   ├── support.js
 │   ├── vendor/ws/
-│   ├── health-check.sh
-│   ├── screenshot.sh
-│   └── session-cleanup.sh
+│   ├── check-daemon.js
+│   ├── check-extension.js
+│   ├── health-check.js
+│   ├── open-chrome.js
+│   ├── screenshot.js
+│   └── session-cleanup.js
 └── references/
     ├── api.md
     ├── decision-guide.md

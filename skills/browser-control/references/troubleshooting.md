@@ -5,7 +5,7 @@
 ```bash
 node skills/browser-control/scripts/browser-control.js status --json
 node skills/browser-control/scripts/browser-control.js doctor --json
-bash skills/browser-control/scripts/health-check.sh
+node skills/browser-control/scripts/health-check.js --json
 ```
 
 Confirm all three layers:
@@ -75,8 +75,8 @@ The editable extension source path is `<repo>/src/extension`; the Chrome Load un
 Use helper scripts instead of embedding base64 in the conversation:
 
 ```bash
-bash skills/browser-control/scripts/health-check.sh
-bash skills/browser-control/scripts/screenshot.sh -s demo -p
+node skills/browser-control/scripts/health-check.js --json
+node skills/browser-control/scripts/screenshot.js -s demo -p
 ```
 
 Artifacts are written under `~/.browser-control/artifacts` unless `BROWSER_CONTROL_ARTIFACT_DIR` is set.

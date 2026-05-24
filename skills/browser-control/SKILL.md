@@ -20,7 +20,7 @@ Run commands from this skill directory unless `browser-control` is already on `P
 ```bash
 node scripts/browser-control.js start --json
 node scripts/browser-control.js doctor --json
-bash scripts/health-check.sh
+node scripts/health-check.js --json
 ```
 
 The daemon listens on `http://127.0.0.1:10087` by default and the extension connects to `ws://127.0.0.1:10087/ws`.
@@ -35,7 +35,7 @@ The daemon listens on `http://127.0.0.1:10087` by default and the extension conn
 6. Use `@e` references (format `@e<structureId>_<revision>`) from the latest snapshot for `click`, `fill`, `press`, `select_option`, and `set_checked`; refresh the snapshot after navigation or significant DOM changes. Stale revisions fail closed with `STALE_ELEMENT_REFERENCE`. Use `scroll` for non-keyboard page or region scrolling; fall back to stable CSS only when needed.
 7. Use default action strategies first (`click.strategy:"auto"`, `fill.strategy:"native_setter"`, `press.strategy:"auto"`). Inspect `warnings`, `hitTest`, and no-delta diagnostics before retrying with another strategy.
 8. Use `force:true` only after confirming that a covering overlay or hit-test mismatch is intentional and safe to bypass. Prefer fixing the target locator or closing the overlay.
-9. Verify important state-changing actions with `expectChange`, `observe_start` / `observe_diff`, `snapshot`, `wait_for`, or `scripts/screenshot.sh` when visual evidence matters.
+9. Verify important state-changing actions with `expectChange`, `observe_start` / `observe_diff`, `snapshot`, `wait_for`, or `node scripts/screenshot.js` when visual evidence matters.
 10. Stop and ask before sensitive, destructive, account-changing, purchase/payment, upload, submit/send/post/publish, credential, MFA, or permission-grant actions.
 11. Close task-specific tabs or sessions with `close_tab` / `close_session` when finished.
 
@@ -98,12 +98,12 @@ For quick single-action verification, `click`, `fill`, and `press` can use `expe
 Do not paste raw screenshot or PDF base64 into context. Use bundled artifact helpers:
 
 ```bash
-bash scripts/screenshot.sh -s demo -f png
+node scripts/screenshot.js -s demo -f png
 ```
 
 Artifact-producing commands return file references and metadata. Default artifact storage is `~/.browser-control/artifacts`; override it with `BROWSER_CONTROL_ARTIFACT_DIR` when needed.
 
-`screenshot` and `save_as_pdf` responses intentionally omit raw base64 after the daemon persists the file. Read the returned artifact path from `data.artifact.path` or `artifacts[0].path`; the `scripts/screenshot.sh` helper does this and prints only the saved file path.
+`screenshot` and `save_as_pdf` responses intentionally omit raw base64 after the daemon persists the file. Read the returned artifact path from `data.artifact.path` or `artifacts[0].path`; the `scripts/screenshot.js` helper does this and prints only the saved file path.
 
 ## Confirmation boundaries
 

@@ -73,6 +73,7 @@ Run commands from `skills/browser-control/` unless `browser-control` is already 
 ```bash
 node scripts/browser-control.js status --json
 node scripts/browser-control.js doctor --json
+node scripts/health-check.js --json
 node scripts/browser-control.js command snapshot --session demo --args '{}'
 node scripts/browser-control.js command get_text --session demo --args '{"scope":"viewport","maxChars":4000}'
 ```

@@ -11,6 +11,12 @@ const {
   RUNTIME_SCHEMA_VERSION,
   CLI_CAPABILITIES
 } = require('./protocol');
+const {
+  defaultChromeUserDataDir,
+  detectLoadedExtension: detectLoadedExtensionPortable,
+  detectLoadedExtensions: detectLoadedExtensionsPortable,
+  findChrome: findChromePortable
+} = require('./support');
 
 const BROWSER_CONTROL_HOME = process.env.BROWSER_CONTROL_HOME || path.join(os.homedir(), '.browser-control');
 const LOG_DIR = BROWSER_CONTROL_HOME;
@@ -25,7 +31,7 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const SKILL_EXTENSION_DIR = path.join(SKILL_ROOT, 'extension');
 const SOURCE_EXTENSION_DIR = resolveExtensionDir();
 const CHROME_EXTENSION_ID = process.env.CODEX_CHROME_EXTENSION_ID || 'jfmjfhklogoienhpfnppmbcbjfjnkonk';
-const CHROME_USER_DATA = process.env.CODEX_CHROME_USER_DATA_DIR || path.join(os.homedir(), 'Library', 'Application Support', 'Google', 'Chrome');
+const CHROME_USER_DATA = process.env.CODEX_CHROME_USER_DATA_DIR || defaultChromeUserDataDir();
 
 function wantsJson(args) { return args.includes('--json'); }
 function printJson(data) { console.log(JSON.stringify(data, null, 2)); }
@@ -97,94 +103,20 @@ function isBrowserControlResponse(response) {
   return Boolean(response && response.status === 200 && data && (data.running === true || data.status === 'ok') && data.version);
 }
 
-function readJsonFile(file) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
-}
-
-function realPathMaybe(file) {
-  try { return fs.realpathSync(file); } catch { return file || null; }
-}
-
-function findChromeProfile(userData = CHROME_USER_DATA) {
-  const localState = readJsonFile(path.join(userData, 'Local State'));
-  const candidates = [];
-  const profile = localState?.profile || {};
-  if (profile.last_used) candidates.push(profile.last_used);
-  if (Array.isArray(profile.last_active_profiles)) candidates.push(...profile.last_active_profiles);
-  candidates.push('Default');
-  try {
-    for (const entry of fs.readdirSync(userData, { withFileTypes: true })) {
-      if (entry.isDirectory() && /^Profile\b/.test(entry.name)) candidates.push(entry.name);
-    }
-  } catch {}
-  for (const name of [...new Set(candidates)]) {
-    const profilePath = path.join(userData, name);
-    if (fs.existsSync(path.join(profilePath, 'Preferences')) || fs.existsSync(path.join(profilePath, 'Secure Preferences'))) {
-      return { name, path: profilePath };
-    }
-  }
-  return { name: 'Default', path: path.join(userData, 'Default') };
-}
-
-function loadedFromKind(loadedPath) {
-  const loaded = realPathMaybe(loadedPath);
-  const sources = [SOURCE_EXTENSION_DIR, SKILL_EXTENSION_DIR].map(realPathMaybe).filter(Boolean);
-  if (!loaded) return 'unknown';
-  if (sources.some(source => loaded === source || loaded.startsWith(`${source}${path.sep}`))) return 'source';
-  return 'other';
-}
-
-function extensionSettingMatches(ext) {
-  const manifestName = ext?.manifest?.name || ext?.manifest?.short_name || '';
-  const extPath = ext?.path || '';
-  return /Browser Control/i.test(manifestName) || /browser-control/i.test(String(extPath));
-}
-
-function extensionRecord(extensionId, ext, profile, file) {
-  let loadedPath = ext.path || null;
-  if (loadedPath && !path.isAbsolute(loadedPath)) loadedPath = path.resolve(profile.path, loadedPath);
-  return {
-    extensionId,
-    profileName: profile.name,
-    profilePath: profile.path,
-    preferencesFile: file,
-    installed: true,
-    state: ext.state ?? null,
-    loadedPath,
-    loadedFrom: loadedFromKind(loadedPath),
-    manifestName: ext.manifest?.name || null,
-    manifestVersion: ext.manifest?.version || null
-  };
-}
-
 function detectLoadedExtension() {
-  const profile = findChromeProfile();
-  const files = ['Secure Preferences', 'Preferences'].map(name => path.join(profile.path, name));
-  const fallbackMatches = [];
-  for (const file of files) {
-    const data = readJsonFile(file);
-    const settings = data?.extensions?.settings || {};
-    const ext = settings[CHROME_EXTENSION_ID];
-    if (ext) return extensionRecord(CHROME_EXTENSION_ID, ext, profile, file);
-    for (const [extensionId, candidate] of Object.entries(settings)) {
-      if (extensionSettingMatches(candidate)) fallbackMatches.push(extensionRecord(extensionId, candidate, profile, file));
-    }
-  }
-  if (fallbackMatches.length) {
-    return {
-      ...fallbackMatches[0],
-      matchedBy: 'manifest-or-path',
-      configuredExtensionId: CHROME_EXTENSION_ID
-    };
-  }
-  return {
+  return detectLoadedExtensionPortable({
     extensionId: CHROME_EXTENSION_ID,
-    profileName: profile.name,
-    profilePath: profile.path,
-    installed: false,
-    loadedPath: null,
-    loadedFrom: 'unknown'
-  };
+    userData: CHROME_USER_DATA,
+    sourceDirs: [SOURCE_EXTENSION_DIR, SKILL_EXTENSION_DIR]
+  });
+}
+
+function detectLoadedExtensions() {
+  return detectLoadedExtensionsPortable({
+    extensionId: CHROME_EXTENSION_ID,
+    userData: CHROME_USER_DATA,
+    sourceDirs: [SOURCE_EXTENSION_DIR, SKILL_EXTENSION_DIR]
+  });
 }
 
 function cliRuntimeMetadata() {
@@ -364,26 +296,46 @@ function showE2eHelp() {
   console.log(`Precondition for live E2E: load ${SOURCE_EXTENSION_DIR} in chrome://extensions, then ensure daemon status shows connected.`);
 }
 
+function formatLogLine(line) {
+  try {
+    const entry = JSON.parse(line);
+    return `${(entry.timestamp || '?').replace('T', ' ').slice(0, 19)} [${(entry.level || '?').padEnd(5)}] ${entry.message}`;
+  } catch {
+    return line;
+  }
+}
+
+function readLastLogLines(lines) {
+  return fs.readFileSync(LOG_FILE, 'utf8').trim().split('\n').filter(Boolean).slice(-lines);
+}
+
 async function showLogs(lines = 100, follow = false) {
   if (!fs.existsSync(LOG_FILE)) { console.log('No log file found.'); return; }
-  if (follow) { const tail = spawn('tail', ['-n', String(lines), '-f', LOG_FILE], { stdio: 'inherit' }); return new Promise(() => tail); }
-  const logLines = fs.readFileSync(LOG_FILE, 'utf8').trim().split('\n').filter(Boolean).slice(-lines);
-  for (const line of logLines) { try { const e = JSON.parse(line); console.log(`${(e.timestamp || '?').replace('T',' ').slice(0,19)} [${(e.level || '?').padEnd(5)}] ${e.message}`); } catch { console.log(line); } }
+  for (const line of readLastLogLines(lines)) console.log(formatLogLine(line));
+  if (!follow) return;
+  let offset = fs.statSync(LOG_FILE).size;
+  fs.watchFile(LOG_FILE, { interval: 500 }, (current, previous) => {
+    if (current.size < previous.size) offset = 0;
+    if (current.size <= offset) return;
+    const stream = fs.createReadStream(LOG_FILE, { start: offset, end: current.size - 1, encoding: 'utf8' });
+    offset = current.size;
+    let buffer = '';
+    stream.on('data', chunk => { buffer += chunk; });
+    stream.on('end', () => {
+      for (const line of buffer.split('\n').filter(Boolean)) console.log(formatLogLine(line));
+    });
+  });
+  return new Promise(() => {});
 }
 function findChrome() {
-  const platform = process.platform;
-  const candidates = platform === 'darwin'
-    ? ['/Applications/Google Chrome.app', path.join(os.homedir(), 'Applications/Google Chrome.app')]
-    : platform === 'win32'
-      ? [path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Google/Chrome/Application/chrome.exe'), path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Google/Chrome/Application/chrome.exe')]
-      : ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/snap/bin/chromium'];
-  return candidates.find(fs.existsSync) || null;
+  return findChromePortable();
 }
 async function diagnose(kind, json = false) {
   const daemon = await statusData();
   const chromePath = findChrome();
   const extensionSource = hasExtensionManifest(SOURCE_EXTENSION_DIR) ? SOURCE_EXTENSION_DIR : null;
-  const loadedExtension = detectLoadedExtension();
+  const loadedExtensions = detectLoadedExtensions();
+  const loadedExtension = loadedExtensions[0] || detectLoadedExtension();
   const cli = cliRuntimeMetadata();
   const runtimeWarnings = buildRuntimeWarnings(daemon, cli);
   const data = {
@@ -396,6 +348,7 @@ async function diagnose(kind, json = false) {
       sourcePath: extensionSource,
       connected: !!daemon.extension_connected,
       loaded: loadedExtension,
+      loadedProfiles: loadedExtensions,
       runtime: daemon.runtime?.extension || null
     },
     runtimeDiagnostics: {

@@ -27,7 +27,7 @@ Regression tests for the Browser Control two-module architecture. The suite cove
 | `extension-build.test.js` | Generated extension output, manifest, and runtime bundle behavior. |
 | `package-scripts.test.js` | Root package scripts and bin entrypoints. |
 | `skill-docs.test.js` | Skill instructions and reference docs coverage. |
-| `e2e-test.sh` | Live Chrome extension smoke test. |
+| `e2e-test.js` | Live Chrome extension smoke test. |
 
 ## Test commands
 

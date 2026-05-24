@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node daemon.js",
     "cli": "node browser-control.js",
-    "typecheck": "node --check daemon.js && node --check browser-control.js && node --check protocol.js && node --check artifact-store.js",
+    "typecheck": "node --check daemon.js && node --check browser-control.js && node --check protocol.js && node --check artifact-store.js && node --check support.js && node --check health-check.js && node --check check-daemon.js && node --check check-extension.js && node --check open-chrome.js && node --check screenshot.js && node --check session-cleanup.js",
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {

@@ -77,6 +77,7 @@ Browser Control 需要在 Chrome 中加载随 Skill 附带的扩展。
 ```bash
 node scripts/browser-control.js status --json
 node scripts/browser-control.js doctor --json
+node scripts/health-check.js --json
 node scripts/browser-control.js command snapshot --session demo --args '{}'
 node scripts/browser-control.js command get_text --session demo --args '{"scope":"viewport","maxChars":4000}'
 ```

@@ -113,7 +113,7 @@ Stop/ask conditions: uncertainty about consequences, payment, deletion, account/
 Use screenshots for visual evidence, layout checks, or when text snapshots are insufficient.
 
 ```bash
-bash scripts/screenshot.sh -s visual-check -f png
+node scripts/screenshot.js -s visual-check -f png
 ```
 
 For a session-bound target tab, screenshot capture may briefly bring that tab to
@@ -186,7 +186,7 @@ Always clean task-specific state unless the user asks to keep tabs open.
 
 ```bash
 node scripts/browser-control.js command close_session --session demo --args '{}'
-bash scripts/session-cleanup.sh --dry-run
+node scripts/session-cleanup.js --dry-run
 ```
 
 Verification evidence: `close_session` response or `list_tabs` shows no remaining task tabs.

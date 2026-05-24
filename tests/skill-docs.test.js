@@ -45,7 +45,7 @@ test('recipes reference covers common browser automation tasks', () => {
     assert.match(recipes, new RegExp(heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
   assert.match(recipes, /@e/);
-  assert.match(recipes, /screenshot\.sh/);
+  assert.match(recipes, /screenshot\.js/);
   assert.doesNotMatch(recipes, /base64 into context/i);
   assert.match(recipes, /first-class `scroll`/);
 });
