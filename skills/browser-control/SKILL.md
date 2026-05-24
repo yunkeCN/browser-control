@@ -46,6 +46,7 @@ Send typed command envelopes to `POST http://127.0.0.1:10087/command` or use the
 ```bash
 node scripts/browser-control.js command snapshot --session demo --args '{}'
 node scripts/browser-control.js command click --session demo --args '{"selector":"@e1jm0sbb_1"}'
+node scripts/browser-control.js command click_probe --session demo --args '{"selector":"@e1jm0sbb_1"}'
 node scripts/browser-control.js command click --session demo --args '{"selector":"@e1jm0sbb_1","expectChange":true}'
 node scripts/browser-control.js command fill --session demo --args '{"selector":"@e0abc12_1","value":"draft text"}'
 node scripts/browser-control.js command get_text --session demo --args '{"scope":"viewport","maxChars":4000}'
@@ -69,7 +70,7 @@ Envelope shape:
 }
 ```
 
-Common commands: `navigate`, `find_tab`, `snapshot`, `click`, `fill`, `press`, `scroll`, `select_option`, `set_checked`, `wait_for`, `evaluate`, `get_text`, `screenshot`, `save_as_pdf`, `observe_start`, `observe_diff`, `network_start`, `network_list`, `network_detail`, `network_stop`, `upload`, `download`, `list_tabs`, `close_tab`, and `close_session`.
+Common commands: `navigate`, `find_tab`, `snapshot`, `click`, `click_probe`, `fill`, `press`, `scroll`, `select_option`, `set_checked`, `wait_for`, `evaluate`, `get_text`, `screenshot`, `save_as_pdf`, `observe_start`, `observe_diff`, `network_start`, `network_list`, `network_detail`, `network_stop`, `upload`, `download`, `list_tabs`, `close_tab`, and `close_session`.
 
 Load `references/api.md` for the full command and CLI reference.
 

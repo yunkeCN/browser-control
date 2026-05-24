@@ -63,6 +63,40 @@ test('protocol keeps action strategy diagnostics args backward compatible', () =
   assert.deepEqual(COMMANDS.press.strategies, ['auto', 'cdp_keyboard', 'dom_keyboard']);
 });
 
+test('protocol validates click_probe args and keeps it separate from action observation', () => {
+  const probe = validateRequest(normalizeRequest({
+    command: 'click_probe',
+    args: {
+      selector: '@e1',
+      strategy: 'cdp_mouse',
+      force: true,
+      button: 'left',
+      clickCount: 1,
+      modifiers: ['Shift'],
+      observeNewTab: false,
+      expectNewTab: false,
+      waitMs: 1000,
+      filter: '/api/',
+      includeHeaders: true,
+      includeBody: true,
+      redactSensitive: true,
+      maxRequests: 10
+    }
+  }));
+  assert.equal(probe.command, 'click_probe');
+  assert.equal(probe.args.filter, '/api/');
+  assert.deepEqual(COMMANDS.click_probe.strategies, COMMANDS.click.strategies);
+  assert.equal(COMMANDS.click_probe.optional.includes('expectChange'), false);
+  assert.equal(COMMANDS.click_probe.optional.includes('observe'), false);
+
+  assert.throws(
+    () => validateRequest(normalizeRequest({ command: 'click_probe', args: { selector: '@e1', includeBody: 'yes' } })),
+    err => err instanceof ProtocolError &&
+      err.code === 'VALIDATION_ERROR' &&
+      err.details?.field === 'includeBody'
+  );
+});
+
 test('protocol docs and TypeScript contracts expose action observe options and navigate result shape', () => {
   const root = path.resolve(__dirname, '..');
   const contracts = fs.readFileSync(path.join(path.resolve(__dirname, '..'), 'contracts.ts'), 'utf8');
@@ -70,6 +104,9 @@ test('protocol docs and TypeScript contracts expose action observe options and n
 
   for (const option of ['strategy', 'force', 'button', 'clickCount', 'modifiers', 'expectChange', 'observe']) {
     assert.match(contracts, new RegExp(`click: \\{[^}]*${option}`, 's'));
+  }
+  for (const option of ['strategy', 'force', 'button', 'clickCount', 'modifiers', 'waitMs', 'filter', 'includeHeaders', 'includeBody', 'redactSensitive', 'maxRequests']) {
+    assert.match(contracts, new RegExp(`click_probe: \\{[^}]*${option}`, 's'));
   }
   for (const option of ['strategy', 'clear', 'commit', 'expectChange', 'observe']) {
     assert.match(contracts, new RegExp(`fill: \\{[^}]*${option}`, 's'));
@@ -81,6 +118,8 @@ test('protocol docs and TypeScript contracts expose action observe options and n
   assert.match(contracts, /export interface NavigateResult/);
   assert.match(contracts, /navigationComplete:\s*boolean/);
   assert.match(api, /Stable response fields:/);
+  assert.match(api, /`click_probe`/);
+  assert.match(api, /not a full dry run/);
   assert.doesNotMatch(contracts, /urlContains|titleContains/);
   assert.doesNotMatch(api, /urlContains|titleContains/);
   assert.match(api, /intentionally loose/);

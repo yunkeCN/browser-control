@@ -1,6 +1,6 @@
 import { createArtifactHint, getTabMetadata } from '../runtime-metadata';
 import { getActiveTabId, setActiveTab } from '../sessions';
-import { ensureNetworkCapture, performCdpEvaluate, performCdpKeyboardPress, performCdpMouseClick, performCdpWheelScroll } from './network-cdp';
+import { ensureNetworkCapture, performCdpEvaluate, performCdpKeyboardPress, performCdpMouseClick, performCdpWheelScroll, runClickProbeCapture } from './network-cdp';
 import { getAccessibilitySnapshot } from '../page-runtime/snapshot';
 import { captureViewportTextObservation } from '../page-runtime/observation';
 import { getDocumentTextSnapshot, getTextSnapshot } from '../page-runtime/get-text';
@@ -152,6 +152,36 @@ export async function handleClick(args: CommandArgs = {}, session: SessionName):
 
   const tabId = argTabId || getActiveTabId(session);
   if (!tabId) throw new Error('No active tab in session');
+  return performObservedClick(args, session, tabId);
+}
+
+export async function handleClickProbe(args: CommandArgs = {}, session: SessionName): Promise<any> {
+  const { selector, tabId: argTabId } = args || {};
+  if (!selector) throw new Error('selector is required for click_probe');
+
+  const tabId = argTabId || getActiveTabId(session);
+  if (!tabId) throw new Error('No active tab in session');
+
+  const { result, probe } = await runClickProbeCapture(tabId, args, () => performObservedClick(args, session, tabId));
+  const warnings = [
+    ...((result as any)?.warnings || []),
+    ...(probe.warnings || [])
+  ];
+  if ((result as any)?.newTab || ((result as any)?.newTabs && (result as any).newTabs.length)) {
+    warnings.push('click_probe does not guarantee blocking first requests from newly opened tabs.');
+  }
+  return {
+    ...(result as any),
+    warnings,
+    probe: {
+      ...probe,
+      warnings: probe.warnings || []
+    }
+  };
+}
+
+async function performObservedClick(args: CommandArgs = {}, session: SessionName, tabId: number): Promise<any> {
+  const { selector } = args || {};
   const strategy = args?.strategy || 'auto';
   const beforeIds = await beginNewTabWatch();
 

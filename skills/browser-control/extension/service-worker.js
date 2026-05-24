@@ -89,6 +89,7 @@
         "observe_start",
         "observe_diff",
         "network",
+        "clickProbe",
         "cdpEvaluate",
         "cdpMouse",
         "cdpKeyboard",
@@ -528,6 +529,15 @@
     if (!chrome.debugger?.sendCommand) {
       return { error: "chrome.debugger API is unavailable", recoverable: true };
     }
+    const actionOwner = actionDebuggerOwners.get(tabId);
+    if (actionOwner) {
+      return {
+        debuggee: { tabId },
+        temporary: false,
+        owner: actionOwner.owner,
+        warnings: actionOwner.warnings || []
+      };
+    }
     const networkOwner = findNetworkDebuggerCapture(tabId);
     if (networkOwner) {
       return {
@@ -548,6 +558,17 @@
       };
     }
   }
+  async function acquireNamedActionDebugger(tabId, owner, warnings = []) {
+    const lease = await acquireActionDebugger(tabId);
+    if (!lease.error) {
+      actionDebuggerOwners.set(tabId, { owner, warnings });
+    }
+    return lease;
+  }
+  async function releaseNamedActionDebugger(tabId, lease) {
+    actionDebuggerOwners.delete(tabId);
+    return releaseActionDebugger(lease);
+  }
   async function releaseActionDebugger(lease) {
     if (!lease?.temporary || !lease.debuggee) return null;
     try {
@@ -555,6 +576,167 @@
       return null;
     } catch (err) {
       return `Failed to detach temporary debugger session: ${err?.message || String(err)}`;
+    }
+  }
+  function normalizeClickProbeWaitMs(value) {
+    const numeric2 = Number(value);
+    if (!Number.isFinite(numeric2)) return CLICK_PROBE_DEFAULT_WAIT_MS;
+    return Math.max(0, Math.min(1e4, Math.round(numeric2)));
+  }
+  function normalizeClickProbeMaxRequests(value) {
+    const numeric2 = Number(value);
+    if (!Number.isFinite(numeric2)) return CLICK_PROBE_DEFAULT_MAX_REQUESTS;
+    return Math.max(1, Math.min(500, Math.round(numeric2)));
+  }
+  function clickProbeIncludesHeaders(options) {
+    return options?.includeHeaders !== false;
+  }
+  function clickProbeIncludesBody(options) {
+    return options?.includeBody !== false;
+  }
+  function clickProbeRedactsSensitive(options) {
+    return options?.redactSensitive !== false;
+  }
+  function isSensitiveFieldName(name) {
+    return SENSITIVE_FIELD_PATTERN.test(String(name || ""));
+  }
+  function redactObject(value) {
+    if (Array.isArray(value)) return value.map((item) => redactObject(item));
+    if (!value || typeof value !== "object") return value;
+    const redacted = {};
+    for (const [key, child] of Object.entries(value)) {
+      redacted[key] = isSensitiveFieldName(key) ? "[REDACTED]" : redactObject(child);
+    }
+    return redacted;
+  }
+  function maybeRedactHeaders(headers, redactSensitive) {
+    if (!headers || !redactSensitive) return headers || {};
+    const redacted = {};
+    for (const [key, value] of Object.entries(headers)) {
+      redacted[key] = isSensitiveFieldName(key) ? "[REDACTED]" : value;
+    }
+    return redacted;
+  }
+  function parseRequestBody(body, redactSensitive) {
+    if (typeof body !== "string") return body ?? null;
+    const trimmed = body.trim();
+    if (!trimmed) return "";
+    try {
+      const parsed = JSON.parse(trimmed);
+      return redactSensitive ? redactObject(parsed) : parsed;
+    } catch {
+      return redactSensitive ? redactStringBody(trimmed) : trimmed;
+    }
+  }
+  function redactStringBody(value) {
+    const params = new URLSearchParams(value);
+    let matched = false;
+    for (const key of [...params.keys()]) {
+      if (isSensitiveFieldName(key)) {
+        params.set(key, "[REDACTED]");
+        matched = true;
+      }
+    }
+    return matched ? params.toString() : value;
+  }
+  function shouldBlockProbeRequest(params, filter) {
+    const url = String(params?.request?.url || "");
+    if (filter && !url.includes(filter)) return false;
+    const resourceType = String(params?.resourceType || params?.type || "").toLowerCase();
+    return CLICK_PROBE_API_RESOURCE_TYPES.has(resourceType);
+  }
+  function buildProbeRequest(params, options) {
+    const request = params?.request || {};
+    const redactSensitive = clickProbeRedactsSensitive(options);
+    const includeBody = clickProbeIncludesBody(options);
+    const includeHeaders = clickProbeIncludesHeaders(options);
+    const body = typeof request.postData === "string" ? request.postData : null;
+    const result = {
+      id: String(params?.requestId || ""),
+      url: String(request.url || ""),
+      method: request.method || null,
+      type: params?.resourceType || params?.type || null,
+      blockedReason: "probe",
+      redacted: redactSensitive
+    };
+    if (includeHeaders) result.requestHeaders = maybeRedactHeaders(request.headers || {}, redactSensitive);
+    if (includeBody) {
+      result.requestBody = parseRequestBody(body, redactSensitive);
+      result.requestBodyLength = typeof body === "string" ? body.length : 0;
+    }
+    return result;
+  }
+  async function runClickProbeCapture(tabId, args, action) {
+    const waitMs = normalizeClickProbeWaitMs(args?.waitMs);
+    const maxRequests = normalizeClickProbeMaxRequests(args?.maxRequests);
+    const filter = typeof args?.filter === "string" && args.filter ? args.filter : null;
+    const warnings = [];
+    const requests = [];
+    let totalIntercepted = 0;
+    let fetchEnabled = false;
+    let listenerInstalled = false;
+    const lease = await acquireNamedActionDebugger(tabId, "click_probe", ["Reusing debugger session owned by click_probe."]);
+    if (lease.error || !lease.debuggee) {
+      throw new Error(`click_probe could not enable CDP request interception: ${lease.error || "debugger unavailable"}`);
+    }
+    const debuggee = lease.debuggee;
+    const listener = (source2, method, params) => {
+      if (source2.tabId !== tabId || method !== "Fetch.requestPaused") return;
+      const requestId = params?.requestId;
+      if (!requestId) return;
+      const shouldBlock = shouldBlockProbeRequest(params, filter);
+      if (shouldBlock) {
+        totalIntercepted += 1;
+        if (requests.length < maxRequests) requests.push(buildProbeRequest(params, args));
+        chrome.debugger.sendCommand(debuggee, "Fetch.failRequest", { requestId, errorReason: "BlockedByClient" }).catch((err) => {
+          warnings.push(`Failed to block probed request ${requestId}: ${err?.message || String(err)}`);
+        });
+        return;
+      }
+      chrome.debugger.sendCommand(debuggee, "Fetch.continueRequest", { requestId }).catch((err) => {
+        warnings.push(`Failed to continue nonmatching request ${requestId}: ${err?.message || String(err)}`);
+      });
+    };
+    try {
+      chrome.debugger.onEvent.addListener(listener);
+      listenerInstalled = true;
+      await chrome.debugger.sendCommand(debuggee, "Fetch.enable", {
+        patterns: [{ urlPattern: "*", requestStage: "Request" }]
+      });
+      fetchEnabled = true;
+      const result = await action();
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      if (totalIntercepted > requests.length) {
+        warnings.push(`click_probe captured ${requests.length} of ${totalIntercepted} intercepted requests; increase maxRequests for more detail.`);
+      }
+      return {
+        result,
+        probe: {
+          blocked: true,
+          mode: "cdp-fetch-request",
+          waitMs,
+          filter,
+          interceptedCount: totalIntercepted,
+          requests,
+          warnings
+        }
+      };
+    } finally {
+      if (fetchEnabled) {
+        try {
+          await chrome.debugger.sendCommand(debuggee, "Fetch.disable");
+        } catch (err) {
+          warnings.push(`Failed to disable Fetch interception: ${err?.message || String(err)}`);
+        }
+      }
+      if (listenerInstalled) {
+        try {
+          chrome.debugger.onEvent.removeListener(listener);
+        } catch {
+        }
+      }
+      const detachWarning = await releaseNamedActionDebugger(tabId, lease);
+      if (detachWarning) warnings.push(detachWarning);
     }
   }
   function buildRuntimeEvaluationExpression(source2, mode) {
@@ -1228,7 +1410,7 @@
     merged.mergedFrom = parts.map((p) => p.id);
     return merged;
   }
-  var networkCaptures, debuggerListenerInstalled, networkPersistTimers;
+  var networkCaptures, debuggerListenerInstalled, networkPersistTimers, actionDebuggerOwners, CLICK_PROBE_DEFAULT_WAIT_MS, CLICK_PROBE_DEFAULT_MAX_REQUESTS, CLICK_PROBE_API_RESOURCE_TYPES, SENSITIVE_FIELD_PATTERN;
   var init_network_cdp = __esm({
     "src/extension/service-worker/handlers/network-cdp.ts"() {
       "use strict";
@@ -1238,6 +1420,11 @@
       networkCaptures = /* @__PURE__ */ new Map();
       debuggerListenerInstalled = false;
       networkPersistTimers = /* @__PURE__ */ new Map();
+      actionDebuggerOwners = /* @__PURE__ */ new Map();
+      CLICK_PROBE_DEFAULT_WAIT_MS = 1e3;
+      CLICK_PROBE_DEFAULT_MAX_REQUESTS = 100;
+      CLICK_PROBE_API_RESOURCE_TYPES = /* @__PURE__ */ new Set(["fetch", "xhr", "xmlhttprequest"]);
+      SENSITIVE_FIELD_PATTERN = /(^|[-_.])(cookie|authorization|proxy-authorization|x-api-key|api-key|token|access_token|refresh_token|secret|password|session|csrf|jwt)([-_.]|$)/i;
     }
   });
 
@@ -3344,6 +3531,32 @@
     if (!selector) throw new Error("selector is required for click");
     const tabId = argTabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
+    return performObservedClick(args, session, tabId);
+  }
+  async function handleClickProbe(args = {}, session) {
+    const { selector, tabId: argTabId } = args || {};
+    if (!selector) throw new Error("selector is required for click_probe");
+    const tabId = argTabId || getActiveTabId(session);
+    if (!tabId) throw new Error("No active tab in session");
+    const { result, probe } = await runClickProbeCapture(tabId, args, () => performObservedClick(args, session, tabId));
+    const warnings = [
+      ...result?.warnings || [],
+      ...probe.warnings || []
+    ];
+    if (result?.newTab || result?.newTabs && result.newTabs.length) {
+      warnings.push("click_probe does not guarantee blocking first requests from newly opened tabs.");
+    }
+    return {
+      ...result,
+      warnings,
+      probe: {
+        ...probe,
+        warnings: probe.warnings || []
+      }
+    };
+  }
+  async function performObservedClick(args = {}, session, tabId) {
+    const { selector } = args || {};
     const strategy = args?.strategy || "auto";
     const beforeIds = await beginNewTabWatch();
     if (strategy === "auto" || strategy === "cdp_mouse") {
@@ -3939,6 +4152,9 @@
           break;
         case "click":
           result = await handleClick(args, session);
+          break;
+        case "click_probe":
+          result = await handleClickProbe(args, session);
           break;
         case "fill":
           result = await handleFill(args, session);

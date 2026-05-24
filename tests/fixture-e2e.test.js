@@ -57,7 +57,7 @@ test('fixture E2E: daemon validates commands and dispatches through extension We
       version: 'fixture-extension',
       protocolVersion: '2026-05-19',
       build: { channel: 'source' },
-      capabilities: ['navigateFinalMetadata', 'observe_start', 'observe_diff', 'network']
+      capabilities: ['navigateFinalMetadata', 'observe_start', 'observe_diff', 'network', 'clickProbe']
     }
   }));
   await new Promise(resolve => setTimeout(resolve, 25));
@@ -71,6 +71,7 @@ test('fixture E2E: daemon validates commands and dispatches through extension We
     const base = { session: msg.session, tabId: 101 };
     const dataByAction = {
       navigate: { ...base, url: msg.args.url, title: 'Fixture', navigationComplete: true, warnings: [] },
+      click_probe: { ...base, clicked: true, selector: msg.args.selector, strategyUsed: msg.args.strategy || 'auto', probe: { blocked: true, mode: 'cdp-fetch-request', waitMs: msg.args.waitMs || 1000, filter: msg.args.filter || null, interceptedCount: 1, requests: [{ id: 'probe-1', url: 'http://fixture.local/api/create', method: 'POST', type: 'Fetch', requestBody: { name: 'draft' }, blockedReason: 'probe', redacted: true }], warnings: [] }, warnings: [] },
       snapshot: { ...base, totalElements: 2, elements: [{ id: '@e1', tag: 'input', attributes: { type: 'text' } }] },
       select_option: { ...base, selected: true, value: [msg.args.value] },
       set_checked: { ...base, checked: msg.args.checked },
@@ -104,6 +105,7 @@ test('fixture E2E: daemon validates commands and dispatches through extension We
 
   for (const [command, args] of [
     ['snapshot', {}],
+    ['click_probe', { selector: '@e1', filter: '/api/', waitMs: 10 }],
     ['select_option', { selector: '#role', value: 'admin' }],
     ['set_checked', { selector: '#active', checked: true }],
     ['press', { key: 'Enter' }],

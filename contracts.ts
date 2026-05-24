@@ -35,6 +35,7 @@ export interface CommandArgs {
   find_tab: { urlIncludes?: string; titleIncludes?: string; active?: boolean; attach?: boolean; tabId?: number };
   snapshot: { tabId?: number; maxDepth?: number; roles?: string[]; tags?: string[]; hasVisibleText?: boolean; textIncludes?: string; viewportOnly?: boolean; maxElements?: number };
   click: { selector: string; tabId?: number; strategy?: 'auto' | 'cdp_mouse' | 'dom_pointer' | 'element_click'; force?: boolean; button?: 'left' | 'middle' | 'right'; clickCount?: number; modifiers?: string[]; expectChange?: boolean; observe?: ObserveOptions; observeNewTab?: boolean; expectNewTab?: boolean };
+  click_probe: { selector: string; tabId?: number; strategy?: 'auto' | 'cdp_mouse' | 'dom_pointer' | 'element_click'; force?: boolean; button?: 'left' | 'middle' | 'right'; clickCount?: number; modifiers?: string[]; observeNewTab?: boolean; expectNewTab?: boolean; waitMs?: number; filter?: string; includeHeaders?: boolean; includeBody?: boolean; redactSensitive?: boolean; maxRequests?: number };
   fill: { selector: string; value: string; tabId?: number; strategy?: 'native_setter' | 'text_input' | 'paste_like'; clear?: boolean; commit?: 'change' | 'blur' | 'enter' | 'none'; expectChange?: boolean; observe?: ObserveOptions };
   press: { key: string; selector?: string; tabId?: number; strategy?: 'auto' | 'cdp_keyboard' | 'dom_keyboard'; modifiers?: string[]; expectChange?: boolean; observe?: ObserveOptions; observeNewTab?: boolean; expectNewTab?: boolean };
   scroll: { tabId?: number; selector?: string; strategy?: 'auto' | 'dom' | 'wheel'; deltaX?: number; deltaY?: number; x?: number; y?: number; region?: { x: number; y: number; width: number; height: number }; steps?: number; block?: ScrollLogicalPosition; behavior?: ScrollBehavior; waitMs?: number };
@@ -159,7 +160,7 @@ export interface ResultEnvelope<TData = unknown> {
 
 
 export const COMMAND_NAMES: readonly CommandName[] = [
-  'navigate', 'find_tab', 'snapshot', 'click', 'fill', 'press', 'scroll', 'select_option', 'set_checked', 'wait_for',
+  'navigate', 'find_tab', 'snapshot', 'click', 'click_probe', 'fill', 'press', 'scroll', 'select_option', 'set_checked', 'wait_for',
   'evaluate', 'screenshot', 'save_as_pdf', 'observe_start', 'observe_diff', 'network_start', 'network_list', 'network_detail',
   'network_stop', 'upload', 'download', 'get_text', 'list_tabs', 'close_tab', 'close_session'
 ] as const;
