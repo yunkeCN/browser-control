@@ -48,7 +48,10 @@ test('service-worker fill returns an error when the value did not stick', () => 
 });
 
 test('press action reports strategy focus key code and modifier diagnostics', () => {
+  assert.match(serviceWorker, /function focusPressTarget\(selector\)/);
   assert.match(serviceWorker, /function performPress\(key, selector, options = \{\}\)/);
+  assert.match(serviceWorker, /preventScroll:\s*true/);
+  assert.match(serviceWorker, /strategyUsed:\s*['"]cdp_keyboard['"]/);
   assert.match(serviceWorker, /strategyUsed:\s*options\?\.strategy \|\| ['"]dom_keyboard['"]/);
   assert.match(serviceWorker, /focusBefore/);
   assert.match(serviceWorker, /focusAfter/);

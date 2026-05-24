@@ -115,6 +115,15 @@ test('generated executeScript page runtime functions are isolated VM-callable', 
       assertResult: result => assert.equal(result.error, 'Element not found: #missing')
     },
     {
+      name: 'focusPressTarget',
+      args: ['#missing'],
+      assertResult: result => {
+        assert.equal(result.error, 'Element not found: #missing');
+        assert.equal(result.strategyUsed, 'cdp_keyboard');
+        assert.equal(result.recoverable, true);
+      }
+    },
+    {
       name: 'performSelectOption',
       args: ['#missing', 'x'],
       assertResult: result => assert.equal(result.error, 'Element not found: #missing')

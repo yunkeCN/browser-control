@@ -1123,6 +1123,61 @@
       warnings: warnings.length ? warnings : void 0
     };
   }
+  function normalizeCdpKeyboardKey(input) {
+    const key = String(input || "");
+    const special = SPECIAL_CDP_KEYS[key.toLowerCase()];
+    if (special) return special;
+    if (/^[a-z]$/i.test(key)) {
+      return {
+        key,
+        code: `Key${key.toUpperCase()}`,
+        keyCode: key.toUpperCase().charCodeAt(0),
+        text: key
+      };
+    }
+    if (/^[0-9]$/.test(key)) {
+      return {
+        key,
+        code: `Digit${key}`,
+        keyCode: key.charCodeAt(0),
+        text: key
+      };
+    }
+    const printable = key.length === 1 ? PRINTABLE_CDP_KEYS[key] : null;
+    if (printable) {
+      return {
+        key,
+        code: printable.code,
+        keyCode: printable.keyCode,
+        text: key
+      };
+    }
+    if (key.length === 1) {
+      return {
+        key,
+        code: "Unidentified",
+        keyCode: key.toUpperCase().charCodeAt(0),
+        text: key
+      };
+    }
+    return { key, code: key || "Unidentified", keyCode: 0 };
+  }
+  function buildCdpKeyboardEvent(type, definition, modifiers) {
+    const event = {
+      type,
+      key: definition.key,
+      code: definition.code,
+      windowsVirtualKeyCode: definition.keyCode,
+      nativeVirtualKeyCode: definition.keyCode,
+      modifiers
+    };
+    if (definition.location !== void 0) event.location = definition.location;
+    if (definition.text && type !== "keyUp") {
+      event.text = definition.text;
+      event.unmodifiedText = definition.text;
+    }
+    return event;
+  }
   async function performCdpKeyboardPress(tabId, key, options = {}) {
     const lease = await acquireActionDebugger(tabId);
     if (lease.error) {
@@ -1137,25 +1192,12 @@
     }
     const warnings = [...lease.warnings || []];
     const debuggee = lease.debuggee;
-    const code2 = key.length === 1 ? `Key${key.toUpperCase()}` : key;
+    const keyDefinition = normalizeCdpKeyboardKey(key);
+    const downType = keyDefinition.text ? "keyDown" : "rawKeyDown";
     const modifiers = cdpModifierMask(options?.modifiers);
     try {
-      await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", {
-        type: "keyDown",
-        key,
-        code: code2,
-        windowsVirtualKeyCode: key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0,
-        nativeVirtualKeyCode: key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0,
-        modifiers
-      });
-      await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", {
-        type: "keyUp",
-        key,
-        code: code2,
-        windowsVirtualKeyCode: key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0,
-        nativeVirtualKeyCode: key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0,
-        modifiers
-      });
+      await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", buildCdpKeyboardEvent(downType, keyDefinition, modifiers));
+      await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", buildCdpKeyboardEvent("keyUp", keyDefinition, modifiers));
     } catch (err) {
       return {
         pressed: false,
@@ -1169,7 +1211,17 @@
       const detachWarning = await releaseActionDebugger(lease);
       if (detachWarning) warnings.push(detachWarning);
     }
-    return { pressed: true, key, code: code2, strategyUsed: "cdp_keyboard", synthetic: false, warnings };
+    return {
+      pressed: true,
+      key: keyDefinition.key,
+      inputKey: key,
+      code: keyDefinition.code,
+      windowsVirtualKeyCode: keyDefinition.keyCode,
+      nativeVirtualKeyCode: keyDefinition.keyCode,
+      strategyUsed: "cdp_keyboard",
+      synthetic: false,
+      warnings
+    };
   }
   function cdpModifierMask(modifiers) {
     const list = Array.isArray(modifiers) ? modifiers.map(String) : [];
@@ -1410,13 +1462,50 @@
     merged.mergedFrom = parts.map((p) => p.id);
     return merged;
   }
-  var networkCaptures, debuggerListenerInstalled, networkPersistTimers, actionDebuggerOwners, CLICK_PROBE_DEFAULT_WAIT_MS, CLICK_PROBE_DEFAULT_MAX_REQUESTS, CLICK_PROBE_API_RESOURCE_TYPES, SENSITIVE_FIELD_PATTERN;
+  var SPECIAL_CDP_KEYS, PRINTABLE_CDP_KEYS, networkCaptures, debuggerListenerInstalled, networkPersistTimers, actionDebuggerOwners, CLICK_PROBE_DEFAULT_WAIT_MS, CLICK_PROBE_DEFAULT_MAX_REQUESTS, CLICK_PROBE_API_RESOURCE_TYPES, SENSITIVE_FIELD_PATTERN;
   var init_network_cdp = __esm({
     "src/extension/service-worker/handlers/network-cdp.ts"() {
       "use strict";
       init_runtime_metadata();
       init_sessions();
       init_cdp_target();
+      SPECIAL_CDP_KEYS = {
+        enter: { key: "Enter", code: "Enter", keyCode: 13 },
+        return: { key: "Enter", code: "Enter", keyCode: 13 },
+        escape: { key: "Escape", code: "Escape", keyCode: 27 },
+        esc: { key: "Escape", code: "Escape", keyCode: 27 },
+        tab: { key: "Tab", code: "Tab", keyCode: 9 },
+        backspace: { key: "Backspace", code: "Backspace", keyCode: 8 },
+        delete: { key: "Delete", code: "Delete", keyCode: 46 },
+        del: { key: "Delete", code: "Delete", keyCode: 46 },
+        arrowleft: { key: "ArrowLeft", code: "ArrowLeft", keyCode: 37 },
+        left: { key: "ArrowLeft", code: "ArrowLeft", keyCode: 37 },
+        arrowup: { key: "ArrowUp", code: "ArrowUp", keyCode: 38 },
+        up: { key: "ArrowUp", code: "ArrowUp", keyCode: 38 },
+        arrowright: { key: "ArrowRight", code: "ArrowRight", keyCode: 39 },
+        right: { key: "ArrowRight", code: "ArrowRight", keyCode: 39 },
+        arrowdown: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
+        down: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
+        home: { key: "Home", code: "Home", keyCode: 36 },
+        end: { key: "End", code: "End", keyCode: 35 },
+        pageup: { key: "PageUp", code: "PageUp", keyCode: 33 },
+        pagedown: { key: "PageDown", code: "PageDown", keyCode: 34 },
+        space: { key: " ", code: "Space", keyCode: 32, text: " " },
+        " ": { key: " ", code: "Space", keyCode: 32, text: " " }
+      };
+      PRINTABLE_CDP_KEYS = {
+        "-": { code: "Minus", keyCode: 189 },
+        "=": { code: "Equal", keyCode: 187 },
+        "[": { code: "BracketLeft", keyCode: 219 },
+        "]": { code: "BracketRight", keyCode: 221 },
+        "\\": { code: "Backslash", keyCode: 220 },
+        ";": { code: "Semicolon", keyCode: 186 },
+        "'": { code: "Quote", keyCode: 222 },
+        ",": { code: "Comma", keyCode: 188 },
+        ".": { code: "Period", keyCode: 190 },
+        "/": { code: "Slash", keyCode: 191 },
+        "`": { code: "Backquote", keyCode: 192 }
+      };
       networkCaptures = /* @__PURE__ */ new Map();
       debuggerListenerInstalled = false;
       networkPersistTimers = /* @__PURE__ */ new Map();
@@ -2788,6 +2877,80 @@
   });
 
   // src/extension/service-worker/page-runtime/press.ts
+  function focusPressTarget(selector) {
+    function localFindElement(sel) {
+      if (!sel) return null;
+      try {
+        if (String(sel).startsWith("@e")) {
+          const runtime = window.__browserControlAgentRef;
+          if (!runtime?.resolve) {
+            return {
+              element: null,
+              error: {
+                error: `Agent reference runtime is unavailable for ${sel}. Take a fresh snapshot.`,
+                code: "STALE_ELEMENT_REFERENCE",
+                recoverable: true,
+                retryable: true,
+                selector: sel,
+                strategyUsed: "cdp_keyboard",
+                nextStep: "Take a fresh snapshot and retry with the new @e reference."
+              }
+            };
+          }
+          const resolved = runtime.resolve(String(sel));
+          if (resolved?.error) return { element: null, error: { ...resolved, strategyUsed: "cdp_keyboard" } };
+          return { element: resolved.element };
+        }
+        return { element: document.querySelector(sel) };
+      } catch {
+        return null;
+      }
+    }
+    function localDescribeElement(el) {
+      if (!el || !el.tagName) return null;
+      const rect = typeof el.getBoundingClientRect === "function" ? el.getBoundingClientRect() : null;
+      return {
+        tag: el.tagName.toLowerCase(),
+        id: el.id || null,
+        role: el.getAttribute?.("role") || null,
+        name: el.getAttribute?.("name") || null,
+        type: el.getAttribute?.("type") || null,
+        valueLength: typeof el.value === "string" ? el.value.length : void 0,
+        rect: rect ? {
+          x: Math.round(rect.left),
+          y: Math.round(rect.top),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height)
+        } : null
+      };
+    }
+    const found = selector ? localFindElement(selector) : null;
+    if (found?.error) return found.error;
+    const target = selector ? found?.element : document.activeElement || document.body;
+    if (!target) {
+      return {
+        focused: false,
+        selector: selector || null,
+        strategyUsed: "cdp_keyboard",
+        error: selector ? `Element not found: ${selector}` : "No focused element",
+        recoverable: true
+      };
+    }
+    const focusBefore = localDescribeElement(document.activeElement);
+    try {
+      target.focus?.({ preventScroll: true });
+    } catch {
+      target.focus?.();
+    }
+    return {
+      focused: document.activeElement === target || Boolean(target.contains?.(document.activeElement)),
+      selector: selector || null,
+      strategyUsed: "cdp_keyboard",
+      target: localDescribeElement(target),
+      focusBefore,
+      focusAfter: localDescribeElement(document.activeElement)
+    };
+  }
   function performPress(key, selector, options = {}) {
     function localFindElement(sel) {
       if (!sel) return null;
@@ -2824,7 +2987,11 @@
     const target = selector ? found?.element : document.activeElement || document.body;
     if (!target) return { error: selector ? `Element not found: ${selector}` : "No focused element" };
     const focusBefore = localDescribeElement(document.activeElement);
-    target.focus?.();
+    try {
+      target.focus?.({ preventScroll: true });
+    } catch {
+      target.focus?.();
+    }
     const code2 = key.length === 1 ? `Key${key.toUpperCase()}` : key;
     const modifiers = localModifiers(options?.modifiers);
     for (const eventType of ["keydown", "keypress", "keyup"]) {
@@ -3464,6 +3631,41 @@
       warnings
     };
   }
+  function mergePressFocusDiagnostics(result, focusResult) {
+    if (!focusResult) return result;
+    const warnings = [...result?.warnings || [], ...focusResult.warnings || []];
+    return {
+      ...result,
+      selector: result?.selector ?? focusResult.selector ?? null,
+      target: result?.target || focusResult.target,
+      focusBefore: result?.focusBefore || focusResult.focusBefore,
+      focusAfter: result?.focusAfter || focusResult.focusAfter,
+      focused: focusResult.focused,
+      focus: {
+        before: focusResult.focusBefore || null,
+        after: focusResult.focusAfter || null,
+        target: focusResult.target || null,
+        focused: Boolean(focusResult.focused)
+      },
+      warnings
+    };
+  }
+  async function focusTargetForCdpKeyboard(tabId, selector) {
+    const targetSelector = typeof selector === "string" && selector ? selector : null;
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: focusPressTarget,
+      args: [targetSelector],
+      world: "MAIN"
+    });
+    return results[0]?.result || {
+      focused: false,
+      selector: targetSelector,
+      strategyUsed: "cdp_keyboard",
+      error: "Focus script returned no result",
+      recoverable: true
+    };
+  }
   async function handleNavigate(args = {}, session) {
     const { url, newTab = true } = args || {};
     if (!url) throw new Error("url is required for navigate");
@@ -3619,28 +3821,19 @@
     const tabId = args?.tabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
     const strategy = args?.strategy || "auto";
-    const selectorIsAgentRef = typeof selector === "string" && selector.startsWith("@e");
     const beforeIds = await beginNewTabWatch();
-    if (selectorIsAgentRef && strategy === "cdp_keyboard") {
-      return {
-        pressed: false,
-        key,
-        selector,
-        strategyUsed: "cdp_keyboard",
-        error: "cdp_keyboard does not support @e selectors because stale-reference validation requires DOM target resolution. Use auto or dom_keyboard.",
-        code: "UNSUPPORTED_SELECTOR_STRATEGY",
-        recoverable: true,
-        retryable: true
-      };
-    }
-    if (!selectorIsAgentRef && (strategy === "auto" || strategy === "cdp_keyboard")) {
+    if (strategy === "auto" || strategy === "cdp_keyboard") {
+      const focusResult = await focusTargetForCdpKeyboard(tabId, selector);
+      if (focusResult?.error) return observeNewTabResult(focusResult);
       const cdpResult = await performCdpKeyboardPress(tabId, key, args || {});
-      if (!cdpResult.error || strategy === "cdp_keyboard") return observeNewTabResult(cdpResult);
+      const cdpResultWithFocus = mergePressFocusDiagnostics(cdpResult, focusResult);
+      if (!cdpResult.error || strategy === "cdp_keyboard") return observeNewTabResult(cdpResultWithFocus);
       args = {
         ...args,
         strategy: "dom_keyboard",
         warnings: [
           ...args?.warnings || [],
+          ...focusResult?.warnings || [],
           `cdp_keyboard unavailable in auto mode; fell back to dom_keyboard: ${cdpResult.error}`
         ]
       };

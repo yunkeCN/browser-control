@@ -21,8 +21,10 @@ test('cdp_mouse and cdp_keyboard strategies use Chrome debugger input dispatch',
   assert.match(networkCdpSource, /type:\s*['"]mouseReleased['"]/);
   assert.match(networkCdpSource, /async function performCdpKeyboardPress/);
   assert.match(networkCdpSource, /Input\.dispatchKeyEvent/);
-  assert.match(networkCdpSource, /type:\s*['"]keyDown['"]/);
-  assert.match(networkCdpSource, /type:\s*['"]keyUp['"]/);
+  assert.match(networkCdpSource, /rawKeyDown/);
+  assert.match(networkCdpSource, /keyDown/);
+  assert.match(networkCdpSource, /keyUp/);
+  assert.match(networkCdpSource, /windowsVirtualKeyCode:\s*definition\.keyCode/);
 });
 
 test('CDP action debugger reuses network capture ownership and only detaches temporary action leases', () => {
@@ -54,15 +56,26 @@ test('auto action strategies fall back visibly while explicit CDP strategies ret
   assert.match(navigationSource, /cdp_mouse unavailable in auto mode; fell back to dom_pointer/);
   assert.match(navigationSource, /strategy === ['"]cdp_mouse['"]\) return cdpResult/);
   assert.match(navigationSource, /cdp_keyboard unavailable in auto mode; fell back to dom_keyboard/);
-  assert.match(navigationSource, /strategy === ['"]cdp_keyboard['"]\) return observeNewTabResult\(cdpResult\)/);
+  assert.match(navigationSource, /strategy === ['"]cdp_keyboard['"]\) return observeNewTabResult\(cdpResultWithFocus\)/);
   assert.match(networkCdpSource, /recoverable:\s*true/);
 });
 
 test('press with @e selectors does not bypass stale validation through cdp_keyboard', () => {
-  assert.match(navigationSource, /const selectorIsAgentRef = typeof selector === ['"]string['"] && selector\.startsWith\(['"]@e['"]\)/);
-  assert.match(navigationSource, /selectorIsAgentRef && strategy === ['"]cdp_keyboard['"]/);
-  assert.match(navigationSource, /UNSUPPORTED_SELECTOR_STRATEGY/);
-  assert.match(navigationSource, /!\s*selectorIsAgentRef && \(strategy === ['"]auto['"] \|\| strategy === ['"]cdp_keyboard['"]\)/);
+  assert.match(navigationSource, /focusPressTarget/);
+  assert.match(navigationSource, /focusTargetForCdpKeyboard\(tabId,\s*selector\)/);
+  assert.match(navigationSource, /if \(focusResult\?\.error\) return observeNewTabResult\(focusResult\)/);
+  assert.match(serviceWorker, /function focusPressTarget\(selector\)/);
+  assert.match(serviceWorker, /STALE_ELEMENT_REFERENCE/);
+  assert.doesNotMatch(navigationSource, /UNSUPPORTED_SELECTOR_STRATEGY/);
+  assert.doesNotMatch(navigationSource, /!\s*selectorIsAgentRef/);
+});
+
+test('cdp_keyboard normalizes Enter and printable keys into browser key codes', () => {
+  assert.match(networkCdpSource, /enter:\s*\{\s*key:\s*['"]Enter['"],\s*code:\s*['"]Enter['"],\s*keyCode:\s*13\s*\}/);
+  assert.match(networkCdpSource, /return:\s*\{\s*key:\s*['"]Enter['"],\s*code:\s*['"]Enter['"],\s*keyCode:\s*13\s*\}/);
+  assert.match(networkCdpSource, /code:\s*`Key\$\{key\.toUpperCase\(\)\}`/);
+  assert.match(networkCdpSource, /code:\s*`Digit\$\{key\}`/);
+  assert.match(networkCdpSource, /const downType = keyDefinition\.text \? ['"]keyDown['"] : ['"]rawKeyDown['"]/);
 });
 
 test('evaluate uses CDP Runtime.evaluate before isolated-world fallback', () => {

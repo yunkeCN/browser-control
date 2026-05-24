@@ -5,6 +5,52 @@ import type { ActionDebuggerLease, CommandArgs, NetworkCapture, NetworkRequest, 
 
 type DebuggerSource = chrome.debugger.Debuggee;
 type DebuggerParams = Record<string, any>;
+type CdpKeyboardKeyDefinition = {
+  key: string;
+  code: string;
+  keyCode: number;
+  text?: string;
+  location?: number;
+};
+
+const SPECIAL_CDP_KEYS: Record<string, CdpKeyboardKeyDefinition> = {
+  enter: { key: 'Enter', code: 'Enter', keyCode: 13 },
+  return: { key: 'Enter', code: 'Enter', keyCode: 13 },
+  escape: { key: 'Escape', code: 'Escape', keyCode: 27 },
+  esc: { key: 'Escape', code: 'Escape', keyCode: 27 },
+  tab: { key: 'Tab', code: 'Tab', keyCode: 9 },
+  backspace: { key: 'Backspace', code: 'Backspace', keyCode: 8 },
+  delete: { key: 'Delete', code: 'Delete', keyCode: 46 },
+  del: { key: 'Delete', code: 'Delete', keyCode: 46 },
+  arrowleft: { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 },
+  left: { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 },
+  arrowup: { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
+  up: { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
+  arrowright: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
+  right: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
+  arrowdown: { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
+  down: { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
+  home: { key: 'Home', code: 'Home', keyCode: 36 },
+  end: { key: 'End', code: 'End', keyCode: 35 },
+  pageup: { key: 'PageUp', code: 'PageUp', keyCode: 33 },
+  pagedown: { key: 'PageDown', code: 'PageDown', keyCode: 34 },
+  space: { key: ' ', code: 'Space', keyCode: 32, text: ' ' },
+  ' ': { key: ' ', code: 'Space', keyCode: 32, text: ' ' }
+};
+
+const PRINTABLE_CDP_KEYS: Record<string, { code: string; keyCode: number }> = {
+  '-': { code: 'Minus', keyCode: 189 },
+  '=': { code: 'Equal', keyCode: 187 },
+  '[': { code: 'BracketLeft', keyCode: 219 },
+  ']': { code: 'BracketRight', keyCode: 221 },
+  '\\': { code: 'Backslash', keyCode: 220 },
+  ';': { code: 'Semicolon', keyCode: 186 },
+  "'": { code: 'Quote', keyCode: 222 },
+  ',': { code: 'Comma', keyCode: 188 },
+  '.': { code: 'Period', keyCode: 190 },
+  '/': { code: 'Slash', keyCode: 191 },
+  '`': { code: 'Backquote', keyCode: 192 }
+};
 
 export async function handleNetwork(args: CommandArgs = {}, session: SessionName): Promise<any> {
   const { cmd, filter, requestId, sinceTimestampMs, limit, tabId, scope, method, statusCode, type } = args || {};
@@ -1000,6 +1046,63 @@ export async function performCdpWheelScroll(tabId: number, options: any = {}): P
   };
 }
 
+function normalizeCdpKeyboardKey(input: string): CdpKeyboardKeyDefinition {
+  const key = String(input || '');
+  const special = SPECIAL_CDP_KEYS[key.toLowerCase()];
+  if (special) return special;
+  if (/^[a-z]$/i.test(key)) {
+    return {
+      key,
+      code: `Key${key.toUpperCase()}`,
+      keyCode: key.toUpperCase().charCodeAt(0),
+      text: key
+    };
+  }
+  if (/^[0-9]$/.test(key)) {
+    return {
+      key,
+      code: `Digit${key}`,
+      keyCode: key.charCodeAt(0),
+      text: key
+    };
+  }
+  const printable = key.length === 1 ? PRINTABLE_CDP_KEYS[key] : null;
+  if (printable) {
+    return {
+      key,
+      code: printable.code,
+      keyCode: printable.keyCode,
+      text: key
+    };
+  }
+  if (key.length === 1) {
+    return {
+      key,
+      code: 'Unidentified',
+      keyCode: key.toUpperCase().charCodeAt(0),
+      text: key
+    };
+  }
+  return { key, code: key || 'Unidentified', keyCode: 0 };
+}
+
+function buildCdpKeyboardEvent(type: 'rawKeyDown' | 'keyDown' | 'keyUp', definition: CdpKeyboardKeyDefinition, modifiers: number): any {
+  const event: any = {
+    type,
+    key: definition.key,
+    code: definition.code,
+    windowsVirtualKeyCode: definition.keyCode,
+    nativeVirtualKeyCode: definition.keyCode,
+    modifiers
+  };
+  if (definition.location !== undefined) event.location = definition.location;
+  if (definition.text && type !== 'keyUp') {
+    event.text = definition.text;
+    event.unmodifiedText = definition.text;
+  }
+  return event;
+}
+
 export async function performCdpKeyboardPress(tabId: number, key: string, options: any = {}): Promise<any> {
   const lease = await acquireActionDebugger(tabId);
   if (lease.error) {
@@ -1015,25 +1118,12 @@ export async function performCdpKeyboardPress(tabId: number, key: string, option
 
   const warnings = [...(lease.warnings || [])];
   const debuggee = lease.debuggee as any;
-  const code = key.length === 1 ? `Key${key.toUpperCase()}` : key;
+  const keyDefinition = normalizeCdpKeyboardKey(key);
+  const downType = keyDefinition.text ? 'keyDown' : 'rawKeyDown';
   const modifiers = cdpModifierMask(options?.modifiers);
   try {
-    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchKeyEvent', {
-      type: 'keyDown',
-      key,
-      code,
-      windowsVirtualKeyCode: key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0,
-      nativeVirtualKeyCode: key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0,
-      modifiers
-    });
-    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchKeyEvent', {
-      type: 'keyUp',
-      key,
-      code,
-      windowsVirtualKeyCode: key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0,
-      nativeVirtualKeyCode: key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0,
-      modifiers
-    });
+    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchKeyEvent', buildCdpKeyboardEvent(downType, keyDefinition, modifiers));
+    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchKeyEvent', buildCdpKeyboardEvent('keyUp', keyDefinition, modifiers));
   } catch (err: any) {
     return {
       pressed: false,
@@ -1048,7 +1138,17 @@ export async function performCdpKeyboardPress(tabId: number, key: string, option
     if (detachWarning) warnings.push(detachWarning);
   }
 
-  return { pressed: true, key, code, strategyUsed: 'cdp_keyboard', synthetic: false, warnings };
+  return {
+    pressed: true,
+    key: keyDefinition.key,
+    inputKey: key,
+    code: keyDefinition.code,
+    windowsVirtualKeyCode: keyDefinition.keyCode,
+    nativeVirtualKeyCode: keyDefinition.keyCode,
+    strategyUsed: 'cdp_keyboard',
+    synthetic: false,
+    warnings
+  };
 }
 
 function cdpModifierMask(modifiers: unknown): number {

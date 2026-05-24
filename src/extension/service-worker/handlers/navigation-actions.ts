@@ -6,7 +6,7 @@ import { captureViewportTextObservation } from '../page-runtime/observation';
 import { getDocumentTextSnapshot, getTextSnapshot } from '../page-runtime/get-text';
 import { performClick } from '../page-runtime/click';
 import { performFill } from '../page-runtime/fill';
-import { performPress } from '../page-runtime/press';
+import { focusPressTarget, performPress } from '../page-runtime/press';
 import { performDomScroll } from '../page-runtime/scroll';
 import { performSelectOption, performSetChecked } from '../page-runtime/select-check';
 import { performWaitFor } from '../page-runtime/wait-for';
@@ -69,6 +69,43 @@ function mergeNewTabObservation(result: any, observed: any): any {
       ? `A new tab opened and Browser Control attached it to this session. Continue with snapshot or wait_for on tab ${observed.openerMatch.id}.`
       : result?.suggestedNextStep,
     warnings
+  };
+}
+
+function mergePressFocusDiagnostics(result: any, focusResult: any): any {
+  if (!focusResult) return result;
+  const warnings = [...(result?.warnings || []), ...(focusResult.warnings || [])];
+  return {
+    ...result,
+    selector: result?.selector ?? focusResult.selector ?? null,
+    target: result?.target || focusResult.target,
+    focusBefore: result?.focusBefore || focusResult.focusBefore,
+    focusAfter: result?.focusAfter || focusResult.focusAfter,
+    focused: focusResult.focused,
+    focus: {
+      before: focusResult.focusBefore || null,
+      after: focusResult.focusAfter || null,
+      target: focusResult.target || null,
+      focused: Boolean(focusResult.focused)
+    },
+    warnings
+  };
+}
+
+async function focusTargetForCdpKeyboard(tabId: number, selector: unknown): Promise<any> {
+  const targetSelector = typeof selector === 'string' && selector ? selector : null;
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: focusPressTarget,
+    args: [targetSelector],
+    world: 'MAIN'
+  });
+  return results[0]?.result || {
+    focused: false,
+    selector: targetSelector,
+    strategyUsed: 'cdp_keyboard',
+    error: 'Focus script returned no result',
+    recoverable: true
   };
 }
 
@@ -254,30 +291,21 @@ export async function handlePress(args: CommandArgs = {}, session: SessionName):
   const tabId = args?.tabId || getActiveTabId(session);
   if (!tabId) throw new Error('No active tab in session');
   const strategy = args?.strategy || 'auto';
-  const selectorIsAgentRef = typeof selector === 'string' && selector.startsWith('@e');
   const beforeIds = await beginNewTabWatch();
 
-  if (selectorIsAgentRef && strategy === 'cdp_keyboard') {
-    return {
-      pressed: false,
-      key,
-      selector,
-      strategyUsed: 'cdp_keyboard',
-      error: 'cdp_keyboard does not support @e selectors because stale-reference validation requires DOM target resolution. Use auto or dom_keyboard.',
-      code: 'UNSUPPORTED_SELECTOR_STRATEGY',
-      recoverable: true,
-      retryable: true
-    };
-  }
+  if (strategy === 'auto' || strategy === 'cdp_keyboard') {
+    const focusResult = await focusTargetForCdpKeyboard(tabId, selector);
+    if (focusResult?.error) return observeNewTabResult(focusResult);
 
-  if (!selectorIsAgentRef && (strategy === 'auto' || strategy === 'cdp_keyboard')) {
     const cdpResult = await performCdpKeyboardPress(tabId, key, args || {});
-    if (!cdpResult.error || strategy === 'cdp_keyboard') return observeNewTabResult(cdpResult);
+    const cdpResultWithFocus = mergePressFocusDiagnostics(cdpResult, focusResult);
+    if (!cdpResult.error || strategy === 'cdp_keyboard') return observeNewTabResult(cdpResultWithFocus);
     args = {
       ...args,
       strategy: 'dom_keyboard',
       warnings: [
         ...(args?.warnings || []),
+        ...(focusResult?.warnings || []),
         `cdp_keyboard unavailable in auto mode; fell back to dom_keyboard: ${cdpResult.error}`
       ]
     };
