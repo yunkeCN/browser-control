@@ -10,7 +10,6 @@ agent command envelope
   -> skills/browser-control/scripts/daemon.js
   -> localhost WebSocket
   -> skills/browser-control/extension/service-worker.js
-  -> skills/browser-control/extension/content.js
   -> Chrome DOM
 ```
 

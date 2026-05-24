@@ -29,7 +29,6 @@ test('extension build emits declared Chrome-loadable output from src/extension',
   for (const relativePath of [
     extensionPath('manifest.json'),
     extensionPath('service-worker.js'),
-    extensionPath('content.js'),
     extensionPath('popup.html'),
     extensionPath('popup.js'),
     extensionPath('options.html'),
@@ -49,7 +48,7 @@ test('generated extension manifest preserves source manifest semantics', () => {
   assert.deepEqual(generated, { ...source, version: packageJson.version });
   assert.equal(generated.version, packageJson.version);
   assert.equal(generated.background.service_worker, 'service-worker.js');
-  assert.deepEqual(generated.content_scripts[0].js, ['content.js']);
+  assert.equal(generated.content_scripts, undefined);
   assert.equal(generated.action.default_popup, 'popup.html');
   assert.equal(generated.options_page, 'options.html');
 });
@@ -57,7 +56,6 @@ test('generated extension manifest preserves source manifest semantics', () => {
 test('generated runtime entrypoints remain classic scripts without runtime module imports', () => {
   for (const relativePath of [
     extensionPath('service-worker.js'),
-    extensionPath('content.js'),
     extensionPath('popup.js'),
     extensionPath('options.js')
   ]) {

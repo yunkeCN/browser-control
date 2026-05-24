@@ -420,8 +420,7 @@ skills/browser-control/
 ├── SKILL.md
 ├── extension/
 │   ├── manifest.json
-│   ├── service-worker.js
-│   └── content.js
+│   └── service-worker.js
 ├── scripts/
 │   ├── browser-control.js
 │   ├── daemon.js

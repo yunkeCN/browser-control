@@ -36,7 +36,6 @@ When working from the source repository, run `npm run build` to regenerate `skil
 | --- | --- |
 | Daemon or CLI code under `skills/browser-control/scripts/` | Run `browser-control restart`; extension reload usually not required. |
 | Extension source under `src/extension` affecting service worker or `manifest.json` | Run `npm run build`, then click **Reload** for the unpacked extension in `chrome://extensions`. |
-| Extension source under `src/extension` affecting `content.js` | Run `npm run build`, reload the extension, then refresh already-open target pages. |
 | Docs/tests only | No browser reload required. |
 
 The extension reports source-channel runtime metadata and does not include local private source paths.

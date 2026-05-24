@@ -7,79 +7,72 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
-const contentSource = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'extension', 'content.js'), 'utf8');
 const serviceWorkerSource = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'extension', 'service-worker.js'), 'utf8');
 
-test('wait_for text succeeds only for visible text in both runtimes', async () => {
-  for (const runtime of ['service-worker', 'content']) {
-    const visible = createElement('div', {
-      id: 'message',
-      text: 'Saved   successfully',
-      rect: visibleRect()
-    });
-    const hidden = createElement('div', {
-      id: 'hidden',
-      text: 'Hidden Ready',
-      rect: visibleRect(),
-      style: { display: 'none' }
-    });
-    const ariaHidden = createElement('div', {
-      id: 'aria-hidden',
-      text: 'Aria Hidden Ready',
-      rect: visibleRect(),
-      attributes: { 'aria-hidden': 'true' }
-    });
-    const document = createFakeDocument([visible, hidden, ariaHidden]);
-    const waitFor = loadPerformWaitFor(runtime, document);
+test('wait_for text succeeds only for visible text in the page runtime', async () => {
+  const visible = createElement('div', {
+    id: 'message',
+    text: 'Saved   successfully',
+    rect: visibleRect()
+  });
+  const hidden = createElement('div', {
+    id: 'hidden',
+    text: 'Hidden Ready',
+    rect: visibleRect(),
+    style: { display: 'none' }
+  });
+  const ariaHidden = createElement('div', {
+    id: 'aria-hidden',
+    text: 'Aria Hidden Ready',
+    rect: visibleRect(),
+    attributes: { 'aria-hidden': 'true' }
+  });
+  const document = createFakeDocument([visible, hidden, ariaHidden]);
+  const waitFor = loadPerformWaitFor(document);
 
-    const result = await waitFor({ text: 'Saved successfully', timeoutMs: 0 });
-    assert.equal(result.waited, true, runtime);
-    assert.equal(result.text, 'Saved successfully', runtime);
+  const result = await waitFor({ text: 'Saved successfully', timeoutMs: 0 });
+  assert.equal(result.waited, true);
+  assert.equal(result.text, 'Saved successfully');
 
-    const hiddenResult = await waitFor({ text: 'Hidden Ready', timeoutMs: 0 });
-    assert.match(hiddenResult.error, /Timed out waiting for text: "Hidden Ready"/, runtime);
+  const hiddenResult = await waitFor({ text: 'Hidden Ready', timeoutMs: 0 });
+  assert.match(hiddenResult.error, /Timed out waiting for text: "Hidden Ready"/);
 
-    const ariaHiddenResult = await waitFor({ text: 'Aria Hidden Ready', timeoutMs: 0 });
-    assert.match(ariaHiddenResult.error, /Timed out waiting for text: "Aria Hidden Ready"/, runtime);
-  }
+  const ariaHiddenResult = await waitFor({ text: 'Aria Hidden Ready', timeoutMs: 0 });
+  assert.match(ariaHiddenResult.error, /Timed out waiting for text: "Aria Hidden Ready"/);
 });
 
 test('wait_for text includes visible control labels and values but excludes password values', async () => {
-  for (const runtime of ['service-worker', 'content']) {
-    const input = createElement('input', {
-      id: 'search',
-      rect: visibleRect(),
-      attributes: { placeholder: 'Search projects' }
-    });
-    const textarea = createElement('textarea', {
-      id: 'notes',
-      rect: visibleRect(),
-      value: 'Release notes ready'
-    });
-    const password = createElement('input', {
-      id: 'secret',
-      rect: visibleRect(),
-      value: 'Never Match Me',
-      attributes: { type: 'password' }
-    });
-    const document = createFakeDocument([input, textarea, password]);
-    const waitFor = loadPerformWaitFor(runtime, document);
+  const input = createElement('input', {
+    id: 'search',
+    rect: visibleRect(),
+    attributes: { placeholder: 'Search projects' }
+  });
+  const textarea = createElement('textarea', {
+    id: 'notes',
+    rect: visibleRect(),
+    value: 'Release notes ready'
+  });
+  const password = createElement('input', {
+    id: 'secret',
+    rect: visibleRect(),
+    value: 'Never Match Me',
+    attributes: { type: 'password' }
+  });
+  const document = createFakeDocument([input, textarea, password]);
+  const waitFor = loadPerformWaitFor(document);
 
-    assert.equal((await waitFor({ text: 'Search projects', timeoutMs: 0 })).waited, true, runtime);
-    assert.equal((await waitFor({ text: 'Release notes ready', timeoutMs: 0 })).waited, true, runtime);
-    assert.match((await waitFor({ text: 'Never Match Me', timeoutMs: 0 })).error, /Timed out waiting for text/, runtime);
-  }
+  assert.equal((await waitFor({ text: 'Search projects', timeoutMs: 0 })).waited, true);
+  assert.equal((await waitFor({ text: 'Release notes ready', timeoutMs: 0 })).waited, true);
+  assert.match((await waitFor({ text: 'Never Match Me', timeoutMs: 0 })).error, /Timed out waiting for text/);
 });
 
 test('wait_for keeps selector and expression behavior unchanged', async () => {
-  for (const runtime of ['service-worker', 'content']) {
-    const done = createElement('div', { id: 'done', text: 'Done', rect: visibleRect() });
-    const document = createFakeDocument([done]);
-    const waitFor = loadPerformWaitFor(runtime, document);
+  const done = createElement('div', { id: 'done', text: 'Done', rect: visibleRect() });
+  const document = createFakeDocument([done]);
+  const waitFor = loadPerformWaitFor(document);
 
-    assert.equal((await waitFor({ selector: '#done', timeoutMs: 0 })).waited, true, runtime);
-    assert.equal((await waitFor({ expression: '1 + 1 === 2', timeoutMs: 0 })).waited, true, runtime);
-  }
+  assert.equal((await waitFor({ selector: '#done', timeoutMs: 0 })).waited, true);
+  assert.equal((await waitFor({ expression: '1 + 1 === 2', timeoutMs: 0 })).waited, true);
 });
 
 test('wait_for docs and protocol expose text semantics', () => {
@@ -103,13 +96,9 @@ test('service-worker wait_for handler passes text into page wait runtime', () =>
   assert.match(serviceWorkerSource, /Wait script returned no result/);
 });
 
-function loadPerformWaitFor(runtime, document) {
-  const source = runtime === 'service-worker' ? serviceWorkerSource : contentSource;
-  const fnSource = extractFunction(source, 'performWaitFor');
+function loadPerformWaitFor(document) {
+  const fnSource = extractFunction(serviceWorkerSource, 'performWaitFor');
   const sandbox = createVmContext(document);
-  if (runtime === 'content') {
-    sandbox.findElement = selector => document.querySelector(selector);
-  }
   vm.createContext(sandbox);
   return vm.runInContext(`(${fnSource})`, sandbox);
 }

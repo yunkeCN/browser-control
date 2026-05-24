@@ -21,7 +21,6 @@ const banner = [
 
 const scriptOutputs = [
   { out: 'service-worker.js', entry: 'service-worker/index.ts' },
-  { out: 'content.js', entry: 'content/index.ts' },
   { out: 'popup.js', entry: 'ui/popup.ts' },
   { out: 'options.js', entry: 'ui/options.ts' }
 ];

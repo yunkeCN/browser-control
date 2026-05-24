@@ -7,14 +7,22 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
-const contentSource = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'extension', 'content.js'), 'utf8');
+const serviceWorkerSource = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'extension', 'service-worker.js'), 'utf8');
 
-function extractClickRuntime() {
-  const start = contentSource.indexOf('function findElement');
-  const end = contentSource.indexOf('function performFill', start);
-  assert.ok(start > 0, 'findElement exists');
-  assert.ok(end > start, 'performFill follows click runtime');
-  return contentSource.slice(start, end);
+function extractFunction(source, name) {
+  const start = source.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `${name} source should exist`);
+  const signatureMatch = new RegExp(`function\\s+${name}\\s*\\([^]*?\\)\\s*\\{`).exec(source.slice(start));
+  assert.notEqual(signatureMatch, null, `${name} signature should include a body`);
+  const bodyStart = start + signatureMatch[0].length - 1;
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '{') depth += 1;
+    if (char === '}') depth -= 1;
+    if (depth === 0) return source.slice(start, index + 1).trim();
+  }
+  assert.fail(`${name} body should end`);
 }
 
 class FakeEvent {
@@ -102,7 +110,7 @@ function loadRuntime({ target, hit = target }) {
     PointerEvent: FakeEvent,
     globalThis: {}
   };
-  vm.runInNewContext(`${extractClickRuntime()}\nglobalThis.api = { performClick, performDomPointerClick, performElementClick };`, sandbox);
+  vm.runInNewContext(`globalThis.api = { performClick: (${extractFunction(serviceWorkerSource, 'performClick')}) };`, sandbox);
   return sandbox.globalThis.api;
 }
 

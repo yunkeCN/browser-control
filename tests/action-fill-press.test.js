@@ -7,24 +7,21 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
-const content = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'extension', 'content.js'), 'utf8');
 const serviceWorker = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'extension', 'service-worker.js'), 'utf8');
 
 test('fill action exposes clear commit diagnostics and sensitive value redaction', () => {
-  for (const source of [content, serviceWorker]) {
-    assert.match(source, /function performFill\(selector, value, options = \{\}\)/);
-    assert.match(source, /options\?\.clear !== false/);
-    assert.match(source, /collapse\(false\)/);
-    assert.match(source, /options\?\.commit \|\| ['"]change['"]/);
-    assert.match(source, /beforeinput/);
-    assert.match(source, /commit\w* === ['\"]blur['\"]/);
-    assert.match(source, /commit\w* === ['\"]enter['\"]/);
-    assert.match(source, /redacted/);
-    assert.match(source, /password\|passwd\|token\|secret/);
-    assert.match(source, /strategyUsed/);
-    assert.match(source, /tag === ['"]input['"] \? HTMLInputElement\.prototype : HTMLTextAreaElement\.prototype/);
-    assert.match(source, /Fill verification failed/);
-  }
+  assert.match(serviceWorker, /function performFill\(selector, value, options = \{\}\)/);
+  assert.match(serviceWorker, /options\?\.clear !== false/);
+  assert.match(serviceWorker, /collapse\(false\)/);
+  assert.match(serviceWorker, /options\?\.commit \|\| ['"]change['"]/);
+  assert.match(serviceWorker, /beforeinput/);
+  assert.match(serviceWorker, /commit\w* === ['\"]blur['\"]/);
+  assert.match(serviceWorker, /commit\w* === ['\"]enter['\"]/);
+  assert.match(serviceWorker, /redacted/);
+  assert.match(serviceWorker, /password\|passwd\|token\|secret/);
+  assert.match(serviceWorker, /strategyUsed/);
+  assert.match(serviceWorker, /tag === ['"]input['"] \? HTMLInputElement\.prototype : HTMLTextAreaElement\.prototype/);
+  assert.match(serviceWorker, /Fill verification failed/);
 });
 
 test('service-worker fill uses textarea native setter and verifies final value', () => {
@@ -51,16 +48,14 @@ test('service-worker fill returns an error when the value did not stick', () => 
 });
 
 test('press action reports strategy focus key code and modifier diagnostics', () => {
-  for (const source of [content, serviceWorker]) {
-    assert.match(source, /function performPress\(key, selector, options = \{\}\)/);
-    assert.match(source, /strategyUsed:\s*options\?\.strategy \|\| ['"]dom_keyboard['"]/);
-    assert.match(source, /focusBefore/);
-    assert.match(source, /focusAfter/);
-    assert.match(source, /modifiers/);
-    assert.match(source, /altKey/);
-    assert.match(source, /ctrlKey/);
-    assert.match(source, /shiftKey/);
-  }
+  assert.match(serviceWorker, /function performPress\(key, selector, options = \{\}\)/);
+  assert.match(serviceWorker, /strategyUsed:\s*options\?\.strategy \|\| ['"]dom_keyboard['"]/);
+  assert.match(serviceWorker, /focusBefore/);
+  assert.match(serviceWorker, /focusAfter/);
+  assert.match(serviceWorker, /modifiers/);
+  assert.match(serviceWorker, /altKey/);
+  assert.match(serviceWorker, /ctrlKey/);
+  assert.match(serviceWorker, /shiftKey/);
 });
 
 function loadServiceWorkerPerformFill(document) {
