@@ -219,14 +219,14 @@ async function main() {
     }
 
     info('Test 6: Interact with form controls');
-    check('checkbox click ok', true, (await apiCall('click', { selector: '#active' }))?.ok === true);
+    check('checkbox click ok', true, (await apiCall('click', { target: 'css=#active' }))?.ok === true);
     check('wait_for ok', true, (await apiCall('wait_for', { selector: '#dynamic', timeoutMs: 5000 }))?.ok === true);
     check('press ok', true, (await apiCall('press', { selector: '#email', key: 'Enter' }))?.ok === true);
 
     if (buttonRef) {
       info('Test 7: Click the submit button and trigger fixture API request');
       check('network_start ok', true, (await apiCall('network_start', { filter: `${fixtureUrl}/api.json` }))?.ok === true);
-      check('click ok', true, (await apiCall('click', { selector: buttonRef }))?.ok === true);
+      check('click ok', true, (await apiCall('click', { target: buttonRef }))?.ok === true);
       await new Promise(resolve => setTimeout(resolve, 1000));
     } else {
       console.log(color.red('  FAIL: submit button element missing'));

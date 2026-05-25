@@ -233,7 +233,7 @@ test('mcp command covers every protocol command', async (t) => {
   const { client } = await withMcpClient(t, { BROWSER_CONTROL_PORT: String(fake.server.address().port) });
   const requiredArgs = {
     navigate: { url: 'https://example.com' },
-    click: { selector: '@e1jm0sbb_1' },
+    click: { target: '@e1jm0sbb_1' },
     click_probe: { selector: '@e1jm0sbb_1' },
     fill: { selector: '@e1jm0sbb_1', value: 'hello' },
     press: { key: 'Enter' },
@@ -315,7 +315,7 @@ test('mcp command returns structured validation feedback', async (t) => {
   });
   assert.equal(missing.isError, true);
   assert.equal(missing.structuredContent.error.code, 'VALIDATION_ERROR');
-  assert.match(JSON.stringify(missing.structuredContent.error.issues), /selector/);
+  assert.match(JSON.stringify(missing.structuredContent.error.issues), /target/);
 
   const hint = await client.callTool({
     name: 'browser_control_command',

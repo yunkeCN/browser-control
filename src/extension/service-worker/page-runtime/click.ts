@@ -217,7 +217,7 @@ export function performClick(selector: string, options: any = {}): any {
         strategyUsed: options?.strategyUsed || 'dom_pointer',
         target: localDescribeElement(el),
         hitTest: geometry.hitTest,
-        warnings: ['Target center is covered. Use a fresh snapshot, close the overlay, choose a visible child target, or retry with force:true only after confirming intent.']
+        warnings: ['Target center is covered. Use a fresh snapshot, close the overlay, or choose a visible child target.']
       };
     }
     if (!geometry.hitWithinTarget) warnings.push('force:true bypassed covered-element hit-test; dispatched events to the requested element.');

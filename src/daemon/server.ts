@@ -83,6 +83,17 @@ const OBSERVATION_DEFAULTS = {
   maxNetworkRequests: 100
 };
 
+const CLICK_AFTER_DEFAULTS = {
+  initialDelayMs: 80,
+  stableWindowMs: 120,
+  timeoutMs: 700,
+  snapshotOptions: {
+    viewportOnly: true,
+    hasVisibleText: true,
+    boxes: true
+  }
+};
+
 function getOrCreateSession(name) {
   if (!name) name = 'default';
   if (!sessions.has(name)) {
@@ -156,6 +167,26 @@ function ensureActionObservationSupported(request) {
       requested: ['expectChange', 'observe'],
       extensionCapabilities: extensionRuntime.capabilities || [],
       nextSteps: ['Reload the Browser Control extension from the source path, then rerun doctor --json.']
+    });
+  }
+}
+
+function clickAfterMode(request) {
+  return request.command === 'click' ? (request.args.after || 'auto') : 'none';
+}
+
+function clickAfterRequested(request) {
+  return request.command === 'click' && clickAfterMode(request) !== 'none';
+}
+
+function ensureClickAfterSupported(request) {
+  if (!clickAfterRequested(request)) return;
+  const supported = extensionHasCapabilities(['observe_capture']);
+  if (supported === false) {
+    throw new ProtocolError('UNSUPPORTED', 'Connected extension metadata does not advertise primitives required for click after observation.', {
+      requested: ['click.after', 'observe_capture'],
+      extensionCapabilities: extensionRuntime.capabilities || [],
+      nextSteps: ['Reload the Browser Control extension from the source path, or call click with after:"none" for a raw click.']
     });
   }
 }
@@ -510,14 +541,14 @@ function summarizeNetworkSince(networkList, marker, limit = OBSERVATION_DEFAULTS
   };
 }
 
-async function handleObserveDiff(request) {
+async function handleObserveDiff(request, currentOverride = null) {
   const baseline = findObservationBaseline(request.session, request.args.baselineId, request.args.tabId);
   if (!baseline) {
     throw new Error(`Observation baseline not found or expired: ${request.args.baselineId}. Run observe_start again for the active tab.`);
   }
   baseline.lastAccessedAtMs = Date.now();
 
-  const current = await captureObservation(request, { tabId: request.args.tabId || baseline.tabId });
+  const current = currentOverride || await captureObservation(request, { tabId: request.args.tabId || baseline.tabId });
   const currentNavigationKey = observationNavigationKey(current);
   const urlChanged = currentNavigationKey !== baseline.navigationKey;
   const titleChanged = String(current.title || '') !== String(baseline.title || '');
@@ -628,6 +659,87 @@ function summarizeActionObservation(diffData, expectChange) {
   };
 }
 
+function observationSignature(observation) {
+  const runs = Array.isArray(observation?.textRuns) ? observation.textRuns : [];
+  return JSON.stringify({
+    url: observation?.url || null,
+    title: observation?.title || '',
+    activeElement: observation?.activeElement || null,
+    textRunCount: observation?.caps?.textRunCount || runs.length,
+    visibleTextChars: observation?.caps?.visibleTextChars || (typeof observation?.visibleText === 'string' ? observation.visibleText.length : 0),
+    texts: runs.slice(0, 500).map(run => run?.normalizedText || run?.text || '')
+  });
+}
+
+async function waitForClickSettle(request, tabId) {
+  const startedAtMs = Date.now();
+  let captures = 0;
+  await delay(CLICK_AFTER_DEFAULTS.initialDelayMs);
+
+  let current = await captureObservation(request, { tabId });
+  captures += 1;
+  let currentSignature = observationSignature(current);
+
+  while (Date.now() - startedAtMs < CLICK_AFTER_DEFAULTS.timeoutMs) {
+    const remainingMs = CLICK_AFTER_DEFAULTS.timeoutMs - (Date.now() - startedAtMs);
+    await delay(Math.min(CLICK_AFTER_DEFAULTS.stableWindowMs, Math.max(0, remainingMs)));
+    const next = await captureObservation(request, { tabId });
+    captures += 1;
+    const nextSignature = observationSignature(next);
+    if (nextSignature === currentSignature) {
+      return {
+        observation: next,
+        settle: {
+          settled: true,
+          elapsedMs: Date.now() - startedAtMs,
+          captures,
+          initialDelayMs: CLICK_AFTER_DEFAULTS.initialDelayMs,
+          stableWindowMs: CLICK_AFTER_DEFAULTS.stableWindowMs,
+          timeoutMs: CLICK_AFTER_DEFAULTS.timeoutMs
+        }
+      };
+    }
+    current = next;
+    currentSignature = nextSignature;
+  }
+
+  return {
+    observation: current,
+    settle: {
+      settled: false,
+      timedOut: true,
+      elapsedMs: Date.now() - startedAtMs,
+      captures,
+      initialDelayMs: CLICK_AFTER_DEFAULTS.initialDelayMs,
+      stableWindowMs: CLICK_AFTER_DEFAULTS.stableWindowMs,
+      timeoutMs: CLICK_AFTER_DEFAULTS.timeoutMs
+    }
+  };
+}
+
+function shouldReturnClickPostSnapshot(mode, diffData, result) {
+  if (mode === 'snapshot') return true;
+  if (mode !== 'auto') return false;
+  const textDiff = diffData?.textDiff || {};
+  return Boolean(
+    result?.newTab ||
+    (Array.isArray(result?.newTabs) && result.newTabs.length) ||
+    diffData?.urlChanged ||
+    diffData?.titleChanged ||
+    textDiff.activeElementChanged ||
+    textDiff.visibleTextRunCountDelta ||
+    textDiff.visibleTextCharsDelta ||
+    (Array.isArray(textDiff.addedText) && textDiff.addedText.length) ||
+    (Array.isArray(textDiff.removedText) && textDiff.removedText.length)
+  );
+}
+
+function postSnapshotTabId(result, fallbackTabId) {
+  if (result?.newTab?.id) return result.newTab.id;
+  if (Array.isArray(result?.newTabs) && result.newTabs.length === 1 && result.newTabs[0]?.id) return result.newTabs[0].id;
+  return fallbackTabId;
+}
+
 async function runActionWithObservation(request, mapped) {
   const observeArgs = actionObserveArgs(request);
   const baselineId = observeArgs.baselineId || `action_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -661,6 +773,76 @@ async function runActionWithObservation(request, mapped) {
   return { data, artifacts: diff.artifacts || [] };
 }
 
+async function runClickWithAfter(request, mapped) {
+  const mode = clickAfterMode(request);
+  if (mode === 'none') {
+    const data = await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
+    return { data, artifacts: [] };
+  }
+
+  const baselineId = `click_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const start = await handleObserveStart({
+    ...request,
+    args: {
+      tabId: request.args.tabId,
+      baselineId,
+      includeNetworkMarker: true
+    }
+  });
+
+  const result = await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
+  const settleTargetTabId = postSnapshotTabId(result, start.data.tabId);
+  const settled = await waitForClickSettle(request, settleTargetTabId);
+
+  const diff = await handleObserveDiff({
+    ...request,
+    args: {
+      baselineId: start.data.baselineId,
+      tabId: start.data.tabId,
+      includeNetwork: true,
+      allowStaleNavigationDiff: true
+    }
+  }, settled.observation);
+
+  const changes = summarizeActionObservation(diff.data, false);
+  const artifacts = [...(diff.artifacts || [])];
+  let postSnapshot = null;
+  let postSnapshotError = null;
+  if (shouldReturnClickPostSnapshot(mode, diff.data, result)) {
+    try {
+      const rawSnapshot = await sendCommandToExtension(request.session, 'snapshot', {
+        ...CLICK_AFTER_DEFAULTS.snapshotOptions,
+        tabId: settleTargetTabId
+      }, request.timeoutMs);
+      const extracted = extractArtifacts('snapshot', rawSnapshot, artifactStore);
+      postSnapshot = extracted.data;
+      artifacts.push(...extracted.artifacts);
+    } catch (err) {
+      postSnapshotError = err?.message || String(err);
+    }
+  }
+
+  const data = result && typeof result === 'object' && !Array.isArray(result)
+    ? { ...result }
+    : { clicked: Boolean(result), result };
+  data.after = mode;
+  data.settle = settled.settle;
+  data.changes = changes;
+  if (postSnapshot) data.postSnapshot = postSnapshot;
+  if (postSnapshotError) {
+    data.postSnapshot = null;
+    data.warnings = [
+      ...(Array.isArray(data.warnings) ? data.warnings : []),
+      `Post-click snapshot failed: ${postSnapshotError}`
+    ];
+  }
+  if (!postSnapshot && mode === 'auto') {
+    data.postSnapshot = null;
+    data.postSnapshotReason = 'No major visible, focus, title, URL, or new-tab change was detected.';
+  }
+  return { data, artifacts };
+}
+
 async function handleCommand(req, res) {
   const startedAt = new Date().toISOString();
   let request;
@@ -683,6 +865,7 @@ async function handleCommand(req, res) {
   try {
     log('info', `Command: ${request.command}`, { session: request.session, args: Object.keys(request.args) });
     ensureActionObservationSupported(request);
+    ensureClickAfterSupported(request);
     if (request.command === 'observe_start' || request.command === 'observe_diff') {
       const observed = request.command === 'observe_start'
         ? await handleObserveStart(request)
@@ -697,11 +880,15 @@ async function handleCommand(req, res) {
         diagnostics: { extensionConnected, pendingRequests: pendingRequests.size, runtime: runtimeMetadata(), warnings: capabilityWarnings() }
       }));
     }
-    const observedAction = actionObservationRequested(request)
+    const clickAfter = clickAfterRequested(request)
+      ? await runClickWithAfter(request, mapped)
+      : null;
+    const observedAction = !clickAfter && actionObservationRequested(request)
       ? await runActionWithObservation(request, mapped)
       : null;
-    const result = observedAction ? observedAction.data : await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
+    const result = clickAfter ? clickAfter.data : observedAction ? observedAction.data : await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
     const { data, artifacts } = extractArtifacts(request.command, result, artifactStore);
+    if (clickAfter?.artifacts?.length) artifacts.push(...clickAfter.artifacts);
     if (observedAction?.artifacts?.length) artifacts.push(...observedAction.artifacts);
     const tab = data && typeof data === 'object' ? (data.tab || data.tabId || null) : null;
     if (request.command === 'navigate' && tab !== null) cleanupSessionObservationBaselines(request.session, tab);

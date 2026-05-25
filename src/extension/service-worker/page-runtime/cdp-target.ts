@@ -149,7 +149,7 @@ export function resolveClickTargetForCdp(selector: string, options: any = {}): a
       strategyUsed: 'cdp_mouse',
       target: localDescribeElement(el),
       hitTest,
-      warnings: ['Target center is covered. Use force:true only after confirming the overlay should be bypassed.']
+      warnings: ['Target center is covered. Use a fresh snapshot, close the overlay, or choose a visible child target.']
     };
   }
 

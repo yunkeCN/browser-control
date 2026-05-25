@@ -13,22 +13,22 @@ Synthetic DOM events remain useful, especially when the Chrome debugger is unava
 
 Introduce a strategy-aware action layer for state-changing commands:
 
-- `click.strategy`: `auto`, `cdp_mouse`, `dom_pointer`, or `element_click`.
+- `click` chooses an internal strategy automatically from `target`.
 - `fill.strategy`: `native_setter`, `text_input`, or `paste_like`.
 - `press.strategy`: `auto`, `cdp_keyboard`, or `dom_keyboard`.
 
-The existing command shapes remain valid. `click({ selector })`, `fill({ selector, value })`, and `press({ key })` continue to validate. Strategy and diagnostics fields are additive.
+The public click command is intentionally small: `click({ target, after? })`, where `target` is a snapshot `@e` ref or an explicit `css=` fallback. `fill({ selector, value })` and `press({ key })` continue to validate. Fill/press strategy and diagnostics fields are additive.
 
-Default `click` uses `auto`: prefer CDP mouse input when debugger ownership is safe, otherwise use `dom_pointer`. The DOM pointer path dispatches one coherent pointer/mouse sequence and must not call `el.click()` after a successful sequence. Direct `el.click()` is available only through the explicit `element_click` strategy and must report synthetic/untrusted limitations.
+Default `click` prefers CDP mouse input when debugger ownership is safe, otherwise it uses DOM pointer fallback. The DOM pointer path dispatches one coherent pointer/mouse sequence and must not call `el.click()` after a successful sequence.
 
 Covered elements fail by default with recoverable diagnostics. `force: true` may bypass the hit-test guard, but only when the agent has confirmed the overlay is intentional.
 
 ## Consequences
 
-- Action results should include `strategyUsed`, `target`, `hitTest`, `focusBefore`, `focusAfter`, `warnings`, and optional `actionObservation`.
+- Click results should include `strategyUsed`, `target`, `hitTest`, `focusBefore`, `focusAfter`, `warnings`, `settle`, `changes`, and optional `postSnapshot`.
 - CDP strategies must respect debugger ownership used by network and PDF features. Explicit CDP failures should be recoverable and visible; silent fallback is reserved for `auto`.
 - Documentation must teach agents to inspect warnings and no-delta outcomes before retrying.
-- Tests must prove the default DOM click no longer double-triggers, covered targets are diagnosable, and existing requests remain valid.
+- Tests must prove the default DOM click no longer double-triggers, covered targets are diagnosable, and legacy public click arguments are rejected with migration hints.
 
 ## Alternatives considered
 

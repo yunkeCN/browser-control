@@ -112,10 +112,10 @@ Response data:
 
 ### Action-coupled observation
 
-`click`, `fill`, and `press` support `expectChange` and `observe`:
+`click` uses its `after` option for action-coupled observation; `fill` and `press` continue to support `expectChange` and `observe`:
 
 ```json
-{"command":"click","args":{"selector":"@e4","expectChange":true,"observe":{"includeNetwork":true,"waitMs":150}}}
+{"command":"click","args":{"target":"@e4_1","after":"auto"}}
 ```
 
 Semantics:
@@ -123,7 +123,7 @@ Semantics:
 - The daemon creates a pre-action baseline using the same bounded observation path as `observe_start`.
 - The action runs normally.
 - The daemon waits briefly, then computes an `observe_diff`-style delta.
-- The command result includes `actionObservation` with visible text, optional network changes, stale/navigation metadata, and warnings when `expectChange` was requested but no meaningful delta was observed.
+- For `click`, the command result includes `changes`, `settle`, and optional `postSnapshot`. For `fill` and `press`, the result includes `actionObservation` with visible text, optional network changes, stale/navigation metadata, and warnings when `expectChange` was requested but no meaningful delta was observed.
 - The explicit `observe_start` / `observe_diff` lifecycle remains the preferred debugging and multi-step workflow primitive.
 
 ## Baseline storage

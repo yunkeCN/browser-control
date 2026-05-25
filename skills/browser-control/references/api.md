@@ -16,7 +16,7 @@ Override host and port with `BROWSER_CONTROL_HOST` and `BROWSER_CONTROL_PORT`. O
 - Daemon version, runtime schema, and daemon-owned capabilities such as `actionObservation`.
 - Extension manifest/build metadata and browser-side capabilities such as `navigateFinalMetadata`, observation primitives, CDP-backed actions, and DOM pointer fallback.
 
-Missing legacy extension metadata is a warning rather than a global command blocker. A command fails with `UNSUPPORTED` only when it explicitly requests a feature that the connected runtime metadata shows is unavailable, for example `expectChange`/`observe` without extension observation primitives.
+Missing legacy extension metadata is a warning rather than a global command blocker. A command fails with `UNSUPPORTED` only when it explicitly requests a feature that the connected runtime metadata shows is unavailable, for example `expectChange`/`observe` or click `after` observation without extension observation primitives.
 
 ## CLI
 
@@ -44,7 +44,7 @@ Browser command helper examples:
 
 ```bash
 node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{}'
-node skills/browser-control/scripts/browser-control.js command click --session demo --args '{"elementRef":"@e1jm0sbb_1"}'
+node skills/browser-control/scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1"}'
 node skills/browser-control/scripts/browser-control.js command click_probe --session demo --args '{"elementRef":"@e1jm0sbb_1","filter":"/api/"}'
 node skills/browser-control/scripts/browser-control.js command scroll --session demo --args '{"deltaY":800,"strategy":"dom"}'
 node skills/browser-control/scripts/browser-control.js command evaluate --session demo --code-file ./snippet.js
@@ -141,7 +141,7 @@ Response semantics:
 - `boxes:true` adds viewport-relative boxes to the rendered snapshot text and tree.
 - If `snapshot` text exceeds 100k characters, Browser Control stores the full JSON snapshot as a local `snapshot` artifact, returns a short preview with `data.artifact`, and includes filtering guidance. Narrow large pages with `textIncludes`, `roles`, `tags`, `hasVisibleText:true`, or `viewportOnly:true`.
 - Likely sensitive input values, such as password/token/secret/session/cookie/API-key fields, are redacted by default with `attributes.redacted:true` and optional `valueLength`.
-- `@e` references use the format `@e<structureId>_<revision>`. They are page-state references scoped to the latest snapshot of the current document, not permanent selectors. For element actions, prefer `elementRef` for these strict snapshot references. `selector` remains available as the CSS selector / compatibility fallback. Refresh the snapshot after navigation, dialog reconstruction, filtering, list reordering, or significant DOM changes. Browser Control rejects stale revisions with `STALE_ELEMENT_REFERENCE` rather than clicking a changed element.
+- `@e` references use the format `@e<structureId>_<revision>`. They are page-state references scoped to the latest snapshot of the current document, not permanent selectors. For `click`, pass the ref as `target`; for other element actions, prefer `elementRef`. CSS fallback for click must be explicit with `target:"css=..."`. Refresh the snapshot after navigation, dialog reconstruction, filtering, list reordering, or significant DOM changes. Browser Control rejects stale revisions with `STALE_ELEMENT_REFERENCE` rather than clicking a changed element.
 - Design notes live in `docs/adr-snapshot-aria-ai.md`.
 
 Examples:
@@ -153,21 +153,20 @@ node skills/browser-control/scripts/browser-control.js command snapshot --sessio
 
 ### `click`
 
-Click an element by strict `elementRef` (`@e<structureId>_<revision>`) or CSS `selector` fallback.
+Click an element by strict snapshot ref or an explicit CSS fallback.
 
-Arguments: `elementRef` or `selector` required, optional `tabId`, `strategy`, `force`, `button`, `clickCount`, `modifiers`, `expectChange`, `observe`, `observeNewTab`, and `expectNewTab`.
+Arguments: `target` required, optional `tabId` and `after`.
 
-Strategies:
+- `target:"@e<structureId>_<revision>"` uses a fresh snapshot ref.
+- `target:"css=<selector>"` is the explicit CSS fallback when no snapshot ref is available.
+- `after` defaults to `"auto"`. Use `"none"` for a raw click, `"changes"` for only a compact diff, or `"snapshot"` to always return a post-click snapshot.
 
-- `auto` default: prefer real CDP mouse input when safe, otherwise use DOM pointer fallback with a warning.
-- `cdp_mouse`: use Chrome debugger mouse events. If debugger ownership is unavailable, return a recoverable error instead of silently falling back.
-- `dom_pointer`: dispatch one pointer/mouse sequence against the hit-tested target. It does not call `el.click()` after a successful sequence.
-- `element_click`: explicitly call `el.click()`. This is an escape hatch, not the default, and may bypass pointer/mouse semantics.
+Browser Control chooses the click strategy internally: it prefers real CDP mouse input when safe, then falls back to DOM pointer events. Diagnostics may include `strategyUsed`, `target`, `hitTest`, `focusBefore`, `focusAfter`, `newTab` / `newTabs`, `settle`, `changes`, `postSnapshot`, and `warnings`. Covered targets fail with `COVERED_TARGET`; take a fresh snapshot, close the overlay, or choose a visible child target.
 
-Diagnostics may include `strategyUsed`, `target`, `hitTest`, `focusBefore`, `focusAfter`, `newTab` / `newTabs` when the action opens another tab, and `warnings`. When a click opens a new tab, Browser Control attaches that tab to the session and extends session network capture so the next `snapshot` or `wait_for` continues on the new page. Covered targets fail by default with covering element details; use `force:true` only after confirming the overlay should be bypassed.
+For `after:"auto"` and `after:"snapshot"`, Browser Control waits briefly for the page to settle before computing changes. Defaults are `initialDelayMs:80`, `stableWindowMs:120`, and `timeoutMs:700`. `after:"auto"` includes a post snapshot when it detects a new tab, URL/title change, focus change, or visible text change. If the post snapshot text exceeds 100k characters, the full JSON snapshot is stored as a `snapshot` artifact and the response includes filtering guidance.
 
 ```json
-{"command":"click","args":{"elementRef":"@e1jm0sbb_1","strategy":"auto","expectChange":true}}
+{"command":"click","args":{"target":"@e1jm0sbb_1","after":"auto"}}
 ```
 
 ### `click_probe`
@@ -220,7 +219,7 @@ Press diagnostics may include key/code/modifier data, focused target before and 
 
 ### Action observation options
 
-`click`, `fill`, and `press` can request action-coupled observation with `expectChange` and `observe`. When enabled, Browser Control may capture a pre-action baseline and a post-action diff. The returned `actionObservation` summarizes visible text and optional network changes. A no-delta result is a warning for the agent to inspect with `snapshot` or `observe_diff` before repeating the action.
+`click` performs post-click observation through its `after` option. `fill` and `press` can request action-coupled observation with `expectChange` and `observe`. When enabled, Browser Control may capture a pre-action baseline and a post-action diff. The returned `actionObservation` summarizes visible text and optional network changes. A no-delta result is a warning for the agent to inspect with `snapshot` or `observe_diff` before repeating the action.
 
 `observe` options are intentionally small and stable: optional `baselineId`, `includeNetwork`, `waitMs`, and the `observe_diff` caps such as `maxAdded`, `maxRemoved`, and `maxSummaryChars`. Command result shapes for browser actions remain intentionally loose because pages and fallback strategies produce dynamic diagnostics; stable fields are the result envelope, documented action diagnostics, and optional `actionObservation`.
 

@@ -19,8 +19,8 @@ export function registerBrowserControlPrompts(server: McpServer): void {
   }, () => textPrompt('Browser Control MCP usage', [
     'Use browser_control_command for browser actions and observations.',
     'The MCP server manages an active session automatically; omit session unless you intentionally need a separate session.',
-    'Typical loop: navigate -> snapshot -> use elementRef with @e ids for click/fill/press -> get_text/screenshot for reading -> browser_control_close_session when done.',
-    'When you need to click or fill an element by visible text, do not request a huge snapshot. Use snapshot with textIncludes, roles, tags, hasVisibleText, and viewportOnly to narrow the returned @e references, then click/fill with elementRef.',
+    'Typical loop: navigate -> snapshot -> use @e ids as click target or elementRef for fill/press -> get_text/screenshot for reading -> browser_control_close_session when done.',
+    'When you need to click or fill an element by visible text, do not request a huge snapshot. Use snapshot with textIncludes, roles, tags, hasVisibleText, and viewportOnly to narrow the returned @e references, then click with target or fill with elementRef.',
     'Do not build Google or YouTube search URLs with query parameters when a task asks for real UI usage; navigate to the homepage and operate the search box.',
     'Prefer snapshot before element actions and prefer @e references from the latest snapshot.'
   ].join('\n')));
@@ -45,7 +45,7 @@ export function registerBrowserControlPrompts(server: McpServer): void {
       '{"command":"navigate","args":{"url":"https://example.com"}}',
       '{"command":"snapshot","args":{"viewportOnly":true,"hasVisibleText":true}}',
       '{"command":"snapshot","args":{"textIncludes":"Submit","hasVisibleText":true,"viewportOnly":true,"roles":["button","link","textbox"]}}',
-      '{"command":"click","args":{"elementRef":"@eabc_1","expectChange":true}}',
+      '{"command":"click","args":{"target":"@eabc_1","after":"auto"}}',
       '{"command":"fill","args":{"elementRef":"@eabc_1","value":"draft","clear":true}}',
       '{"command":"press","args":{"key":"Enter","expectChange":true}}',
       '{"command":"get_text","args":{"scope":"document","maxChars":6000}}'

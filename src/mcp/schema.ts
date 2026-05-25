@@ -10,6 +10,9 @@ const envelopeSchema = {
 const tabId = z.number().int().positive().optional();
 const selector = z.string().min(1);
 const elementRef = z.string().min(1).regex(/^@e[^\s_]+_\d+$/, 'must be an @e<structureId>_<revision> reference from snapshot');
+const clickTarget = z.string().min(1).refine(value => /^@e[^\s_]+_\d+$/.test(value) || (value.startsWith('css=') && value.slice(4).trim().length > 0), {
+  message: 'must be an @e<structureId>_<revision> reference from snapshot or an explicit css=<selector> fallback'
+});
 const observeOptions = z.object({
   baselineId: z.string().optional(),
   includeNetwork: z.boolean().optional(),
@@ -42,18 +45,9 @@ export const commandArgSchemas = {
     boxes: z.boolean().optional()
   }).strict(),
   click: z.object({
-    elementRef: elementRef.optional(),
-    selector: selector.optional(),
+    target: clickTarget,
     tabId,
-    strategy: z.enum(['auto', 'cdp_mouse', 'dom_pointer', 'element_click']).optional(),
-    force: z.boolean().optional(),
-    button: z.enum(['left', 'middle', 'right']).optional(),
-    clickCount: z.number().int().positive().optional(),
-    modifiers: z.array(z.string()).optional(),
-    expectChange: z.boolean().optional(),
-    observe: observeOptions.optional(),
-    observeNewTab: z.boolean().optional(),
-    expectNewTab: z.boolean().optional()
+    after: z.enum(['auto', 'none', 'changes', 'snapshot']).optional()
   }).strict(),
   click_probe: z.object({
     elementRef: elementRef.optional(),

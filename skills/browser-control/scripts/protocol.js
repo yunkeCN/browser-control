@@ -88,11 +88,9 @@ var COMMANDS = {
   find_tab: { required: [], optional: ["urlIncludes", "titleIncludes", "active", "tabId", "attach"] },
   snapshot: { required: [], optional: ["tabId", "roles", "tags", "hasVisibleText", "textIncludes", "viewportOnly", "boxes"], example: { tabId: 123, roles: ["button", "link"], hasVisibleText: true, viewportOnly: true } },
   click: {
-    required: [],
-    requiredOneOf: ["elementRef", "selector"],
-    optional: ["elementRef", "selector", "tabId", "strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"],
-    example: { elementRef: "@e1jm0sbb_1", strategy: "auto", expectChange: true },
-    strategies: ["auto", "cdp_mouse", "dom_pointer", "element_click"]
+    required: ["target"],
+    optional: ["tabId", "after"],
+    example: { target: "@e1jm0sbb_1", after: "auto" }
   },
   click_probe: {
     required: [],
@@ -208,6 +206,8 @@ function validateRequest(request) {
     "network_start",
     "network_list"
   ]);
+  validateClickTarget(request, spec);
+  validateClickAfter(request, spec);
   validateOptionalBooleanArgs(request, ["force", "observeNewTab", "expectNewTab", "includeHeaders", "includeBody", "redactSensitive"]);
   validateOptionalNumberArgs(request, ["tabId", "clickCount", "waitMs", "maxRequests"]);
   return request;
@@ -232,7 +232,10 @@ function validateKnownArgs(request, spec) {
     hints.unshift("Use args.requestId from network_list; numeric index is not part of the network_detail protocol.");
   }
   if (request.command === "click" && field === "text") {
-    hints.unshift("click uses args.elementRef for snapshot @e references. To click visible text, call snapshot with args.textIncludes plus hasVisibleText and viewportOnly, then click the returned @e id.");
+    hints.unshift("click uses args.target for snapshot @e references. To click visible text, call snapshot with args.textIncludes plus hasVisibleText and viewportOnly, then click the returned @e id as target.");
+  }
+  if (request.command === "click" && ["elementRef", "selector", "strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].includes(field)) {
+    hints.unshift('click now accepts only args.target, optional args.after, and optional args.tabId. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.');
   }
   if (request.command === "get_text" && field === "selectors") {
     hints.unshift("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes.");
@@ -380,7 +383,10 @@ function validationDetails(request, spec, field) {
     hints.push("Run observe_start first, then pass the returned baselineId to observe_diff.");
   }
   if (request.command === "click" && Object.prototype.hasOwnProperty.call(request.args || {}, "text")) {
-    hints.push("click uses args.elementRef for snapshot @e references. Run snapshot and click a returned element id; semantic click_text is deferred.");
+    hints.push("click uses args.target for snapshot @e references. Run snapshot and click a returned element id; semantic click_text is deferred.");
+  }
+  if (request.command === "click" && ["elementRef", "selector", "strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].some((arg) => Object.prototype.hasOwnProperty.call(request.args || {}, arg))) {
+    hints.push('click now accepts args.target, optional args.after, and optional args.tabId. Use {"target":"@e..."} or {"target":"css=..."} instead.');
   }
   if (hints.length) {
     details.hints = hints;
@@ -449,6 +455,8 @@ function createResultEnvelope(request, { ok, backend = "extension", tab = null, 
 }
 function mapNetworkCommand(command, args) {
   switch (command) {
+    case "click":
+      return { command, args: { ...args, selector: clickTargetToSelector(args?.target) } };
     case "network_start":
       return { command: "network", args: { ...args, cmd: "start" } };
     case "network_list":
@@ -460,6 +468,44 @@ function mapNetworkCommand(command, args) {
     default:
       return { command, args };
   }
+}
+function validateClickTarget(request, spec) {
+  if (request.command !== "click") return;
+  const value = request.args.target;
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new ProtocolError("VALIDATION_ERROR", "target must be a non-empty string for command 'click'", {
+      ...validationDetails(request, spec, "target"),
+      expectedType: "string",
+      actualType: Array.isArray(value) ? "array" : typeof value,
+      hint: 'Use {"target":"@e1jm0sbb_1"} from snapshot, or {"target":"css=#save"} for an explicit CSS fallback.'
+    });
+  }
+  if (clickTargetToSelector(value)) return;
+  throw new ProtocolError("VALIDATION_ERROR", "target must be an @e reference or explicit css= selector for command 'click'", {
+    ...validationDetails(request, spec, "target"),
+    expectedFormat: "@e<structureId>_<revision> or css=<selector>",
+    value,
+    hint: 'Prefer a fresh snapshot ref such as {"target":"@e1jm0sbb_1"}. Use css= only when a snapshot ref is unavailable.'
+  });
+}
+function validateClickAfter(request, spec) {
+  if (request.command !== "click") return;
+  const value = request.args.after;
+  if (value === void 0 || value === null || value === "") return;
+  if (["auto", "none", "changes", "snapshot"].includes(value)) return;
+  throw new ProtocolError("VALIDATION_ERROR", "after must be one of auto, none, changes, or snapshot for command 'click'", {
+    ...validationDetails(request, spec, "after"),
+    expectedValues: ["auto", "none", "changes", "snapshot"],
+    value,
+    hint: 'Use after:"auto" for the default post-click summary, "snapshot" when you need the next page state, "changes" for compact diffs, or "none" for a raw click.'
+  });
+}
+function clickTargetToSelector(target) {
+  if (typeof target !== "string") return null;
+  const value = target.trim();
+  if (ELEMENT_REF_PATTERN.test(value)) return value;
+  if (value.startsWith("css=") && value.slice(4).trim()) return value.slice(4).trim();
+  return null;
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

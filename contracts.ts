@@ -5,6 +5,8 @@ export type ArtifactKind = 'screenshot' | 'pdf' | 'download' | 'network' | 'obse
 export type ScrollLogicalPosition = 'start' | 'center' | 'end' | 'nearest';
 export type ScrollBehavior = 'auto' | 'instant' | 'smooth';
 export type ElementRef = `@e${string}_${number}`;
+export type ClickTarget = ElementRef | `css=${string}`;
+export type ClickAfter = 'auto' | 'none' | 'changes' | 'snapshot';
 export type ElementTarget =
   | { elementRef: ElementRef; selector?: string }
   | { selector: string; elementRef?: ElementRef };
@@ -38,7 +40,7 @@ export interface CommandArgs {
   navigate: { url: string; newTab?: boolean; timeoutMs?: number };
   find_tab: { urlIncludes?: string; titleIncludes?: string; active?: boolean; attach?: boolean; tabId?: number };
   snapshot: { tabId?: number; roles?: string[]; tags?: string[]; hasVisibleText?: boolean; textIncludes?: string; viewportOnly?: boolean; boxes?: boolean };
-  click: ElementTarget & { tabId?: number; strategy?: 'auto' | 'cdp_mouse' | 'dom_pointer' | 'element_click'; force?: boolean; button?: 'left' | 'middle' | 'right'; clickCount?: number; modifiers?: string[]; expectChange?: boolean; observe?: ObserveOptions; observeNewTab?: boolean; expectNewTab?: boolean };
+  click: { target: ClickTarget; tabId?: number; after?: ClickAfter };
   click_probe: ElementTarget & { tabId?: number; strategy?: 'auto' | 'cdp_mouse' | 'dom_pointer' | 'element_click'; force?: boolean; button?: 'left' | 'middle' | 'right'; clickCount?: number; modifiers?: string[]; observeNewTab?: boolean; expectNewTab?: boolean; waitMs?: number; filter?: string; includeHeaders?: boolean; includeBody?: boolean; redactSensitive?: boolean; maxRequests?: number };
   fill: ElementTarget & { value: string; tabId?: number; strategy?: 'native_setter' | 'text_input' | 'paste_like'; clear?: boolean; commit?: 'change' | 'blur' | 'enter' | 'none'; expectChange?: boolean; observe?: ObserveOptions };
   press: { key: string; elementRef?: ElementRef; selector?: string; tabId?: number; strategy?: 'auto' | 'cdp_keyboard' | 'dom_keyboard'; modifiers?: string[]; expectChange?: boolean; observe?: ObserveOptions; observeNewTab?: boolean; expectNewTab?: boolean };

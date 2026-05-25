@@ -34602,11 +34602,9 @@ var COMMANDS = {
   find_tab: { required: [], optional: ["urlIncludes", "titleIncludes", "active", "tabId", "attach"] },
   snapshot: { required: [], optional: ["tabId", "roles", "tags", "hasVisibleText", "textIncludes", "viewportOnly", "boxes"], example: { tabId: 123, roles: ["button", "link"], hasVisibleText: true, viewportOnly: true } },
   click: {
-    required: [],
-    requiredOneOf: ["elementRef", "selector"],
-    optional: ["elementRef", "selector", "tabId", "strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"],
-    example: { elementRef: "@e1jm0sbb_1", strategy: "auto", expectChange: true },
-    strategies: ["auto", "cdp_mouse", "dom_pointer", "element_click"]
+    required: ["target"],
+    optional: ["tabId", "after"],
+    example: { target: "@e1jm0sbb_1", after: "auto" }
   },
   click_probe: {
     required: [],
@@ -34722,6 +34720,8 @@ function validateRequest(request) {
     "network_start",
     "network_list"
   ]);
+  validateClickTarget(request, spec);
+  validateClickAfter(request, spec);
   validateOptionalBooleanArgs(request, ["force", "observeNewTab", "expectNewTab", "includeHeaders", "includeBody", "redactSensitive"]);
   validateOptionalNumberArgs(request, ["tabId", "clickCount", "waitMs", "maxRequests"]);
   return request;
@@ -34746,7 +34746,10 @@ function validateKnownArgs(request, spec) {
     hints.unshift("Use args.requestId from network_list; numeric index is not part of the network_detail protocol.");
   }
   if (request.command === "click" && field === "text") {
-    hints.unshift("click uses args.elementRef for snapshot @e references. To click visible text, call snapshot with args.textIncludes plus hasVisibleText and viewportOnly, then click the returned @e id.");
+    hints.unshift("click uses args.target for snapshot @e references. To click visible text, call snapshot with args.textIncludes plus hasVisibleText and viewportOnly, then click the returned @e id as target.");
+  }
+  if (request.command === "click" && ["elementRef", "selector", "strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].includes(field)) {
+    hints.unshift('click now accepts only args.target, optional args.after, and optional args.tabId. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.');
   }
   if (request.command === "get_text" && field === "selectors") {
     hints.unshift("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes.");
@@ -34894,7 +34897,10 @@ function validationDetails(request, spec, field) {
     hints.push("Run observe_start first, then pass the returned baselineId to observe_diff.");
   }
   if (request.command === "click" && Object.prototype.hasOwnProperty.call(request.args || {}, "text")) {
-    hints.push("click uses args.elementRef for snapshot @e references. Run snapshot and click a returned element id; semantic click_text is deferred.");
+    hints.push("click uses args.target for snapshot @e references. Run snapshot and click a returned element id; semantic click_text is deferred.");
+  }
+  if (request.command === "click" && ["elementRef", "selector", "strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].some((arg) => Object.prototype.hasOwnProperty.call(request.args || {}, arg))) {
+    hints.push('click now accepts args.target, optional args.after, and optional args.tabId. Use {"target":"@e..."} or {"target":"css=..."} instead.');
   }
   if (hints.length) {
     details.hints = hints;
@@ -34963,6 +34969,8 @@ function createResultEnvelope(request, { ok, backend = "extension", tab = null, 
 }
 function mapNetworkCommand(command, args) {
   switch (command) {
+    case "click":
+      return { command, args: { ...args, selector: clickTargetToSelector(args?.target) } };
     case "network_start":
       return { command: "network", args: { ...args, cmd: "start" } };
     case "network_list":
@@ -34974,6 +34982,44 @@ function mapNetworkCommand(command, args) {
     default:
       return { command, args };
   }
+}
+function validateClickTarget(request, spec) {
+  if (request.command !== "click") return;
+  const value = request.args.target;
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new ProtocolError("VALIDATION_ERROR", "target must be a non-empty string for command 'click'", {
+      ...validationDetails(request, spec, "target"),
+      expectedType: "string",
+      actualType: Array.isArray(value) ? "array" : typeof value,
+      hint: 'Use {"target":"@e1jm0sbb_1"} from snapshot, or {"target":"css=#save"} for an explicit CSS fallback.'
+    });
+  }
+  if (clickTargetToSelector(value)) return;
+  throw new ProtocolError("VALIDATION_ERROR", "target must be an @e reference or explicit css= selector for command 'click'", {
+    ...validationDetails(request, spec, "target"),
+    expectedFormat: "@e<structureId>_<revision> or css=<selector>",
+    value,
+    hint: 'Prefer a fresh snapshot ref such as {"target":"@e1jm0sbb_1"}. Use css= only when a snapshot ref is unavailable.'
+  });
+}
+function validateClickAfter(request, spec) {
+  if (request.command !== "click") return;
+  const value = request.args.after;
+  if (value === void 0 || value === null || value === "") return;
+  if (["auto", "none", "changes", "snapshot"].includes(value)) return;
+  throw new ProtocolError("VALIDATION_ERROR", "after must be one of auto, none, changes, or snapshot for command 'click'", {
+    ...validationDetails(request, spec, "after"),
+    expectedValues: ["auto", "none", "changes", "snapshot"],
+    value,
+    hint: 'Use after:"auto" for the default post-click summary, "snapshot" when you need the next page state, "changes" for compact diffs, or "none" for a raw click.'
+  });
+}
+function clickTargetToSelector(target) {
+  if (typeof target !== "string") return null;
+  const value = target.trim();
+  if (ELEMENT_REF_PATTERN.test(value)) return value;
+  if (value.startsWith("css=") && value.slice(4).trim()) return value.slice(4).trim();
+  return null;
 }
 
 // src/mcp/daemon-client.ts
@@ -35053,6 +35099,9 @@ var envelopeSchema = {
 var tabId = external_exports.number().int().positive().optional();
 var selector = external_exports.string().min(1);
 var elementRef = external_exports.string().min(1).regex(/^@e[^\s_]+_\d+$/, "must be an @e<structureId>_<revision> reference from snapshot");
+var clickTarget = external_exports.string().min(1).refine((value) => /^@e[^\s_]+_\d+$/.test(value) || value.startsWith("css=") && value.slice(4).trim().length > 0, {
+  message: "must be an @e<structureId>_<revision> reference from snapshot or an explicit css=<selector> fallback"
+});
 var observeOptions = external_exports.object({
   baselineId: external_exports.string().optional(),
   includeNetwork: external_exports.boolean().optional(),
@@ -35084,18 +35133,9 @@ var commandArgSchemas = {
     boxes: external_exports.boolean().optional()
   }).strict(),
   click: external_exports.object({
-    elementRef: elementRef.optional(),
-    selector: selector.optional(),
+    target: clickTarget,
     tabId,
-    strategy: external_exports.enum(["auto", "cdp_mouse", "dom_pointer", "element_click"]).optional(),
-    force: external_exports.boolean().optional(),
-    button: external_exports.enum(["left", "middle", "right"]).optional(),
-    clickCount: external_exports.number().int().positive().optional(),
-    modifiers: external_exports.array(external_exports.string()).optional(),
-    expectChange: external_exports.boolean().optional(),
-    observe: observeOptions.optional(),
-    observeNewTab: external_exports.boolean().optional(),
-    expectNewTab: external_exports.boolean().optional()
+    after: external_exports.enum(["auto", "none", "changes", "snapshot"]).optional()
   }).strict(),
   click_probe: external_exports.object({
     elementRef: elementRef.optional(),
@@ -35685,7 +35725,7 @@ function registerCompactTools(server, client, sessions) {
       "Run any low-level Browser Control protocol command through the local daemon.",
       "Input shape: command, optional args object, optional session, timeoutMs, and id.",
       "Session is managed automatically by this MCP server process. Omit session for normal use; pass session only for advanced isolation.",
-      "Before clicking by visible text, call snapshot with args.textIncludes plus semantic filters such as roles, hasVisibleText, and viewportOnly to get focused @e references.",
+      "Before clicking by visible text, call snapshot with args.textIncludes plus semantic filters such as roles, hasVisibleText, and viewportOnly to get focused @e references, then pass the ref as click target.",
       "Use browser_control_close_session at the end of a task. The MCP server validates command args and returns structured hints, but does not perform user confirmation."
     ].join("\n\n"),
     inputSchema: unifiedCommandInputSchema
@@ -35789,7 +35829,7 @@ function validateCommandArgs(command, args) {
       return {
         ok: false,
         issues: [`args: one of ${requiredOneOf.join(", ")} is required`],
-        hints: [`Prefer args.elementRef with a fresh snapshot @e reference. Use args.selector only for CSS fallback.`]
+        hints: [command === "click" ? 'Prefer args.target with a fresh snapshot @e reference. Use args.target:"css=..." only for CSS fallback.' : "Prefer args.elementRef with a fresh snapshot @e reference. Use args.selector only for CSS fallback."]
       };
     }
     return { ok: true, data: parsed.data };
@@ -35835,7 +35875,8 @@ function hintsFor(command, args, issues) {
   const hints = [];
   const keys = new Set(Object.keys(args));
   if (command === "fill" && keys.has("text")) hints.push("fill uses args.value, not args.text.");
-  if (command === "click" && keys.has("text")) hints.push("click uses args.elementRef for snapshot @e references. To click visible text, first call snapshot with args.textIncludes plus hasVisibleText and viewportOnly, then click with the returned @e id.");
+  if (command === "click" && keys.has("text")) hints.push("click uses args.target for snapshot @e references. To click visible text, first call snapshot with args.textIncludes plus hasVisibleText and viewportOnly, then click with the returned @e id.");
+  if (command === "click" && ["elementRef", "selector", "strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].some((key) => keys.has(key))) hints.push('click now accepts only args.target, optional args.after, and optional args.tabId. Use {"target":"@e..."} or {"target":"css=..."} instead.');
   if (command === "get_text" && keys.has("selectors")) hints.push("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes instead.");
   if (command === "evaluate" && keys.has("expression")) hints.push("evaluate uses args.code, not args.expression.");
   if (command === "wait_for" && keys.has("timeMs")) hints.push("wait_for uses args.timeoutMs, not args.timeMs.");
@@ -35924,8 +35965,8 @@ function registerBrowserControlPrompts(server) {
   }, () => textPrompt("Browser Control MCP usage", [
     "Use browser_control_command for browser actions and observations.",
     "The MCP server manages an active session automatically; omit session unless you intentionally need a separate session.",
-    "Typical loop: navigate -> snapshot -> use elementRef with @e ids for click/fill/press -> get_text/screenshot for reading -> browser_control_close_session when done.",
-    "When you need to click or fill an element by visible text, do not request a huge snapshot. Use snapshot with textIncludes, roles, tags, hasVisibleText, and viewportOnly to narrow the returned @e references, then click/fill with elementRef.",
+    "Typical loop: navigate -> snapshot -> use @e ids as click target or elementRef for fill/press -> get_text/screenshot for reading -> browser_control_close_session when done.",
+    "When you need to click or fill an element by visible text, do not request a huge snapshot. Use snapshot with textIncludes, roles, tags, hasVisibleText, and viewportOnly to narrow the returned @e references, then click with target or fill with elementRef.",
     "Do not build Google or YouTube search URLs with query parameters when a task asks for real UI usage; navigate to the homepage and operate the search box.",
     "Prefer snapshot before element actions and prefer @e references from the latest snapshot."
   ].join("\n")));
@@ -35949,7 +35990,7 @@ function registerBrowserControlPrompts(server) {
       '{"command":"navigate","args":{"url":"https://example.com"}}',
       '{"command":"snapshot","args":{"viewportOnly":true,"hasVisibleText":true}}',
       '{"command":"snapshot","args":{"textIncludes":"Submit","hasVisibleText":true,"viewportOnly":true,"roles":["button","link","textbox"]}}',
-      '{"command":"click","args":{"elementRef":"@eabc_1","expectChange":true}}',
+      '{"command":"click","args":{"target":"@eabc_1","after":"auto"}}',
       '{"command":"fill","args":{"elementRef":"@eabc_1","value":"draft","clear":true}}',
       '{"command":"press","args":{"key":"Enter","expectChange":true}}',
       '{"command":"get_text","args":{"scope":"document","maxChars":6000}}'
@@ -36235,6 +36276,16 @@ function runDaemonServer() {
     maxSummaryChars: 1200,
     maxNetworkRequests: 100
   };
+  const CLICK_AFTER_DEFAULTS = {
+    initialDelayMs: 80,
+    stableWindowMs: 120,
+    timeoutMs: 700,
+    snapshotOptions: {
+      viewportOnly: true,
+      hasVisibleText: true,
+      boxes: true
+    }
+  };
   function getOrCreateSession(name) {
     if (!name) name = "default";
     if (!sessions.has(name)) {
@@ -36299,6 +36350,23 @@ function runDaemonServer() {
         requested: ["expectChange", "observe"],
         extensionCapabilities: extensionRuntime.capabilities || [],
         nextSteps: ["Reload the Browser Control extension from the source path, then rerun doctor --json."]
+      });
+    }
+  }
+  function clickAfterMode(request) {
+    return request.command === "click" ? request.args.after || "auto" : "none";
+  }
+  function clickAfterRequested(request) {
+    return request.command === "click" && clickAfterMode(request) !== "none";
+  }
+  function ensureClickAfterSupported(request) {
+    if (!clickAfterRequested(request)) return;
+    const supported = extensionHasCapabilities(["observe_capture"]);
+    if (supported === false) {
+      throw new ProtocolError("UNSUPPORTED", "Connected extension metadata does not advertise primitives required for click after observation.", {
+        requested: ["click.after", "observe_capture"],
+        extensionCapabilities: extensionRuntime.capabilities || [],
+        nextSteps: ['Reload the Browser Control extension from the source path, or call click with after:"none" for a raw click.']
       });
     }
   }
@@ -36619,13 +36687,13 @@ function runDaemonServer() {
       label: "requests since marker; not proof of causation"
     };
   }
-  async function handleObserveDiff(request) {
+  async function handleObserveDiff(request, currentOverride = null) {
     const baseline = findObservationBaseline(request.session, request.args.baselineId, request.args.tabId);
     if (!baseline) {
       throw new Error(`Observation baseline not found or expired: ${request.args.baselineId}. Run observe_start again for the active tab.`);
     }
     baseline.lastAccessedAtMs = Date.now();
-    const current = await captureObservation(request, { tabId: request.args.tabId || baseline.tabId });
+    const current = currentOverride || await captureObservation(request, { tabId: request.args.tabId || baseline.tabId });
     const currentNavigationKey = observationNavigationKey(current);
     const urlChanged = currentNavigationKey !== baseline.navigationKey;
     const titleChanged = String(current.title || "") !== String(baseline.title || "");
@@ -36720,6 +36788,72 @@ function runDaemonServer() {
       warnings
     };
   }
+  function observationSignature(observation) {
+    const runs = Array.isArray(observation?.textRuns) ? observation.textRuns : [];
+    return JSON.stringify({
+      url: observation?.url || null,
+      title: observation?.title || "",
+      activeElement: observation?.activeElement || null,
+      textRunCount: observation?.caps?.textRunCount || runs.length,
+      visibleTextChars: observation?.caps?.visibleTextChars || (typeof observation?.visibleText === "string" ? observation.visibleText.length : 0),
+      texts: runs.slice(0, 500).map((run) => run?.normalizedText || run?.text || "")
+    });
+  }
+  async function waitForClickSettle(request, tabId2) {
+    const startedAtMs = Date.now();
+    let captures = 0;
+    await delay(CLICK_AFTER_DEFAULTS.initialDelayMs);
+    let current = await captureObservation(request, { tabId: tabId2 });
+    captures += 1;
+    let currentSignature = observationSignature(current);
+    while (Date.now() - startedAtMs < CLICK_AFTER_DEFAULTS.timeoutMs) {
+      const remainingMs = CLICK_AFTER_DEFAULTS.timeoutMs - (Date.now() - startedAtMs);
+      await delay(Math.min(CLICK_AFTER_DEFAULTS.stableWindowMs, Math.max(0, remainingMs)));
+      const next = await captureObservation(request, { tabId: tabId2 });
+      captures += 1;
+      const nextSignature = observationSignature(next);
+      if (nextSignature === currentSignature) {
+        return {
+          observation: next,
+          settle: {
+            settled: true,
+            elapsedMs: Date.now() - startedAtMs,
+            captures,
+            initialDelayMs: CLICK_AFTER_DEFAULTS.initialDelayMs,
+            stableWindowMs: CLICK_AFTER_DEFAULTS.stableWindowMs,
+            timeoutMs: CLICK_AFTER_DEFAULTS.timeoutMs
+          }
+        };
+      }
+      current = next;
+      currentSignature = nextSignature;
+    }
+    return {
+      observation: current,
+      settle: {
+        settled: false,
+        timedOut: true,
+        elapsedMs: Date.now() - startedAtMs,
+        captures,
+        initialDelayMs: CLICK_AFTER_DEFAULTS.initialDelayMs,
+        stableWindowMs: CLICK_AFTER_DEFAULTS.stableWindowMs,
+        timeoutMs: CLICK_AFTER_DEFAULTS.timeoutMs
+      }
+    };
+  }
+  function shouldReturnClickPostSnapshot(mode, diffData, result) {
+    if (mode === "snapshot") return true;
+    if (mode !== "auto") return false;
+    const textDiff = diffData?.textDiff || {};
+    return Boolean(
+      result?.newTab || Array.isArray(result?.newTabs) && result.newTabs.length || diffData?.urlChanged || diffData?.titleChanged || textDiff.activeElementChanged || textDiff.visibleTextRunCountDelta || textDiff.visibleTextCharsDelta || Array.isArray(textDiff.addedText) && textDiff.addedText.length || Array.isArray(textDiff.removedText) && textDiff.removedText.length
+    );
+  }
+  function postSnapshotTabId(result, fallbackTabId) {
+    if (result?.newTab?.id) return result.newTab.id;
+    if (Array.isArray(result?.newTabs) && result.newTabs.length === 1 && result.newTabs[0]?.id) return result.newTabs[0].id;
+    return fallbackTabId;
+  }
   async function runActionWithObservation(request, mapped) {
     const observeArgs = actionObserveArgs(request);
     const baselineId = observeArgs.baselineId || `action_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -36747,6 +36881,68 @@ function runDaemonServer() {
     const data = result && typeof result === "object" && !Array.isArray(result) ? { ...result, actionObservation } : { result, actionObservation };
     return { data, artifacts: diff.artifacts || [] };
   }
+  async function runClickWithAfter(request, mapped) {
+    const mode = clickAfterMode(request);
+    if (mode === "none") {
+      const data2 = await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
+      return { data: data2, artifacts: [] };
+    }
+    const baselineId = `click_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const start = await handleObserveStart({
+      ...request,
+      args: {
+        tabId: request.args.tabId,
+        baselineId,
+        includeNetworkMarker: true
+      }
+    });
+    const result = await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
+    const settleTargetTabId = postSnapshotTabId(result, start.data.tabId);
+    const settled = await waitForClickSettle(request, settleTargetTabId);
+    const diff = await handleObserveDiff({
+      ...request,
+      args: {
+        baselineId: start.data.baselineId,
+        tabId: start.data.tabId,
+        includeNetwork: true,
+        allowStaleNavigationDiff: true
+      }
+    }, settled.observation);
+    const changes = summarizeActionObservation(diff.data, false);
+    const artifacts = [...diff.artifacts || []];
+    let postSnapshot = null;
+    let postSnapshotError = null;
+    if (shouldReturnClickPostSnapshot(mode, diff.data, result)) {
+      try {
+        const rawSnapshot = await sendCommandToExtension(request.session, "snapshot", {
+          ...CLICK_AFTER_DEFAULTS.snapshotOptions,
+          tabId: settleTargetTabId
+        }, request.timeoutMs);
+        const extracted = extractArtifacts("snapshot", rawSnapshot, artifactStore);
+        postSnapshot = extracted.data;
+        artifacts.push(...extracted.artifacts);
+      } catch (err) {
+        postSnapshotError = err?.message || String(err);
+      }
+    }
+    const data = result && typeof result === "object" && !Array.isArray(result) ? { ...result } : { clicked: Boolean(result), result };
+    data.after = mode;
+    data.settle = settled.settle;
+    data.changes = changes;
+    if (postSnapshot) data.postSnapshot = postSnapshot;
+    if (postSnapshotError) {
+      data.postSnapshot = null;
+      data.warnings = [
+        ...Array.isArray(data.warnings) ? data.warnings : [],
+        `Post-click snapshot failed: ${postSnapshotError}`
+      ];
+    }
+    if (!postSnapshot && mode === "auto") {
+      data.postSnapshot = null;
+      data.postSnapshotReason = "No major visible, focus, title, URL, or new-tab change was detected.";
+    }
+    return { data, artifacts };
+  }
   async function handleCommand(req, res) {
     const startedAt = (/* @__PURE__ */ new Date()).toISOString();
     let request;
@@ -36767,6 +36963,7 @@ function runDaemonServer() {
     try {
       log("info", `Command: ${request.command}`, { session: request.session, args: Object.keys(request.args) });
       ensureActionObservationSupported(request);
+      ensureClickAfterSupported(request);
       if (request.command === "observe_start" || request.command === "observe_diff") {
         const observed = request.command === "observe_start" ? await handleObserveStart(request) : await handleObserveDiff(request);
         const tab2 = observed.data && typeof observed.data === "object" ? observed.data.tab || observed.data.tabId || null : null;
@@ -36779,9 +36976,11 @@ function runDaemonServer() {
           diagnostics: { extensionConnected, pendingRequests: pendingRequests.size, runtime: runtimeMetadata(), warnings: capabilityWarnings() }
         }));
       }
-      const observedAction = actionObservationRequested(request) ? await runActionWithObservation(request, mapped) : null;
-      const result = observedAction ? observedAction.data : await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
+      const clickAfter = clickAfterRequested(request) ? await runClickWithAfter(request, mapped) : null;
+      const observedAction = !clickAfter && actionObservationRequested(request) ? await runActionWithObservation(request, mapped) : null;
+      const result = clickAfter ? clickAfter.data : observedAction ? observedAction.data : await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
       const { data, artifacts } = extractArtifacts(request.command, result, artifactStore);
+      if (clickAfter?.artifacts?.length) artifacts.push(...clickAfter.artifacts);
       if (observedAction?.artifacts?.length) artifacts.push(...observedAction.artifacts);
       const tab = data && typeof data === "object" ? data.tab || data.tabId || null : null;
       if (request.command === "navigate" && tab !== null) cleanupSessionObservationBaselines(request.session, tab);

@@ -38,7 +38,7 @@ async function waitForHealth() {
   throw new Error('daemon did not start');
 }
 
-test('action expectChange attaches observation deltas and warns on no-delta actions', async (t) => {
+test('click after attaches changes and fill expectChange warns on no-delta actions', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-control-action-observe-'));
   const daemon = spawn(process.execPath, [daemonScript], { cwd: path.join(root, 'skills', 'browser-control', 'scripts'), stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, BROWSER_CONTROL_HOME: home, BROWSER_CONTROL_PORT: String(port), BROWSER_CONTROL_ARTIFACT_DIR: path.join(home, 'artifacts') } });
   t.after(async () => {
@@ -60,10 +60,15 @@ test('action expectChange attaches observation deltas and warns on no-delta acti
       const states = [
         observation(['Menu']),
         observation(['Menu', 'Drawer opened']),
+        observation(['Menu', 'Drawer opened']),
         observation(['Stable form']),
         observation(['Stable form'])
       ];
       ws.send(JSON.stringify({ type: 'response', requestId: msg.requestId, data: states[captureCount - 1] || states.at(-1) }));
+      return;
+    }
+    if (msg.action === 'snapshot') {
+      ws.send(JSON.stringify({ type: 'response', requestId: msg.requestId, data: { schemaVersion: 3, snapshot: '- dialog "Drawer opened" [ref=@e1_1]', refs: [{ id: '@e1_1' }], tabId: 301 } }));
       return;
     }
     if (msg.action === 'click') {
@@ -79,13 +84,15 @@ test('action expectChange attaches observation deltas and warns on no-delta acti
 
   const changed = await request('POST', '/command', {
     command: 'click',
-    args: { selector: '@e1', expectChange: true, observe: { includeNetwork: false, waitMs: 0 } },
+    args: { target: '@e1abc_1' },
     session: 'action-observe'
   });
   assert.equal(changed.status, 200);
   assert.equal(changed.json.ok, true);
-  assert.deepEqual(changed.json.data.actionObservation.textDiff.addedText, ['Drawer opened']);
-  assert.deepEqual(changed.json.data.actionObservation.warnings, []);
+  assert.deepEqual(changed.json.data.changes.textDiff.addedText, ['Drawer opened']);
+  assert.deepEqual(changed.json.data.changes.warnings, []);
+  assert.equal(changed.json.data.after, 'auto');
+  assert.match(changed.json.data.postSnapshot.snapshot, /Drawer opened/);
   assert.match(changed.json.diagnostics.warnings.join(' '), /runtime metadata/);
 
   const noDelta = await request('POST', '/command', {
@@ -109,12 +116,12 @@ test('action expectChange attaches observation deltas and warns on no-delta acti
   await new Promise(resolve => setTimeout(resolve, 25));
   const unsupported = await request('POST', '/command', {
     command: 'click',
-    args: { selector: '@e3', expectChange: true, observe: { includeNetwork: false, waitMs: 0 } },
+    args: { target: '@e3abc_1' },
     session: 'action-observe'
   });
   assert.equal(unsupported.status, 502);
   assert.equal(unsupported.json.error.code, 'UNSUPPORTED');
-  assert.match(unsupported.json.error.message, /observation primitives/);
+  assert.match(unsupported.json.error.message, /click after observation/);
 });
 
 function observation(texts) {
@@ -177,15 +184,15 @@ test('action observation warning considers lightweight non-structural deltas', a
       ws.send(JSON.stringify({ type: 'response', requestId: msg.requestId, data: state }));
       return;
     }
-    if (msg.action === 'click') {
-      ws.send(JSON.stringify({ type: 'response', requestId: msg.requestId, data: { clicked: true, tabId: 301 } }));
+    if (msg.action === 'fill') {
+      ws.send(JSON.stringify({ type: 'response', requestId: msg.requestId, data: { filled: true, tabId: 301 } }));
       return;
     }
     ws.send(JSON.stringify({ type: 'response', requestId: msg.requestId, data: { session: msg.session, tabId: 301 } }));
   });
   const changed = await localRequest('POST', '/command', {
-    command: 'click',
-    args: { selector: '@e1', expectChange: true, observe: { includeNetwork: false, waitMs: 0 } },
+    command: 'fill',
+    args: { selector: '@e1', value: 'draft', expectChange: true, observe: { includeNetwork: false, waitMs: 0 } },
     session: 'lightweight-delta'
   });
   assert.equal(changed.status, 200);

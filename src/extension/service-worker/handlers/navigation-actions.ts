@@ -92,6 +92,10 @@ function mergePressFocusDiagnostics(result: any, focusResult: any): any {
 }
 
 function targetSelector(args: CommandArgs = {}): string | undefined {
+  if (typeof args?.target === 'string' && args.target) {
+    if (args.target.startsWith('css=')) return args.target.slice(4).trim();
+    return args.target;
+  }
   return typeof args?.elementRef === 'string' && args.elementRef ? args.elementRef : args?.selector;
 }
 
@@ -189,7 +193,7 @@ export async function handleSnapshot(args: CommandArgs = {}, session: SessionNam
 export async function handleClick(args: CommandArgs = {}, session: SessionName): Promise<any> {
   const { tabId: argTabId } = args || {};
   const selector = targetSelector(args);
-  if (!selector) throw new Error('selector is required for click');
+  if (!selector) throw new Error('target is required for click');
 
   const tabId = argTabId || getActiveTabId(session);
   if (!tabId) throw new Error('No active tab in session');
@@ -224,7 +228,7 @@ export async function handleClickProbe(args: CommandArgs = {}, session: SessionN
 
 async function performObservedClick(args: CommandArgs = {}, session: SessionName, tabId: number): Promise<any> {
   const selector = targetSelector(args);
-  if (!selector) throw new Error('selector is required for click');
+  if (!selector) throw new Error('target is required for click');
   const strategy = args?.strategy || 'auto';
   const beforeIds = await beginNewTabWatch();
 

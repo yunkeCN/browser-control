@@ -21,7 +21,7 @@ test('protocol validates all supported command envelopes', () => {
   for (const command of Object.keys(COMMANDS)) {
     const args = {};
     for (const field of COMMANDS[command].required) {
-      args[field] = field === 'files' ? ['fixture.txt'] : field === 'checked' ? true : `${field}-value`;
+      args[field] = field === 'files' ? ['fixture.txt'] : field === 'checked' ? true : field === 'target' ? '@e1jm0sbb_1' : `${field}-value`;
     }
     if (COMMANDS[command].requiredOneOf?.length) args.elementRef = '@e1jm0sbb_1';
     const req = validateRequest(normalizeRequest({ command, args, session: 's1' }));
@@ -30,24 +30,24 @@ test('protocol validates all supported command envelopes', () => {
   }
 });
 
-test('protocol keeps action strategy diagnostics args backward compatible', () => {
+test('protocol exposes simplified click target/after and keeps non-click action diagnostics', () => {
   const click = validateRequest(normalizeRequest({
     command: 'click',
     args: {
-      selector: '@e1',
-      strategy: 'dom_pointer',
-      force: false,
-      button: 'left',
-      clickCount: 1,
-      modifiers: ['Shift'],
-      expectChange: true,
-      observe: { includeNetwork: true }
+      target: '@e1abc_1',
+      after: 'snapshot'
     }
   }));
-  assert.equal(click.args.strategy, 'dom_pointer');
-  assert.equal(click.args.expectChange, true);
-  assert.deepEqual(COMMANDS.click.strategies, ['auto', 'cdp_mouse', 'dom_pointer', 'element_click']);
-  assert.deepEqual(COMMANDS.click.requiredOneOf, ['elementRef', 'selector']);
+  assert.equal(click.args.target, '@e1abc_1');
+  assert.equal(click.args.after, 'snapshot');
+  assert.equal(COMMANDS.click.required.includes('target'), true);
+  assert.deepEqual(COMMANDS.click.optional, ['tabId', 'after']);
+  assert.equal(COMMANDS.click.requiredOneOf, undefined);
+  assert.equal(COMMANDS.click.strategies, undefined);
+  assert.deepEqual(mapNetworkCommand('click', click.args), {
+    command: 'click',
+    args: { target: '@e1abc_1', after: 'snapshot', selector: '@e1abc_1' }
+  });
 
   const fill = validateRequest(normalizeRequest({
     command: 'fill',
@@ -69,10 +69,9 @@ test('protocol keeps action strategy diagnostics args backward compatible', () =
 test('elementRef is a strict @e alias for element-targeting commands', () => {
   const click = validateRequest(normalizeRequest({
     command: 'click',
-    args: { elementRef: '@e1abc_2', expectChange: true }
+    args: { target: '@e1abc_2' }
   }));
-  assert.equal(click.args.selector, '@e1abc_2');
-  assert.equal(click.args.elementRef, '@e1abc_2');
+  assert.equal(click.args.target, '@e1abc_2');
 
   const press = validateRequest(normalizeRequest({
     command: 'press',
@@ -81,12 +80,13 @@ test('elementRef is a strict @e alias for element-targeting commands', () => {
   assert.equal(press.args.selector, '@e2abc_1');
 
   assert.throws(
-    () => validateRequest(normalizeRequest({ command: 'click', args: { elementRef: '#save' } })),
+    () => validateRequest(normalizeRequest({ command: 'click', args: { target: '#save' } })),
     err => err instanceof ProtocolError &&
       err.code === 'VALIDATION_ERROR' &&
-      err.details?.field === 'elementRef' &&
-      /@e<structureId>_<revision>/.test(err.details?.expectedFormat)
+      err.details?.field === 'target' &&
+      /css=<selector>/.test(err.details?.expectedFormat)
   );
+  assert.equal(validateRequest(normalizeRequest({ command: 'click', args: { target: 'css=#save' } })).args.target, 'css=#save');
   assert.throws(
     () => validateRequest(normalizeRequest({ command: 'fill', args: { value: 'draft' } })),
     err => err instanceof ProtocolError &&
@@ -94,10 +94,11 @@ test('elementRef is a strict @e alias for element-targeting commands', () => {
       err.details?.requiredOneOf?.includes('elementRef')
   );
   assert.throws(
-    () => validateRequest(normalizeRequest({ command: 'click', args: { elementRef: '@e1abc_1', selector: '#save' } })),
+    () => validateRequest(normalizeRequest({ command: 'click', args: { elementRef: '@e1abc_1' } })),
     err => err instanceof ProtocolError &&
       err.code === 'VALIDATION_ERROR' &&
-      /cannot target different elements/.test(err.message)
+      err.details?.field === 'target' &&
+      /args\.target/.test((err.details?.hints || []).join(' '))
   );
 });
 
@@ -123,7 +124,7 @@ test('protocol validates click_probe args and keeps it separate from action obse
   }));
   assert.equal(probe.command, 'click_probe');
   assert.equal(probe.args.filter, '/api/');
-  assert.deepEqual(COMMANDS.click_probe.strategies, COMMANDS.click.strategies);
+  assert.deepEqual(COMMANDS.click_probe.strategies, ['auto', 'cdp_mouse', 'dom_pointer', 'element_click']);
   assert.equal(COMMANDS.click_probe.optional.includes('expectChange'), false);
   assert.equal(COMMANDS.click_probe.optional.includes('observe'), false);
 
@@ -140,8 +141,9 @@ test('protocol docs and TypeScript contracts expose action observe options and n
   const contracts = fs.readFileSync(path.join(path.resolve(__dirname, '..'), 'contracts.ts'), 'utf8');
   const api = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'references', 'api.md'), 'utf8');
 
-  for (const option of ['strategy', 'force', 'button', 'clickCount', 'modifiers', 'expectChange', 'observe']) {
-    assert.match(contracts, new RegExp(`click: [^;\\n]*\\{[^}]*${option}`, 's'));
+  assert.match(contracts, /click:\s*\{\s*target:\s*ClickTarget;[^}]*after\?:\s*ClickAfter/s);
+  for (const removed of ['force?:', 'clickCount?:', 'expectChange?:', 'observe?: ObserveOptions']) {
+    assert.doesNotMatch(contracts.match(/click:\s*\{[^}]+}/s)?.[0] || '', new RegExp(removed.replace(/[?]/g, '\\?')));
   }
   for (const option of ['strategy', 'force', 'button', 'clickCount', 'modifiers', 'waitMs', 'filter', 'includeHeaders', 'includeBody', 'redactSensitive', 'maxRequests']) {
     assert.match(contracts, new RegExp(`click_probe: [^;\\n]*\\{[^}]*${option}`, 's'));
@@ -159,6 +161,8 @@ test('protocol docs and TypeScript contracts expose action observe options and n
   assert.match(api, /Stable response fields:/);
   assert.match(api, /`click_probe`/);
   assert.match(api, /not a full dry run/);
+  assert.match(api, /Arguments: `target` required, optional `tabId` and `after`/);
+  assert.match(api, /post snapshot/);
   assert.doesNotMatch(contracts, /urlContains|titleContains/);
   assert.doesNotMatch(api, /urlContains|titleContains/);
   assert.match(api, /intentionally loose/);

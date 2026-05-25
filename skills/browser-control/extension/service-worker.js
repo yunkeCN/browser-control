@@ -282,7 +282,7 @@
         strategyUsed: "cdp_mouse",
         target: localDescribeElement(el),
         hitTest,
-        warnings: ["Target center is covered. Use force:true only after confirming the overlay should be bypassed."]
+        warnings: ["Target center is covered. Use a fresh snapshot, close the overlay, or choose a visible child target."]
       };
     }
     return {
@@ -3389,7 +3389,7 @@
           strategyUsed: options?.strategyUsed || "dom_pointer",
           target: localDescribeElement(el),
           hitTest: geometry.hitTest,
-          warnings: ["Target center is covered. Use a fresh snapshot, close the overlay, choose a visible child target, or retry with force:true only after confirming intent."]
+          warnings: ["Target center is covered. Use a fresh snapshot, close the overlay, or choose a visible child target."]
         };
       }
       if (!geometry.hitWithinTarget) warnings.push("force:true bypassed covered-element hit-test; dispatched events to the requested element.");
@@ -4329,6 +4329,10 @@
     };
   }
   function targetSelector(args = {}) {
+    if (typeof args?.target === "string" && args.target) {
+      if (args.target.startsWith("css=")) return args.target.slice(4).trim();
+      return args.target;
+    }
     return typeof args?.elementRef === "string" && args.elementRef ? args.elementRef : args?.selector;
   }
   async function focusTargetForCdpKeyboard(tabId, selector) {
@@ -4412,7 +4416,7 @@
   async function handleClick(args = {}, session) {
     const { tabId: argTabId } = args || {};
     const selector = targetSelector(args);
-    if (!selector) throw new Error("selector is required for click");
+    if (!selector) throw new Error("target is required for click");
     const tabId = argTabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
     return performObservedClick(args, session, tabId);
@@ -4442,7 +4446,7 @@
   }
   async function performObservedClick(args = {}, session, tabId) {
     const selector = targetSelector(args);
-    if (!selector) throw new Error("selector is required for click");
+    if (!selector) throw new Error("target is required for click");
     const strategy = args?.strategy || "auto";
     const beforeIds = await beginNewTabWatch();
     if (strategy === "auto" || strategy === "cdp_mouse") {

@@ -32,10 +32,10 @@ The daemon listens on `http://127.0.0.1:10087` by default and the extension conn
 3. Run `node scripts/browser-control.js doctor --json` and proceed only when the daemon is reachable and `extension_connected` is true.
 4. Navigate with `navigate`, or find/attach an existing tab with `find_tab` (default attach; pass `attach:false` for lookup only).
 5. Take a fresh `snapshot` before every element interaction. Snapshot is a compact structure/interaction view, not a full text dump; use `get_text` for reading page prose. On noisy pages, use filters such as `hasVisibleText`, `viewportOnly`, `textIncludes`, `roles`, and `tags`.
-6. Use `@e` references via `elementRef` (format `@e<structureId>_<revision>`) from the latest snapshot for `click`, `fill`, and `press`; refresh the snapshot after navigation or significant DOM changes. Stale revisions fail closed with `STALE_ELEMENT_REFERENCE`. Use `scroll` for non-keyboard page or region scrolling; fall back to `selector` CSS only when needed.
-7. Use default action strategies first (`click.strategy:"auto"`, `fill.strategy:"native_setter"`, `press.strategy:"auto"`). Inspect `warnings`, `hitTest`, and no-delta diagnostics before retrying with another strategy.
-8. Use `force:true` only after confirming that a covering overlay or hit-test mismatch is intentional and safe to bypass. Prefer fixing the target locator or closing the overlay.
-9. Verify important state-changing actions with `expectChange`, `observe_start` / `observe_diff`, `snapshot`, `wait_for`, or `node scripts/screenshot.js` when visual evidence matters.
+6. Use `@e` references from the latest snapshot as `click.target` or as `elementRef` for `fill` and `press`; refresh the snapshot after navigation or significant DOM changes. Stale revisions fail closed with `STALE_ELEMENT_REFERENCE`. Use `scroll` for non-keyboard page or region scrolling; use click `target:"css=..."` only when a snapshot ref is unavailable.
+7. Let `click` choose its internal strategy. Inspect `warnings`, `hitTest`, `changes`, and `postSnapshot` before retrying. For `fill` and `press`, use default strategies first.
+8. Covered click targets fail with `COVERED_TARGET`; prefer fixing the target locator, closing the overlay, or choosing a visible child target.
+9. Verify important state-changing actions with click `after`, `expectChange`, `observe_start` / `observe_diff`, `snapshot`, `wait_for`, or `node scripts/screenshot.js` when visual evidence matters.
 10. Stop and ask before sensitive, destructive, account-changing, purchase/payment, upload, submit/send/post/publish, credential, MFA, or permission-grant actions.
 11. Close task-specific tabs or sessions with `close_tab` / `close_session` when finished.
 
@@ -45,9 +45,9 @@ Send typed command envelopes to `POST http://127.0.0.1:10087/command` or use the
 
 ```bash
 node scripts/browser-control.js command snapshot --session demo --args '{}'
-node scripts/browser-control.js command click --session demo --args '{"elementRef":"@e1jm0sbb_1"}'
+node scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1"}'
 node scripts/browser-control.js command click_probe --session demo --args '{"elementRef":"@e1jm0sbb_1"}'
-node scripts/browser-control.js command click --session demo --args '{"elementRef":"@e1jm0sbb_1","expectChange":true}'
+node scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1","after":"snapshot"}'
 node scripts/browser-control.js command fill --session demo --args '{"elementRef":"@e0abc12_1","value":"draft text"}'
 node scripts/browser-control.js command get_text --session demo --args '{"scope":"viewport","maxChars":4000}'
 node scripts/browser-control.js command scroll --session demo --args '{"deltaY":800,"strategy":"dom"}'
@@ -74,7 +74,7 @@ Common commands: `navigate`, `find_tab`, `snapshot`, `click`, `click_probe`, `fi
 
 Load `references/api.md` for the full command and CLI reference.
 
-Action commands return diagnostics when available: `strategyUsed`, `target`, `hitTest`, `focusBefore`, `focusAfter`, `newTab` / `newTabs` for actions that open another tab, `warnings`, and optional `actionObservation`. If a click reports no observable change, take a fresh `snapshot`, inspect whether another element covered the target, and retry only with a deliberate strategy choice. `element_click` is an explicit escape hatch that calls `el.click()` directly; it is not the default fallback because it can bypass pointer/mouse semantics.
+Action commands return diagnostics when available: `strategyUsed`, `target`, `hitTest`, `focusBefore`, `focusAfter`, `newTab` / `newTabs` for actions that open another tab, `warnings`, and observation details. `click` returns `changes` by default and may return `postSnapshot` after the page settles. If a click reports no observable change, inspect whether another element covered the target before retrying.
 
 Snapshot redacts likely sensitive field values by default (`password`, token/secret/session/cookie/API-key-like fields). If you need page text rather than targets, prefer `get_text` so the agent does not spend context on layout containers. For below-fold or scrollable-region text, use `scroll` plus `get_text` instead of using `evaluate` as a scrolling workaround.
 
@@ -91,7 +91,7 @@ Load `references/recipes.md` for task playbooks:
 - download files
 - clean up sessions
 
-For quick single-action verification, `click`, `fill`, and `press` can use `expectChange` / `observe` and return an inline `actionObservation`. For multi-step debugging or broader before/after checks, call `observe_start`, perform normal reversible actions, then call `observe_diff` to get capped added/removed visible text and network requests since the baseline marker. This does not prove request causation and may include sensitive visible text; keep summaries compact.
+For quick single-action verification, use click `after` or use `expectChange` / `observe` with `fill` and `press`. For multi-step debugging or broader before/after checks, call `observe_start`, perform normal reversible actions, then call `observe_diff` to get capped added/removed visible text and network requests since the baseline marker. This does not prove request causation and may include sensitive visible text; keep summaries compact.
 
 ## Screenshots and artifacts
 
