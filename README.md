@@ -106,7 +106,7 @@ Commands are sent to `POST /command` as typed envelopes:
 }
 ```
 
-Supported browser commands include `navigate`, `find_tab`, `snapshot`, `get_text`, `scroll`, `click`, `click_probe`, `fill`, `press`, `select_option`, `set_checked`, `wait_for`, `evaluate`, `screenshot`, `save_as_pdf`, `observe_start`, `observe_diff`, `network_start`, `network_list`, `network_detail`, `network_stop`, `upload`, `download`, `list_tabs`, `close_tab`, and `close_session`.
+Supported browser commands include `navigate`, `find_tab`, `snapshot`, `get_text`, `scroll`, `click`, `click_probe`, `fill`, `press`, `wait_for`, `evaluate`, `screenshot`, `save_as_pdf`, `observe_start`, `observe_diff`, `network_start`, `network_list`, `network_detail`, `network_stop`, `upload`, `download`, `list_tabs`, `close_tab`, and `close_session`.
 
 See `skills/browser-control/references/api.md` for the full CLI and API reference.
 

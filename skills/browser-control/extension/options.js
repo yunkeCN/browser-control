@@ -12,21 +12,18 @@
     "src/extension/ui/options.ts"() {
       var defaults = {
         daemonUrl: "ws://127.0.0.1:10087/ws",
-        snapshotMaxDepth: 20,
         requestTimeout: 3e4,
         confirmActions: true
       };
       async function loadSettings() {
         const stored = await chrome.storage.sync.get(defaults);
         document.getElementById("daemonUrl").value = stored.daemonUrl;
-        document.getElementById("snapshotMaxDepth").value = stored.snapshotMaxDepth;
         document.getElementById("requestTimeout").value = stored.requestTimeout;
         document.getElementById("confirmActions").checked = stored.confirmActions;
       }
       async function saveSettings() {
         const settings = {
           daemonUrl: document.getElementById("daemonUrl").value || defaults.daemonUrl,
-          snapshotMaxDepth: parseInt(document.getElementById("snapshotMaxDepth").value) || defaults.snapshotMaxDepth,
           requestTimeout: parseInt(document.getElementById("requestTimeout").value) || defaults.requestTimeout,
           confirmActions: document.getElementById("confirmActions").checked
         };

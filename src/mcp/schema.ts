@@ -34,13 +34,12 @@ export const commandArgSchemas = {
   }).strict(),
   snapshot: z.object({
     tabId,
-    maxDepth: z.number().int().nonnegative().optional(),
     roles: z.array(z.string()).optional(),
     tags: z.array(z.string()).optional(),
     hasVisibleText: z.boolean().optional(),
     textIncludes: z.string().optional(),
     viewportOnly: z.boolean().optional(),
-    maxElements: z.number().int().positive().optional()
+    boxes: z.boolean().optional()
   }).strict(),
   click: z.object({
     elementRef: elementRef.optional(),
@@ -112,8 +111,6 @@ export const commandArgSchemas = {
     behavior: z.enum(['auto', 'instant', 'smooth']).optional(),
     waitMs: z.number().nonnegative().optional()
   }).strict(),
-  select_option: z.object({ elementRef: elementRef.optional(), selector: selector.optional(), value: z.string(), tabId }).strict(),
-  set_checked: z.object({ elementRef: elementRef.optional(), selector: selector.optional(), checked: z.boolean(), tabId }).strict(),
   wait_for: z.object({
     selector: selector.optional(),
     text: z.string().optional(),

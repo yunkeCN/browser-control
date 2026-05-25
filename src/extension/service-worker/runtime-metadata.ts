@@ -40,7 +40,8 @@ export const EXTENSION_CAPABILITIES = [
   'scroll',
   'get_text',
   'sessionNetworkCapture',
-  'snapshotFilters'
+  'snapshotFilters',
+  'snapshotAriaTree'
 ];
 
 let extensionRuntimeMetadata: ExtensionRuntimeMetadata | null = null;

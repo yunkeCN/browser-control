@@ -15,8 +15,6 @@ export type CommandAction =
   | 'fill'
   | 'press'
   | 'scroll'
-  | 'select_option'
-  | 'set_checked'
   | 'wait_for'
   | 'find_tab'
   | 'evaluate'

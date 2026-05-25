@@ -140,13 +140,13 @@ async function apiCall(command, args = {}) {
 }
 
 function firstElementId(snapshot, predicate) {
-  const elements = snapshot?.data?.elements || [];
-  const match = elements.find(predicate);
-  return match?.id || '';
+  const refs = snapshot?.data?.refs || [];
+  const match = refs.find(predicate);
+  return match?.ref || match?.id || '';
 }
 
 function visibleText(element) {
-  return element?.visibleText || element?.text || element?.name || '';
+  return element?.text || element?.name || '';
 }
 
 async function main() {
@@ -189,7 +189,7 @@ async function main() {
     info('Test 4: Take accessibility snapshot');
     const snapshot = await apiCall('snapshot', {});
     check('snapshot ok', true, snapshot?.ok === true);
-    info(`  Elements found: ${snapshot?.data?.totalElements || snapshot?.data?.stats?.returned || 0}`);
+    info(`  Refs found: ${snapshot?.data?.refs?.length || snapshot?.data?.stats?.returned || 0}`);
 
     const inputRef = firstElementId(snapshot, element => element.tag === 'input' && element.attributes?.type === 'email');
     const buttonRef = firstElementId(snapshot, element => element.tag === 'button' && visibleText(element).includes('Submit'));
@@ -219,8 +219,7 @@ async function main() {
     }
 
     info('Test 6: Interact with form controls');
-    check('select_option ok', true, (await apiCall('select_option', { selector: '#role', value: 'admin' }))?.ok === true);
-    check('set_checked ok', true, (await apiCall('set_checked', { selector: '#active', checked: true }))?.ok === true);
+    check('checkbox click ok', true, (await apiCall('click', { selector: '#active' }))?.ok === true);
     check('wait_for ok', true, (await apiCall('wait_for', { selector: '#dynamic', timeoutMs: 5000 }))?.ok === true);
     check('press ok', true, (await apiCall('press', { selector: '#email', key: 'Enter' }))?.ok === true);
 

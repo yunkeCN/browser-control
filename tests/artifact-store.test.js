@@ -28,19 +28,42 @@ test('large network bodies are artifacted by default', () => {
   assert.ok(result.data.bodyArtifact.path.endsWith('.txt'));
 });
 
-test('snapshot writes a JSON artifact without changing returned data', () => {
+test('small snapshot responses stay inline without an artifact', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-control-snapshot-'));
   const snapshot = {
-    schemaVersion: 2,
-    elements: [{ id: '@e1', tag: 'button', visibleText: 'Submit' }],
-    returned: 1,
-    truncated: false
+    schemaVersion: 3,
+    semantics: 'playwright-aria-ai-v1',
+    snapshot: '- button "Submit" [ref=@eabc_1]',
+    refs: [{ ref: '@eabc_1', tag: 'button', text: 'Submit' }],
+    tree: []
+  };
+  const result = extractArtifacts('snapshot', snapshot, new ArtifactStore(dir));
+  assert.equal(result.artifacts.length, 0);
+  assert.deepEqual(result.data, snapshot);
+});
+
+test('large snapshot text is artifacted and replaced with a compact preview', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-control-snapshot-'));
+  const snapshot = {
+    schemaVersion: 3,
+    semantics: 'playwright-aria-ai-v1',
+    snapshot: 'x'.repeat(100_001),
+    refs: Array.from({ length: 205 }, (_, index) => ({ ref: `@e${index}_1`, tag: 'button', text: `Button ${index}` })),
+    tree: [{ role: 'document', children: [{ text: 'full tree' }] }],
+    stats: { returned: 205 },
+    guidance: { textReading: 'use get_text' }
   };
   const result = extractArtifacts('snapshot', snapshot, new ArtifactStore(dir));
   assert.equal(result.artifacts.length, 1);
   assert.equal(result.artifacts[0].kind, 'snapshot');
   assert.equal(result.artifacts[0].mimeType, 'application/json');
-  assert.deepEqual(result.data, snapshot);
+  assert.equal(result.data.truncated, true);
+  assert.equal(result.data.artifact.path, result.artifacts[0].path);
+  assert.equal(result.data.snapshot.includes('truncated'), true);
+  assert.equal(result.data.snapshot.length < 25_000, true);
+  assert.deepEqual(result.data.tree, []);
+  assert.equal(result.data.refs.length, 200);
+  assert.equal(result.data.guidance.filtering.some(hint => /textIncludes/.test(hint)), true);
   assert.ok(fs.existsSync(result.artifacts[0].path));
   const saved = JSON.parse(fs.readFileSync(result.artifacts[0].path, 'utf8'));
   assert.deepEqual(saved, snapshot);

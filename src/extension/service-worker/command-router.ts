@@ -1,5 +1,5 @@
 import { sendToDaemon, pendingRequests } from './transport';
-import { handleNavigate, handleSnapshot, handleClick, handleClickProbe, handleFill, handlePress, handleScroll, handleSelectOption, handleSetChecked, handleWaitFor, handleFindTab, handleAttachTab, handleEvaluate, handleScreenshot, handleObserveCapture, handleGetText } from './handlers/navigation-actions';
+import { handleNavigate, handleSnapshot, handleClick, handleClickProbe, handleFill, handlePress, handleScroll, handleWaitFor, handleFindTab, handleAttachTab, handleEvaluate, handleScreenshot, handleObserveCapture, handleGetText } from './handlers/navigation-actions';
 import { handleNetwork } from './handlers/network-cdp';
 import { handleUpload, handleDownload, handleSaveAsPdf, handleListTabs, handleCloseTab, handleCloseSession } from './handlers/artifacts-tabs';
 import type { CommandAction, CommandArgs, CommandResult, RequestId, SessionName } from '../shared/types';
@@ -66,12 +66,6 @@ export async function executeCommand(
         break;
       case 'scroll':
         result = await handleScroll(args, session);
-        break;
-      case 'select_option':
-        result = await handleSelectOption(args, session);
-        break;
-      case 'set_checked':
-        result = await handleSetChecked(args, session);
         break;
       case 'wait_for':
         result = await handleWaitFor(args, session);

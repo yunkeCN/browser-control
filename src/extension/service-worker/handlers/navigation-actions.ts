@@ -8,7 +8,6 @@ import { performClick } from '../page-runtime/click';
 import { performFill } from '../page-runtime/fill';
 import { focusPressTarget, performPress } from '../page-runtime/press';
 import { performDomScroll } from '../page-runtime/scroll';
-import { performSelectOption, performSetChecked } from '../page-runtime/select-check';
 import { performWaitFor } from '../page-runtime/wait-for';
 import { performEvaluate } from '../page-runtime/evaluate';
 import { updateTabAndWaitForLoad } from '../navigation-helpers';
@@ -367,50 +366,6 @@ export async function handleScroll(args: CommandArgs = {}, session: SessionName)
 
   const result = results[0]?.result as any;
   if (!result) throw new Error('Scroll script returned no result');
-  if (result?.error && result?.recoverable) return result;
-  if (result?.error) throw new Error(result.error);
-  return result;
-}
-
-export async function handleSelectOption(args: CommandArgs = {}, session: SessionName): Promise<any> {
-  const { value } = args || {};
-  const selector = targetSelector(args);
-  if (!selector) throw new Error('selector is required for select_option');
-  if (value === undefined) throw new Error('value is required for select_option');
-
-  const tabId = args?.tabId || getActiveTabId(session);
-  if (!tabId) throw new Error('No active tab in session');
-
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: performSelectOption,
-    args: [selector, value],
-    world: 'MAIN'
-  });
-
-  const result = results[0]?.result as any;
-  if (result?.error && result?.recoverable) return result;
-  if (result?.error) throw new Error(result.error);
-  return result;
-}
-
-export async function handleSetChecked(args: CommandArgs = {}, session: SessionName): Promise<any> {
-  const { checked } = args || {};
-  const selector = targetSelector(args);
-  if (!selector) throw new Error('selector is required for set_checked');
-  if (typeof checked !== 'boolean') throw new Error('checked is required for set_checked');
-
-  const tabId = args?.tabId || getActiveTabId(session);
-  if (!tabId) throw new Error('No active tab in session');
-
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: performSetChecked,
-    args: [selector, checked],
-    world: 'MAIN'
-  });
-
-  const result = results[0]?.result as any;
   if (result?.error && result?.recoverable) return result;
   if (result?.error) throw new Error(result.error);
   return result;

@@ -63,6 +63,7 @@ var DAEMON_CAPABILITIES = [
   "get_text",
   "sessionNetworkCapture",
   "snapshotFilters",
+  "snapshotAriaTree",
   "clickProbe"
 ];
 var EXTENSION_CAPABILITY_HINTS = [
@@ -79,12 +80,13 @@ var EXTENSION_CAPABILITY_HINTS = [
   "scroll",
   "get_text",
   "sessionNetworkCapture",
-  "snapshotFilters"
+  "snapshotFilters",
+  "snapshotAriaTree"
 ];
 var COMMANDS = {
   navigate: { required: ["url"], optional: ["newTab", "timeoutMs"] },
   find_tab: { required: [], optional: ["urlIncludes", "titleIncludes", "active", "tabId", "attach"] },
-  snapshot: { required: [], optional: ["tabId", "maxDepth", "roles", "tags", "hasVisibleText", "textIncludes", "viewportOnly", "maxElements"], example: { tabId: 123, roles: ["button", "link"], hasVisibleText: true, maxElements: 50 } },
+  snapshot: { required: [], optional: ["tabId", "roles", "tags", "hasVisibleText", "textIncludes", "viewportOnly", "boxes"], example: { tabId: 123, roles: ["button", "link"], hasVisibleText: true, viewportOnly: true } },
   click: {
     required: [],
     requiredOneOf: ["elementRef", "selector"],
@@ -116,8 +118,6 @@ var COMMANDS = {
     example: { deltaY: 800, strategy: "dom" },
     strategies: ["auto", "dom", "wheel"]
   },
-  select_option: { required: ["value"], requiredOneOf: ["elementRef", "selector"], optional: ["elementRef", "selector", "tabId"] },
-  set_checked: { required: ["checked"], requiredOneOf: ["elementRef", "selector"], optional: ["elementRef", "selector", "tabId"] },
   wait_for: { required: [], optional: ["selector", "text", "state", "timeoutMs", "tabId", "expression"] },
   evaluate: { required: ["code"], optional: ["tabId"], example: { code: "return { title: document.title }" } },
   screenshot: { required: [], optional: ["tabId", "format", "quality", "fullPage", "file_name", "fileName"] },
@@ -138,8 +138,6 @@ var COMMANDS = {
 var ELEMENT_REF_PATTERN = /^@e[^\s_]+_\d+$/;
 var LEGACY_ACTION_ALIASES = {
   saveAsPdf: "save_as_pdf",
-  selectOption: "select_option",
-  setChecked: "set_checked",
   waitFor: "wait_for",
   findTab: "find_tab",
   getText: "get_text",
@@ -202,9 +200,6 @@ function validateRequest(request) {
   validateKnownArgs(request, spec);
   validateAndNormalizeElementRef(request, spec);
   validateRequiredOneOf(request, spec);
-  if (request.command === "set_checked" && typeof request.args.checked !== "boolean") {
-    throw new ProtocolError("VALIDATION_ERROR", "checked must be a boolean for command 'set_checked'", { field: "checked" });
-  }
   if (request.command === "upload" && !Array.isArray(request.args.files)) {
     throw new ProtocolError("VALIDATION_ERROR", "files must be an array for command 'upload'", { field: "files" });
   }
@@ -237,7 +232,7 @@ function validateKnownArgs(request, spec) {
     hints.unshift("Use args.requestId from network_list; numeric index is not part of the network_detail protocol.");
   }
   if (request.command === "click" && field === "text") {
-    hints.unshift("click uses args.elementRef for snapshot @e references. To click visible text, call snapshot with args.textIncludes and args.maxElements, then click the returned @e id.");
+    hints.unshift("click uses args.elementRef for snapshot @e references. To click visible text, call snapshot with args.textIncludes plus hasVisibleText and viewportOnly, then click the returned @e id.");
   }
   if (request.command === "get_text" && field === "selectors") {
     hints.unshift("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes.");

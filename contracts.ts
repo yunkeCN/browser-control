@@ -1,7 +1,7 @@
 export const PROTOCOL_VERSION = '2026-05-19' as const;
 
 export type BackendName = 'extension';
-export type ArtifactKind = 'screenshot' | 'pdf' | 'download' | 'network' | 'observation';
+export type ArtifactKind = 'screenshot' | 'pdf' | 'download' | 'network' | 'observation' | 'snapshot';
 export type ScrollLogicalPosition = 'start' | 'center' | 'end' | 'nearest';
 export type ScrollBehavior = 'auto' | 'instant' | 'smooth';
 export type ElementRef = `@e${string}_${number}`;
@@ -37,14 +37,12 @@ export interface ProtocolErrorShape {
 export interface CommandArgs {
   navigate: { url: string; newTab?: boolean; timeoutMs?: number };
   find_tab: { urlIncludes?: string; titleIncludes?: string; active?: boolean; attach?: boolean; tabId?: number };
-  snapshot: { tabId?: number; maxDepth?: number; roles?: string[]; tags?: string[]; hasVisibleText?: boolean; textIncludes?: string; viewportOnly?: boolean; maxElements?: number };
+  snapshot: { tabId?: number; roles?: string[]; tags?: string[]; hasVisibleText?: boolean; textIncludes?: string; viewportOnly?: boolean; boxes?: boolean };
   click: ElementTarget & { tabId?: number; strategy?: 'auto' | 'cdp_mouse' | 'dom_pointer' | 'element_click'; force?: boolean; button?: 'left' | 'middle' | 'right'; clickCount?: number; modifiers?: string[]; expectChange?: boolean; observe?: ObserveOptions; observeNewTab?: boolean; expectNewTab?: boolean };
   click_probe: ElementTarget & { tabId?: number; strategy?: 'auto' | 'cdp_mouse' | 'dom_pointer' | 'element_click'; force?: boolean; button?: 'left' | 'middle' | 'right'; clickCount?: number; modifiers?: string[]; observeNewTab?: boolean; expectNewTab?: boolean; waitMs?: number; filter?: string; includeHeaders?: boolean; includeBody?: boolean; redactSensitive?: boolean; maxRequests?: number };
   fill: ElementTarget & { value: string; tabId?: number; strategy?: 'native_setter' | 'text_input' | 'paste_like'; clear?: boolean; commit?: 'change' | 'blur' | 'enter' | 'none'; expectChange?: boolean; observe?: ObserveOptions };
   press: { key: string; elementRef?: ElementRef; selector?: string; tabId?: number; strategy?: 'auto' | 'cdp_keyboard' | 'dom_keyboard'; modifiers?: string[]; expectChange?: boolean; observe?: ObserveOptions; observeNewTab?: boolean; expectNewTab?: boolean };
   scroll: { elementRef?: ElementRef; tabId?: number; selector?: string; strategy?: 'auto' | 'dom' | 'wheel'; deltaX?: number; deltaY?: number; x?: number; y?: number; region?: { x: number; y: number; width: number; height: number }; steps?: number; block?: ScrollLogicalPosition; behavior?: ScrollBehavior; waitMs?: number };
-  select_option: ElementTarget & { value: string; tabId?: number };
-  set_checked: ElementTarget & { checked: boolean; tabId?: number };
   wait_for: { selector?: string; text?: string; state?: 'visible' | 'attached' | 'hidden' | 'detached'; timeoutMs?: number; tabId?: number; expression?: string };
   evaluate: { code: string; tabId?: number };
   screenshot: { tabId?: number; format?: 'png' | 'jpeg'; quality?: number; fullPage?: boolean; file_name?: string; fileName?: string };
@@ -86,19 +84,39 @@ export interface NavigateResult {
   };
 }
 
-export interface SnapshotElement {
-  id: string;
+export interface SnapshotBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface SnapshotNode {
+  role?: string;
+  name?: string;
+  ref?: ElementRef;
   tag: string;
+  text?: string;
+  props?: Record<string, string>;
+  state?: Record<string, unknown>;
+  box?: SnapshotBox;
+  children?: Array<SnapshotNode | { text: string }>;
+}
+
+export interface SnapshotRef {
+  ref: ElementRef;
+  id: ElementRef;
+  structureId: string;
+  revision: number;
   role: string;
-  name: string;
-  description: string;
-  cssSelector: string;
+  name: string | null;
+  tag: string;
+  text: string | null;
+  selector: string | null;
   testId: string | null;
   href: string | null;
-  visibleText: string | null;
-  boundingBox: { x: number; y: number; width: number; height: number };
-  enabled: boolean;
-  visible: boolean;
+  box: SnapshotBox;
+  state?: Record<string, unknown>;
   attributes: {
     type: string | null;
     value: string | null;
@@ -110,28 +128,52 @@ export interface SnapshotElement {
 }
 
 export interface SnapshotResult {
-  schemaVersion: 2;
-  semantics: 'compact-dom-v2';
-  elements: SnapshotElement[];
+  schemaVersion: 3;
+  semantics: 'playwright-aria-ai-v1';
+  snapshot: string;
+  tree: SnapshotNode[];
+  refs: SnapshotRef[];
   url: string;
   title: string;
+  truncated?: boolean;
+  artifact?: ArtifactRef | null;
+  artifactPath?: string;
+  omitted?: {
+    fullSnapshot?: boolean;
+    tree?: boolean;
+    refs?: boolean;
+  };
+  caps?: {
+    snapshotTextArtifactThreshold?: number;
+    snapshotPreviewChars?: number;
+    refPreviewLimit?: number;
+    fullSnapshotChars?: number;
+    fullRefs?: number;
+  };
   stats: {
-    scanned: number;
-    matched: number;
+    visited: number;
+    emitted: number;
+    text: number;
+    refs: number;
+    filtered: number;
+    frames: number;
+    inaccessibleFrames: number;
     returned: number;
     truncated: boolean;
   };
-  totalBeforeFilter: number;
-  returned: number;
-  truncated: boolean;
   filters: {
-    maxDepth: number | null;
     roles: string[] | null;
     tags: string[] | null;
     hasVisibleText: boolean;
     textIncludes: string | null;
     viewportOnly: boolean;
-    maxElements: number | null;
+    boxes?: boolean;
+  };
+  guidance: {
+    refFormat: string;
+    refLifetime: string;
+    textReading: string;
+    filtering?: string[];
   };
 }
 
@@ -164,7 +206,7 @@ export interface ResultEnvelope<TData = unknown> {
 
 
 export const COMMAND_NAMES: readonly CommandName[] = [
-  'navigate', 'find_tab', 'snapshot', 'click', 'click_probe', 'fill', 'press', 'scroll', 'select_option', 'set_checked', 'wait_for',
+  'navigate', 'find_tab', 'snapshot', 'click', 'click_probe', 'fill', 'press', 'scroll', 'wait_for',
   'evaluate', 'screenshot', 'save_as_pdf', 'observe_start', 'observe_diff', 'network_start', 'network_list', 'network_detail',
   'network_stop', 'upload', 'download', 'get_text', 'list_tabs', 'close_tab', 'close_session'
 ] as const;

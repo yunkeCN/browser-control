@@ -95,8 +95,11 @@ test('generated executeScript page runtime functions are isolated VM-callable', 
       name: 'getAccessibilitySnapshot',
       args: [],
       assertResult: result => {
-        assert.equal(Array.isArray(result.elements), true);
-        assert.equal(result.elements.length, 0);
+        assert.equal(result.schemaVersion, 3);
+        assert.equal(result.semantics, 'playwright-aria-ai-v1');
+        assert.equal(typeof result.snapshot, 'string');
+        assert.equal(Array.isArray(result.tree), true);
+        assert.equal(Array.isArray(result.refs), true);
       }
     },
     {
@@ -122,16 +125,6 @@ test('generated executeScript page runtime functions are isolated VM-callable', 
         assert.equal(result.strategyUsed, 'cdp_keyboard');
         assert.equal(result.recoverable, true);
       }
-    },
-    {
-      name: 'performSelectOption',
-      args: ['#missing', 'x'],
-      assertResult: result => assert.equal(result.error, 'Element not found: #missing')
-    },
-    {
-      name: 'performSetChecked',
-      args: ['#missing', true],
-      assertResult: result => assert.equal(result.error, 'Element not found: #missing')
     },
     {
       name: 'performWaitFor',
@@ -162,7 +155,7 @@ test('generated executeScript page runtime functions are isolated VM-callable', 
   }
 });
 
-test('snapshot runtime emits compact schema, deterministic depth, direct text, and redacts sensitive values', async () => {
+test('snapshot runtime emits Playwright-style aria tree, semantic filters, and redacts sensitive values', async () => {
   const source = read(extensionPath('service-worker.js'));
   const fnSource = extractFunction(source, 'getAccessibilitySnapshot');
   const sandbox = createSnapshotSandbox();
@@ -170,44 +163,38 @@ test('snapshot runtime emits compact schema, deterministic depth, direct text, a
   const getSnapshot = vm.runInContext(`(${fnSource})`, sandbox);
 
   const full = await getSnapshot({});
-  assert.equal(full.schemaVersion, 2);
-  assert.equal(full.semantics, 'compact-dom-v2');
-  assert.equal(full.filters.maxDepth, null);
-  assert.equal(full.stats.scanned >= 7, true);
-  assert.equal(full.stats.returned, full.elements.length);
-  assert.equal(full.totalBeforeFilter, full.stats.scanned);
+  assert.equal(full.schemaVersion, 3);
+  assert.equal(full.semantics, 'playwright-aria-ai-v1');
+  assert.equal(full.stats.visited >= 4, true);
+  assert.equal(full.stats.returned, full.refs.length);
+  assert.match(full.snapshot, /button "Nested descendant text" \[ref=@e[a-z0-9]+_1\]/);
 
-  const panel = full.elements.find(element => element.testId === 'panel');
-  assert.equal(panel.visibleText, 'Panel direct text');
-  assert.doesNotMatch(panel.visibleText || '', /Nested descendant text/);
+  const panel = full.refs.find(element => element.testId === 'panel');
+  assert.equal(panel.text, 'Panel direct text');
+  assert.match(full.snapshot, /generic \[ref=@e[a-z0-9]+_1\]:/);
 
-  const button = full.elements.find(element => element.tag === 'button');
+  const button = full.refs.find(element => element.tag === 'button');
   assert.equal(button.name, 'Nested descendant text');
-  assert.equal(button.visibleText, 'Nested descendant text');
-  assert.match(button.id, /^@e[a-z0-9]+_\d+$/);
+  assert.equal(button.text, 'Nested descendant text');
+  assert.match(button.ref, /^@e[a-z0-9]+_\d+$/);
 
-  const token = full.elements.find(element => element.testId === 'token-input');
+  const token = full.refs.find(element => element.testId === 'token-input');
   assert.equal(token.attributes.value, '[redacted]');
   assert.equal(token.attributes.valueLength, 'super-secret-token'.length);
   assert.equal(token.attributes.redacted, true);
   assert.doesNotMatch(JSON.stringify(token), /super-secret-token/);
 
-  const shallow = await getSnapshot({ maxDepth: 1 });
-  assert.equal(shallow.elements.some(element => element.testId === 'panel'), true);
-  assert.equal(shallow.elements.some(element => element.tag === 'button'), false);
-
-  const buttons = await getSnapshot({ roles: ['button'], maxElements: 1 });
-  assert.equal(buttons.elements.length, 1);
-  assert.equal(buttons.stats.matched >= 1, true);
-  assert.equal(buttons.elements.every(element => element.role === 'button'), true);
-  assert.equal(buttons.elements[0].id, button.id);
+  const buttons = await getSnapshot({ roles: ['button'] });
+  assert.equal(buttons.refs.filter(element => element.role === 'button').length, 1);
+  assert.equal(buttons.refs.some(element => element.role === 'button'), true);
+  assert.equal(buttons.refs.find(element => element.role === 'button').ref, button.ref);
 
   const assignedIds = sandbox.document
     .querySelectorAll('[data-agent-id^="@e"]')
     .map(element => element.getAttribute('data-agent-id'));
   assert.equal(new Set(assignedIds).size, assignedIds.length);
   assert.equal(
-    sandbox.document.querySelector(`[data-agent-id="${buttons.elements[0].id}"]`),
+    sandbox.document.querySelector(`[data-agent-id="${buttons.refs.find(element => element.role === 'button').ref}"]`),
     sandbox.fixture.button
   );
 });
@@ -222,21 +209,22 @@ test('snapshot runtime keeps structural ids stable and stale @e refs fail closed
   const performClick = vm.runInContext(`(${performClickSource})`, sandbox);
 
   const first = await getSnapshot({ roles: ['button'] });
-  const firstButton = first.elements[0];
-  assert.match(firstButton.id, /^@e[a-z0-9]+_1$/);
+  const firstButton = first.refs.find(element => element.role === 'button');
+  assert.match(firstButton.ref, /^@e[a-z0-9]+_1$/);
 
   const second = await getSnapshot({ roles: ['button'] });
-  assert.equal(second.elements[0].id, firstButton.id);
+  assert.equal(second.refs.find(element => element.role === 'button').ref, firstButton.ref);
 
   sandbox.fixture.button.childNodes[0].textContent = '超過 20 分鐘';
-  const staleClick = performClick(firstButton.id, { strategy: 'dom_pointer', force: true });
+  const staleClick = performClick(firstButton.ref, { strategy: 'dom_pointer', force: true });
   assert.equal(staleClick.code, 'STALE_ELEMENT_REFERENCE');
   assert.equal(staleClick.recoverable, true);
   assert.equal(sandbox.fixture.button.events.length, 0);
 
   const third = await getSnapshot({ roles: ['button'] });
-  assert.match(third.elements[0].id, new RegExp(`^@e${firstButton.structureId}_2$`));
-  assert.notEqual(third.elements[0].id, firstButton.id);
+  const thirdButton = third.refs.find(element => element.role === 'button');
+  assert.match(thirdButton.ref, new RegExp(`^@e${firstButton.structureId}_2$`));
+  assert.notEqual(thirdButton.ref, firstButton.ref);
 });
 
 function createIsolatedPageSandbox() {
@@ -377,17 +365,18 @@ function createSnapshotSandbox() {
     }
   }
 
-  const button = new FakeElement('button', {}, { text: 'Nested descendant text' });
-  const inline = new FakeElement('span', {}, { text: 'inline cell text' });
-  const cell = new FakeElement('td', { 'data-testid': 'cell' }, { text: 'Cell direct ', children: [inline] });
+  const button = new FakeElement('button', {}, { text: 'Nested descendant text', rect: { x: 10, y: 30, left: 10, top: 30, right: 130, bottom: 54, width: 120, height: 24 } });
+  const inline = new FakeElement('span', {}, { text: 'inline cell text', rect: { x: 10, y: 60, left: 10, top: 60, right: 130, bottom: 84, width: 120, height: 24 } });
+  const cell = new FakeElement('td', { 'data-testid': 'cell' }, { text: 'Cell direct ', rect: { x: 10, y: 60, left: 10, top: 60, right: 180, bottom: 84, width: 170, height: 24 }, children: [inline] });
   const tokenInput = new FakeElement('input', {
     type: 'text',
     name: 'api_token',
     placeholder: 'Token',
     'data-testid': 'token-input'
-  }, { value: 'super-secret-token' });
+  }, { value: 'super-secret-token', rect: { x: 10, y: 90, left: 10, top: 90, right: 180, bottom: 114, width: 170, height: 24 } });
   const panel = new FakeElement('div', { 'data-testid': 'panel' }, {
     text: 'Panel direct text',
+    rect: { x: 0, y: 0, left: 0, top: 0, right: 240, bottom: 124, width: 240, height: 124 },
     children: [button, cell, tokenInput]
   });
   const username = new FakeElement('input', {
@@ -395,7 +384,7 @@ function createSnapshotSandbox() {
     name: 'username',
     placeholder: 'Username',
     'data-testid': 'username-input'
-  }, { value: 'alice' });
+  }, { value: 'alice', rect: { x: 0, y: 140, left: 0, top: 140, right: 160, bottom: 164, width: 160, height: 24 } });
   const hidden = new FakeElement('div', { 'data-testid': 'offscreen' }, {
     text: 'Offscreen',
     rect: { x: 0, y: 900, left: 0, top: 900, right: 120, bottom: 924, width: 120, height: 24 }
@@ -418,8 +407,11 @@ function createSnapshotSandbox() {
     title: 'Snapshot Fixture',
     body,
     activeElement: body,
-    elementFromPoint() {
-      return button;
+    elementFromPoint(x = 0, y = 0) {
+      return allElements().slice().reverse().find(element => {
+        const rect = element.getBoundingClientRect();
+        return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+      }) || body;
     },
     querySelector(selector) {
       if (selector.startsWith('[data-agent-id="')) {

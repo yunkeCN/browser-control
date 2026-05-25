@@ -3679,12 +3679,13 @@ var DAEMON_CAPABILITIES = [
   "get_text",
   "sessionNetworkCapture",
   "snapshotFilters",
+  "snapshotAriaTree",
   "clickProbe"
 ];
 var COMMANDS = {
   navigate: { required: ["url"], optional: ["newTab", "timeoutMs"] },
   find_tab: { required: [], optional: ["urlIncludes", "titleIncludes", "active", "tabId", "attach"] },
-  snapshot: { required: [], optional: ["tabId", "maxDepth", "roles", "tags", "hasVisibleText", "textIncludes", "viewportOnly", "maxElements"], example: { tabId: 123, roles: ["button", "link"], hasVisibleText: true, maxElements: 50 } },
+  snapshot: { required: [], optional: ["tabId", "roles", "tags", "hasVisibleText", "textIncludes", "viewportOnly", "boxes"], example: { tabId: 123, roles: ["button", "link"], hasVisibleText: true, viewportOnly: true } },
   click: {
     required: [],
     requiredOneOf: ["elementRef", "selector"],
@@ -3716,8 +3717,6 @@ var COMMANDS = {
     example: { deltaY: 800, strategy: "dom" },
     strategies: ["auto", "dom", "wheel"]
   },
-  select_option: { required: ["value"], requiredOneOf: ["elementRef", "selector"], optional: ["elementRef", "selector", "tabId"] },
-  set_checked: { required: ["checked"], requiredOneOf: ["elementRef", "selector"], optional: ["elementRef", "selector", "tabId"] },
   wait_for: { required: [], optional: ["selector", "text", "state", "timeoutMs", "tabId", "expression"] },
   evaluate: { required: ["code"], optional: ["tabId"], example: { code: "return { title: document.title }" } },
   screenshot: { required: [], optional: ["tabId", "format", "quality", "fullPage", "file_name", "fileName"] },
@@ -3738,8 +3737,6 @@ var COMMANDS = {
 var ELEMENT_REF_PATTERN = /^@e[^\s_]+_\d+$/;
 var LEGACY_ACTION_ALIASES = {
   saveAsPdf: "save_as_pdf",
-  selectOption: "select_option",
-  setChecked: "set_checked",
   waitFor: "wait_for",
   findTab: "find_tab",
   getText: "get_text",
@@ -3802,9 +3799,6 @@ function validateRequest(request) {
   validateKnownArgs(request, spec);
   validateAndNormalizeElementRef(request, spec);
   validateRequiredOneOf(request, spec);
-  if (request.command === "set_checked" && typeof request.args.checked !== "boolean") {
-    throw new ProtocolError("VALIDATION_ERROR", "checked must be a boolean for command 'set_checked'", { field: "checked" });
-  }
   if (request.command === "upload" && !Array.isArray(request.args.files)) {
     throw new ProtocolError("VALIDATION_ERROR", "files must be an array for command 'upload'", { field: "files" });
   }
@@ -3837,7 +3831,7 @@ function validateKnownArgs(request, spec) {
     hints.unshift("Use args.requestId from network_list; numeric index is not part of the network_detail protocol.");
   }
   if (request.command === "click" && field === "text") {
-    hints.unshift("click uses args.elementRef for snapshot @e references. To click visible text, call snapshot with args.textIncludes and args.maxElements, then click the returned @e id.");
+    hints.unshift("click uses args.elementRef for snapshot @e references. To click visible text, call snapshot with args.textIncludes plus hasVisibleText and viewportOnly, then click the returned @e id.");
   }
   if (request.command === "get_text" && field === "selectors") {
     hints.unshift("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes.");
@@ -4082,6 +4076,16 @@ var MIME_BY_KIND = {
   observation: { json: "application/json", txt: "text/plain" },
   snapshot: { json: "application/json" }
 };
+var SNAPSHOT_TEXT_ARTIFACT_THRESHOLD = 1e5;
+var SNAPSHOT_TEXT_PREVIEW_CHARS = 2e4;
+var SNAPSHOT_REF_PREVIEW_LIMIT = 200;
+var SNAPSHOT_FILTERING_HINTS = [
+  "Use textIncludes to narrow the snapshot around visible labels or nearby text.",
+  "Use roles for actionable targets such as button, link, textbox, checkbox, radio, combobox, option, menuitem, tab, and heading.",
+  "Use tags when a specific HTML element matters.",
+  "Use hasVisibleText:true and viewportOnly:true to focus on visible UI.",
+  "Use get_text when the task is mainly reading long prose instead of choosing an elementRef."
+];
 function sanitizeName(name) {
   return String(name || "artifact").replace(/[/\\?%*:|"<>]/g, "-").replace(/\s+/g, "-").slice(0, 120) || "artifact";
 }
@@ -4149,12 +4153,40 @@ function extractArtifacts(command, result, store = new ArtifactStore()) {
     data.artifact = artifact;
   }
   if (command === "snapshot") {
-    const artifact = store.writeText("snapshot", JSON.stringify(result, null, 2), {
-      ext: "json",
-      name: "snapshot",
-      mimeType: "application/json"
-    });
-    if (artifact) artifacts.push(artifact);
+    const snapshotText = typeof result.snapshot === "string" ? result.snapshot : "";
+    if (snapshotText.length > SNAPSHOT_TEXT_ARTIFACT_THRESHOLD) {
+      const artifact = store.writeText("snapshot", JSON.stringify(result, null, 2), {
+        ext: "json",
+        name: "snapshot",
+        mimeType: "application/json"
+      });
+      if (artifact) artifacts.push(artifact);
+      const refs = Array.isArray(result.refs) ? result.refs : [];
+      data.snapshot = `${snapshotText.slice(0, SNAPSHOT_TEXT_PREVIEW_CHARS)}
+... [truncated: snapshot text was ${snapshotText.length} chars; full JSON snapshot is available in data.artifact.path]`;
+      data.tree = [];
+      data.refs = refs.slice(0, SNAPSHOT_REF_PREVIEW_LIMIT);
+      data.truncated = true;
+      data.artifact = artifact;
+      data.artifactPath = artifact?.path;
+      data.omitted = {
+        fullSnapshot: true,
+        tree: true,
+        refs: refs.length > data.refs.length
+      };
+      data.caps = {
+        snapshotTextArtifactThreshold: SNAPSHOT_TEXT_ARTIFACT_THRESHOLD,
+        snapshotPreviewChars: SNAPSHOT_TEXT_PREVIEW_CHARS,
+        refPreviewLimit: SNAPSHOT_REF_PREVIEW_LIMIT,
+        fullSnapshotChars: snapshotText.length,
+        fullRefs: refs.length
+      };
+      data.stats = result.stats && typeof result.stats === "object" ? { ...result.stats, truncated: true, previewRefs: data.refs.length, fullRefs: refs.length } : { truncated: true, previewRefs: data.refs.length, fullRefs: refs.length };
+      data.guidance = {
+        ...result.guidance || {},
+        filtering: SNAPSHOT_FILTERING_HINTS
+      };
+    }
   }
   if (command === "save_as_pdf" && result.data) {
     const artifact = store.writeBase64("pdf", result.data, {

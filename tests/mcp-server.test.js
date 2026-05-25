@@ -177,7 +177,7 @@ test('mcp command forwards protocol envelopes and manages sessions', async (t) =
       timeoutMs: 1234,
       args: {
         viewportOnly: true,
-        maxElements: 10
+        roles: ['button']
       }
     }
   });
@@ -188,7 +188,7 @@ test('mcp command forwards protocol envelopes and manages sessions', async (t) =
   assert.match(fake.requests[0].session, /^mcp-/);
   assert.equal(fake.requests[0].command, 'snapshot');
   assert.equal(fake.requests[0].timeoutMs, 1234);
-  assert.deepEqual(fake.requests[0].args, { viewportOnly: true, maxElements: 10 });
+  assert.deepEqual(fake.requests[0].args, { viewportOnly: true, roles: ['button'] });
   assert.equal(result.structuredContent.ok, true);
   assert.equal(result.structuredContent.command, 'snapshot');
   assert.equal(result.structuredContent.session, fake.requests[0].session);
@@ -237,8 +237,6 @@ test('mcp command covers every protocol command', async (t) => {
     click_probe: { selector: '@e1jm0sbb_1' },
     fill: { selector: '@e1jm0sbb_1', value: 'hello' },
     press: { key: 'Enter' },
-    select_option: { selector: '@e1jm0sbb_1', value: 'option-1' },
-    set_checked: { selector: '@e1jm0sbb_1', checked: true },
     evaluate: { code: 'return document.title' },
     observe_diff: { baselineId: 'obs_test' },
     network_detail: { requestId: 'req_test' },

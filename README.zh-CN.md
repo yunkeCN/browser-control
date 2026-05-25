@@ -110,7 +110,7 @@ node scripts/browser-control.js command get_text --session demo --args '{"scope"
 }
 ```
 
-支持的浏览器命令包括 `navigate`、`find_tab`、`snapshot`、`get_text`、`scroll`、`click`、`click_probe`、`fill`、`press`、`select_option`、`set_checked`、`wait_for`、`evaluate`、`screenshot`、`save_as_pdf`、`observe_start`、`observe_diff`、`network_start`、`network_list`、`network_detail`、`network_stop`、`upload`、`download`、`list_tabs`、`close_tab` 和 `close_session`。
+支持的浏览器命令包括 `navigate`、`find_tab`、`snapshot`、`get_text`、`scroll`、`click`、`click_probe`、`fill`、`press`、`wait_for`、`evaluate`、`screenshot`、`save_as_pdf`、`observe_start`、`observe_diff`、`network_start`、`network_list`、`network_detail`、`network_stop`、`upload`、`download`、`list_tabs`、`close_tab` 和 `close_session`。
 
 完整 CLI 和 API 参考见 `skills/browser-control/references/api.md`。
 

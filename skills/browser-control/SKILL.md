@@ -31,8 +31,8 @@ The daemon listens on `http://127.0.0.1:10087` by default and the extension conn
 2. Start or reuse the singleton daemon: `node scripts/browser-control.js start --json`.
 3. Run `node scripts/browser-control.js doctor --json` and proceed only when the daemon is reachable and `extension_connected` is true.
 4. Navigate with `navigate`, or find/attach an existing tab with `find_tab` (default attach; pass `attach:false` for lookup only).
-5. Take a fresh `snapshot` before every element interaction. Snapshot is a compact structure/interaction view, not a full text dump; use `get_text` for reading page prose. On noisy pages, use filters such as `hasVisibleText`, `viewportOnly`, `roles`, and `maxElements`.
-6. Use `@e` references via `elementRef` (format `@e<structureId>_<revision>`) from the latest snapshot for `click`, `fill`, `press`, `select_option`, and `set_checked`; refresh the snapshot after navigation or significant DOM changes. Stale revisions fail closed with `STALE_ELEMENT_REFERENCE`. Use `scroll` for non-keyboard page or region scrolling; fall back to `selector` CSS only when needed.
+5. Take a fresh `snapshot` before every element interaction. Snapshot is a compact structure/interaction view, not a full text dump; use `get_text` for reading page prose. On noisy pages, use filters such as `hasVisibleText`, `viewportOnly`, `textIncludes`, `roles`, and `tags`.
+6. Use `@e` references via `elementRef` (format `@e<structureId>_<revision>`) from the latest snapshot for `click`, `fill`, and `press`; refresh the snapshot after navigation or significant DOM changes. Stale revisions fail closed with `STALE_ELEMENT_REFERENCE`. Use `scroll` for non-keyboard page or region scrolling; fall back to `selector` CSS only when needed.
 7. Use default action strategies first (`click.strategy:"auto"`, `fill.strategy:"native_setter"`, `press.strategy:"auto"`). Inspect `warnings`, `hitTest`, and no-delta diagnostics before retrying with another strategy.
 8. Use `force:true` only after confirming that a covering overlay or hit-test mismatch is intentional and safe to bypass. Prefer fixing the target locator or closing the overlay.
 9. Verify important state-changing actions with `expectChange`, `observe_start` / `observe_diff`, `snapshot`, `wait_for`, or `node scripts/screenshot.js` when visual evidence matters.
@@ -52,7 +52,7 @@ node scripts/browser-control.js command fill --session demo --args '{"elementRef
 node scripts/browser-control.js command get_text --session demo --args '{"scope":"viewport","maxChars":4000}'
 node scripts/browser-control.js command scroll --session demo --args '{"deltaY":800,"strategy":"dom"}'
 node scripts/browser-control.js command scroll --session demo --args '{"strategy":"wheel","x":400,"y":500,"deltaY":800}'
-node scripts/browser-control.js command snapshot --session demo --args '{"hasVisibleText":true,"viewportOnly":true,"maxElements":120}'
+node scripts/browser-control.js command snapshot --session demo --args '{"hasVisibleText":true,"viewportOnly":true}'
 node scripts/browser-control.js command snapshot --session demo --args '{"roles":["button","link","textbox","combobox"],"viewportOnly":true}'
 node scripts/browser-control.js command evaluate --session demo --code-file ./snippet.js
 ```
@@ -70,7 +70,7 @@ Envelope shape:
 }
 ```
 
-Common commands: `navigate`, `find_tab`, `snapshot`, `click`, `click_probe`, `fill`, `press`, `scroll`, `select_option`, `set_checked`, `wait_for`, `evaluate`, `get_text`, `screenshot`, `save_as_pdf`, `observe_start`, `observe_diff`, `network_start`, `network_list`, `network_detail`, `network_stop`, `upload`, `download`, `list_tabs`, `close_tab`, and `close_session`.
+Common commands: `navigate`, `find_tab`, `snapshot`, `click`, `click_probe`, `fill`, `press`, `scroll`, `wait_for`, `evaluate`, `get_text`, `screenshot`, `save_as_pdf`, `observe_start`, `observe_diff`, `network_start`, `network_list`, `network_detail`, `network_stop`, `upload`, `download`, `list_tabs`, `close_tab`, and `close_session`.
 
 Load `references/api.md` for the full command and CLI reference.
 

@@ -31,7 +31,7 @@ function registerCompactTools(server: McpServer, client: DaemonClient, sessions:
       'Run any low-level Browser Control protocol command through the local daemon.',
       'Input shape: command, optional args object, optional session, timeoutMs, and id.',
       'Session is managed automatically by this MCP server process. Omit session for normal use; pass session only for advanced isolation.',
-      'Before clicking by visible text, call snapshot with args.textIncludes plus maxElements to get a small set of @e references.',
+      'Before clicking by visible text, call snapshot with args.textIncludes plus semantic filters such as roles, hasVisibleText, and viewportOnly to get focused @e references.',
       'Use browser_control_close_session at the end of a task. The MCP server validates command args and returns structured hints, but does not perform user confirmation.'
     ].join('\n\n'),
     inputSchema: unifiedCommandInputSchema
@@ -199,7 +199,7 @@ function hintsFor(command: CommandName, args: Record<string, unknown>, issues: u
   const hints: string[] = [];
   const keys = new Set(Object.keys(args));
   if (command === 'fill' && keys.has('text')) hints.push('fill uses args.value, not args.text.');
-  if (command === 'click' && keys.has('text')) hints.push('click uses args.elementRef for snapshot @e references. To click visible text, first call snapshot with args.textIncludes and args.maxElements, then click with the returned @e id.');
+  if (command === 'click' && keys.has('text')) hints.push('click uses args.elementRef for snapshot @e references. To click visible text, first call snapshot with args.textIncludes plus hasVisibleText and viewportOnly, then click with the returned @e id.');
   if (command === 'get_text' && keys.has('selectors')) hints.push('get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes instead.');
   if (command === 'evaluate' && keys.has('expression')) hints.push('evaluate uses args.code, not args.expression.');
   if (command === 'wait_for' && keys.has('timeMs')) hints.push('wait_for uses args.timeoutMs, not args.timeMs.');

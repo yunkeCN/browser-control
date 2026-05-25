@@ -34594,12 +34594,13 @@ var DAEMON_CAPABILITIES = [
   "get_text",
   "sessionNetworkCapture",
   "snapshotFilters",
+  "snapshotAriaTree",
   "clickProbe"
 ];
 var COMMANDS = {
   navigate: { required: ["url"], optional: ["newTab", "timeoutMs"] },
   find_tab: { required: [], optional: ["urlIncludes", "titleIncludes", "active", "tabId", "attach"] },
-  snapshot: { required: [], optional: ["tabId", "maxDepth", "roles", "tags", "hasVisibleText", "textIncludes", "viewportOnly", "maxElements"], example: { tabId: 123, roles: ["button", "link"], hasVisibleText: true, maxElements: 50 } },
+  snapshot: { required: [], optional: ["tabId", "roles", "tags", "hasVisibleText", "textIncludes", "viewportOnly", "boxes"], example: { tabId: 123, roles: ["button", "link"], hasVisibleText: true, viewportOnly: true } },
   click: {
     required: [],
     requiredOneOf: ["elementRef", "selector"],
@@ -34631,8 +34632,6 @@ var COMMANDS = {
     example: { deltaY: 800, strategy: "dom" },
     strategies: ["auto", "dom", "wheel"]
   },
-  select_option: { required: ["value"], requiredOneOf: ["elementRef", "selector"], optional: ["elementRef", "selector", "tabId"] },
-  set_checked: { required: ["checked"], requiredOneOf: ["elementRef", "selector"], optional: ["elementRef", "selector", "tabId"] },
   wait_for: { required: [], optional: ["selector", "text", "state", "timeoutMs", "tabId", "expression"] },
   evaluate: { required: ["code"], optional: ["tabId"], example: { code: "return { title: document.title }" } },
   screenshot: { required: [], optional: ["tabId", "format", "quality", "fullPage", "file_name", "fileName"] },
@@ -34653,8 +34652,6 @@ var COMMANDS = {
 var ELEMENT_REF_PATTERN = /^@e[^\s_]+_\d+$/;
 var LEGACY_ACTION_ALIASES = {
   saveAsPdf: "save_as_pdf",
-  selectOption: "select_option",
-  setChecked: "set_checked",
   waitFor: "wait_for",
   findTab: "find_tab",
   getText: "get_text",
@@ -34717,9 +34714,6 @@ function validateRequest(request) {
   validateKnownArgs(request, spec);
   validateAndNormalizeElementRef(request, spec);
   validateRequiredOneOf(request, spec);
-  if (request.command === "set_checked" && typeof request.args.checked !== "boolean") {
-    throw new ProtocolError("VALIDATION_ERROR", "checked must be a boolean for command 'set_checked'", { field: "checked" });
-  }
   if (request.command === "upload" && !Array.isArray(request.args.files)) {
     throw new ProtocolError("VALIDATION_ERROR", "files must be an array for command 'upload'", { field: "files" });
   }
@@ -34752,7 +34746,7 @@ function validateKnownArgs(request, spec) {
     hints.unshift("Use args.requestId from network_list; numeric index is not part of the network_detail protocol.");
   }
   if (request.command === "click" && field === "text") {
-    hints.unshift("click uses args.elementRef for snapshot @e references. To click visible text, call snapshot with args.textIncludes and args.maxElements, then click the returned @e id.");
+    hints.unshift("click uses args.elementRef for snapshot @e references. To click visible text, call snapshot with args.textIncludes plus hasVisibleText and viewportOnly, then click the returned @e id.");
   }
   if (request.command === "get_text" && field === "selectors") {
     hints.unshift("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes.");
@@ -35082,13 +35076,12 @@ var commandArgSchemas = {
   }).strict(),
   snapshot: external_exports.object({
     tabId,
-    maxDepth: external_exports.number().int().nonnegative().optional(),
     roles: external_exports.array(external_exports.string()).optional(),
     tags: external_exports.array(external_exports.string()).optional(),
     hasVisibleText: external_exports.boolean().optional(),
     textIncludes: external_exports.string().optional(),
     viewportOnly: external_exports.boolean().optional(),
-    maxElements: external_exports.number().int().positive().optional()
+    boxes: external_exports.boolean().optional()
   }).strict(),
   click: external_exports.object({
     elementRef: elementRef.optional(),
@@ -35160,8 +35153,6 @@ var commandArgSchemas = {
     behavior: external_exports.enum(["auto", "instant", "smooth"]).optional(),
     waitMs: external_exports.number().nonnegative().optional()
   }).strict(),
-  select_option: external_exports.object({ elementRef: elementRef.optional(), selector: selector.optional(), value: external_exports.string(), tabId }).strict(),
-  set_checked: external_exports.object({ elementRef: elementRef.optional(), selector: selector.optional(), checked: external_exports.boolean(), tabId }).strict(),
   wait_for: external_exports.object({
     selector: selector.optional(),
     text: external_exports.string().optional(),
@@ -35694,7 +35685,7 @@ function registerCompactTools(server, client, sessions) {
       "Run any low-level Browser Control protocol command through the local daemon.",
       "Input shape: command, optional args object, optional session, timeoutMs, and id.",
       "Session is managed automatically by this MCP server process. Omit session for normal use; pass session only for advanced isolation.",
-      "Before clicking by visible text, call snapshot with args.textIncludes plus maxElements to get a small set of @e references.",
+      "Before clicking by visible text, call snapshot with args.textIncludes plus semantic filters such as roles, hasVisibleText, and viewportOnly to get focused @e references.",
       "Use browser_control_close_session at the end of a task. The MCP server validates command args and returns structured hints, but does not perform user confirmation."
     ].join("\n\n"),
     inputSchema: unifiedCommandInputSchema
@@ -35844,7 +35835,7 @@ function hintsFor(command, args, issues) {
   const hints = [];
   const keys = new Set(Object.keys(args));
   if (command === "fill" && keys.has("text")) hints.push("fill uses args.value, not args.text.");
-  if (command === "click" && keys.has("text")) hints.push("click uses args.elementRef for snapshot @e references. To click visible text, first call snapshot with args.textIncludes and args.maxElements, then click with the returned @e id.");
+  if (command === "click" && keys.has("text")) hints.push("click uses args.elementRef for snapshot @e references. To click visible text, first call snapshot with args.textIncludes plus hasVisibleText and viewportOnly, then click with the returned @e id.");
   if (command === "get_text" && keys.has("selectors")) hints.push("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes instead.");
   if (command === "evaluate" && keys.has("expression")) hints.push("evaluate uses args.code, not args.expression.");
   if (command === "wait_for" && keys.has("timeMs")) hints.push("wait_for uses args.timeoutMs, not args.timeMs.");
@@ -35934,7 +35925,7 @@ function registerBrowserControlPrompts(server) {
     "Use browser_control_command for browser actions and observations.",
     "The MCP server manages an active session automatically; omit session unless you intentionally need a separate session.",
     "Typical loop: navigate -> snapshot -> use elementRef with @e ids for click/fill/press -> get_text/screenshot for reading -> browser_control_close_session when done.",
-    "When you need to click or fill an element by visible text, do not request a huge snapshot. Use snapshot with textIncludes, hasVisibleText, viewportOnly, and maxElements to get a small list of @e references, then click/fill with elementRef.",
+    "When you need to click or fill an element by visible text, do not request a huge snapshot. Use snapshot with textIncludes, roles, tags, hasVisibleText, and viewportOnly to narrow the returned @e references, then click/fill with elementRef.",
     "Do not build Google or YouTube search URLs with query parameters when a task asks for real UI usage; navigate to the homepage and operate the search box.",
     "Prefer snapshot before element actions and prefer @e references from the latest snapshot."
   ].join("\n")));
@@ -35949,15 +35940,15 @@ function registerBrowserControlPrompts(server) {
     });
     return textPrompt("Browser Control command reference", [
       "Call browser_control_command with this shape:",
-      '{"command":"snapshot","args":{"viewportOnly":true,"maxElements":120}}',
+      '{"command":"snapshot","args":{"viewportOnly":true,"hasVisibleText":true}}',
       "",
       "All commands:",
       ...lines,
       "",
       "Common examples:",
       '{"command":"navigate","args":{"url":"https://example.com"}}',
-      '{"command":"snapshot","args":{"viewportOnly":true,"maxElements":120}}',
-      '{"command":"snapshot","args":{"textIncludes":"Submit","hasVisibleText":true,"viewportOnly":true,"maxElements":10}}',
+      '{"command":"snapshot","args":{"viewportOnly":true,"hasVisibleText":true}}',
+      '{"command":"snapshot","args":{"textIncludes":"Submit","hasVisibleText":true,"viewportOnly":true,"roles":["button","link","textbox"]}}',
       '{"command":"click","args":{"elementRef":"@eabc_1","expectChange":true}}',
       '{"command":"fill","args":{"elementRef":"@eabc_1","value":"draft","clear":true}}',
       '{"command":"press","args":{"key":"Enter","expectChange":true}}',
@@ -36009,6 +36000,16 @@ var MIME_BY_KIND = {
   observation: { json: "application/json", txt: "text/plain" },
   snapshot: { json: "application/json" }
 };
+var SNAPSHOT_TEXT_ARTIFACT_THRESHOLD = 1e5;
+var SNAPSHOT_TEXT_PREVIEW_CHARS = 2e4;
+var SNAPSHOT_REF_PREVIEW_LIMIT = 200;
+var SNAPSHOT_FILTERING_HINTS = [
+  "Use textIncludes to narrow the snapshot around visible labels or nearby text.",
+  "Use roles for actionable targets such as button, link, textbox, checkbox, radio, combobox, option, menuitem, tab, and heading.",
+  "Use tags when a specific HTML element matters.",
+  "Use hasVisibleText:true and viewportOnly:true to focus on visible UI.",
+  "Use get_text when the task is mainly reading long prose instead of choosing an elementRef."
+];
 function sanitizeName(name) {
   return String(name || "artifact").replace(/[/\\?%*:|"<>]/g, "-").replace(/\s+/g, "-").slice(0, 120) || "artifact";
 }
@@ -36076,12 +36077,40 @@ function extractArtifacts(command, result, store = new ArtifactStore()) {
     data.artifact = artifact;
   }
   if (command === "snapshot") {
-    const artifact = store.writeText("snapshot", JSON.stringify(result, null, 2), {
-      ext: "json",
-      name: "snapshot",
-      mimeType: "application/json"
-    });
-    if (artifact) artifacts.push(artifact);
+    const snapshotText = typeof result.snapshot === "string" ? result.snapshot : "";
+    if (snapshotText.length > SNAPSHOT_TEXT_ARTIFACT_THRESHOLD) {
+      const artifact = store.writeText("snapshot", JSON.stringify(result, null, 2), {
+        ext: "json",
+        name: "snapshot",
+        mimeType: "application/json"
+      });
+      if (artifact) artifacts.push(artifact);
+      const refs = Array.isArray(result.refs) ? result.refs : [];
+      data.snapshot = `${snapshotText.slice(0, SNAPSHOT_TEXT_PREVIEW_CHARS)}
+... [truncated: snapshot text was ${snapshotText.length} chars; full JSON snapshot is available in data.artifact.path]`;
+      data.tree = [];
+      data.refs = refs.slice(0, SNAPSHOT_REF_PREVIEW_LIMIT);
+      data.truncated = true;
+      data.artifact = artifact;
+      data.artifactPath = artifact?.path;
+      data.omitted = {
+        fullSnapshot: true,
+        tree: true,
+        refs: refs.length > data.refs.length
+      };
+      data.caps = {
+        snapshotTextArtifactThreshold: SNAPSHOT_TEXT_ARTIFACT_THRESHOLD,
+        snapshotPreviewChars: SNAPSHOT_TEXT_PREVIEW_CHARS,
+        refPreviewLimit: SNAPSHOT_REF_PREVIEW_LIMIT,
+        fullSnapshotChars: snapshotText.length,
+        fullRefs: refs.length
+      };
+      data.stats = result.stats && typeof result.stats === "object" ? { ...result.stats, truncated: true, previewRefs: data.refs.length, fullRefs: refs.length } : { truncated: true, previewRefs: data.refs.length, fullRefs: refs.length };
+      data.guidance = {
+        ...result.guidance || {},
+        filtering: SNAPSHOT_FILTERING_HINTS
+      };
+    }
   }
   if (command === "save_as_pdf" && result.data) {
     const artifact = store.writeBase64("pdf", result.data, {

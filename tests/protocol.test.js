@@ -179,11 +179,12 @@ test('protocol rejects unknown args with canonical-name hints', () => {
       /urlIncludes/.test((err.details?.hints || []).join(' '))
   );
   assert.throws(
-    () => validateRequest(normalizeRequest({ command: 'snapshot', args: { maxElementz: 10 } })),
+    () => validateRequest(normalizeRequest({ command: 'snapshot', args: { maxElements: 10 } })),
     err => err instanceof ProtocolError &&
       err.code === 'VALIDATION_ERROR' &&
-      err.details?.field === 'maxElementz' &&
-      err.details?.suggestion === 'maxElements'
+      err.details?.field === 'maxElements' &&
+      Array.isArray(err.details?.validArgs) &&
+      !err.details.validArgs.includes('maxElements')
   );
 });
 
@@ -286,7 +287,7 @@ test('public docs and contracts stay aligned with current command argument surfa
   assert.doesNotMatch(api, /includeResources/);
   assert.doesNotMatch(contracts, /includeResources/);
   assert.equal(COMMANDS.network_start.optional.includes('includeResources'), false);
-  assert.match(recipes, /snapshot --session read-page --args '\{"hasVisibleText":true,"viewportOnly":true,"maxElements":120\}'/);
+  assert.match(recipes, /snapshot --session read-page --args '\{"hasVisibleText":true,"viewportOnly":true\}'/);
   assert.match(api, /### `scroll`/);
   assert.match(api, /strategy.*wheel.*x.*y.*deltaY/s);
   assert.match(api, /explicit wheel failures are recoverable/s);
@@ -294,10 +295,10 @@ test('public docs and contracts stay aligned with current command argument surfa
   assert.match(api, /Unknown fields fail validation/);
   assert.match(api, /newTab.*newTabs/);
   assert.match(recipes, /first-class `scroll` rather than keyboard keys or an `evaluate` workaround/);
-  assert.match(api, /schemaVersion: 2/);
-  assert.match(api, /compact-dom-v2/);
+  assert.match(api, /schemaVersion: 3/);
+  assert.match(api, /playwright-aria-ai-v1/);
   assert.match(contracts, /interface SnapshotResult/);
-  assert.match(contracts, /semantics:\s*'compact-dom-v2'/);
+  assert.match(contracts, /semantics:\s*'playwright-aria-ai-v1'/);
   assert.doesNotMatch(api, /navigate[\s\S]{0,250}optional `tabId`/);
   assert.doesNotMatch(contracts, /navigate:\s*\{[^}]*tabId/s);
 });
@@ -367,8 +368,8 @@ test('validation details include optional fields, examples, and common recovery 
 });
 
 test('protocol command metadata lists documented optional args for file, tab, and artifact commands', () => {
-  assert.deepEqual(COMMANDS.select_option.optional, ['elementRef', 'selector', 'tabId']);
-  assert.deepEqual(COMMANDS.set_checked.optional, ['elementRef', 'selector', 'tabId']);
+  assert.equal(COMMANDS[['select', 'option'].join('_')], undefined);
+  assert.equal(COMMANDS[['set', 'checked'].join('_')], undefined);
   assert.deepEqual(COMMANDS.upload.optional, ['elementRef', 'selector', 'tabId']);
   assert.deepEqual(COMMANDS.close_tab.optional, ['tabId']);
   for (const field of ['tabId', 'paper_format', 'landscape', 'scale', 'print_background', 'file_name']) {

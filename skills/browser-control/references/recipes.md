@@ -37,7 +37,7 @@ Use when the user asks you to inspect, summarize, or extract visible content fro
    ```
    For noisy pages, prefer snapshot filters before reading a broad structure snapshot:
    ```bash
-   node scripts/browser-control.js command snapshot --session read-page --args '{"hasVisibleText":true,"viewportOnly":true,"maxElements":120}'
+   node scripts/browser-control.js command snapshot --session read-page --args '{"hasVisibleText":true,"viewportOnly":true}'
    ```
    Snapshot avoids repeating most parent container descendant text and redacts likely sensitive input values. It is still meant for interaction, not prose extraction.
 4. If you only need visible text, use `get_text` instead of custom JavaScript or a broad snapshot:
@@ -81,8 +81,10 @@ Use when preparing form fields but not sending the form yet.
 2. Fill fields:
    ```bash
    node scripts/browser-control.js command fill --session form-draft --args '{"selector":"@e0field_1","value":"example text"}'
-   node scripts/browser-control.js command select_option --session form-draft --args '{"selector":"@e0select_1","value":"standard"}'
-   node scripts/browser-control.js command set_checked --session form-draft --args '{"selector":"@e1jm0sbb_1","checked":true}'
+   node scripts/browser-control.js command click --session form-draft --args '{"selector":"@e0select_1"}'
+   node scripts/browser-control.js command press --session form-draft --args '{"key":"ArrowDown"}'
+   node scripts/browser-control.js command press --session form-draft --args '{"key":"Enter"}'
+   node scripts/browser-control.js command click --session form-draft --args '{"selector":"@e1jm0sbb_1"}'
    ```
 3. Verify values with a fresh snapshot or targeted evaluate.
 4. Stop before clicking Submit/Send/Confirm unless the user explicitly approved submission.

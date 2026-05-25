@@ -100,13 +100,13 @@ For element actions, prefer `snapshot` to get `@e` references, then pass the cho
       "textIncludes": "新增工单",
       "hasVisibleText": true,
       "viewportOnly": true,
-      "maxElements": 10
+      "roles": ["button", "link", "textbox"]
     }
   }
 }
 ```
 
-Snapshot responses keep their existing `data` shape and clipping behavior, and also include a top-level `artifacts` entry before `data`, so clients can find the same snapshot payload as a JSON artifact even when they truncate large tool output.
+Snapshot responses return `data.snapshot` as compact ARIA text plus `data.tree` and `data.refs` as structured JSON. If the snapshot text exceeds 100k characters, the daemon stores the full JSON payload as a local snapshot artifact, returns a preview plus `data.artifact`, and recommends narrowing with `textIncludes`, `roles`, `tags`, `hasVisibleText`, or `viewportOnly`.
 
 The server also provides prompts:
 

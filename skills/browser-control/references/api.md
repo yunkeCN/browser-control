@@ -127,26 +127,27 @@ Arguments: optional `urlIncludes`, `titleIncludes`, `active`, `tabId`, and `atta
 
 ### `snapshot`
 
-Return a compact accessibility/DOM snapshot for interaction and page structure. Snapshot is optimized for choosing actionable targets, not for dumping all page prose; use `get_text` when you mainly need readable page text.
+Return a Playwright-inspired ARIA snapshot for interaction and page structure. Snapshot is optimized for choosing actionable targets, not for dumping all page prose; use `get_text` when you mainly need readable page text.
 
-Arguments: optional `tabId`, `maxDepth`, `roles`, `tags`, `hasVisibleText`, `textIncludes`, `viewportOnly`, and `maxElements`.
+Arguments: optional `tabId`, `roles`, `tags`, `hasVisibleText`, `textIncludes`, `viewportOnly`, and `boxes`.
 
 Response semantics:
 
-- `schemaVersion: 2` and `semantics: "compact-dom-v2"` identify the compact snapshot behavior.
-- `stats.scanned` counts candidate elements after cheap visibility/depth/tag/viewport pruning.
-- `stats.matched` counts elements matching role/text filters before `maxElements`.
-- `stats.returned` and `stats.truncated` describe the returned element list.
-- Legacy aliases `totalBeforeFilter`, `returned`, and `truncated` are preserved for compatibility.
-- `maxDepth` is enforced only when explicitly provided; omitting it preserves broad default element discovery for deeply nested SPA controls.
-- Generic containers prefer direct text instead of aggregating all descendant text, which reduces duplicated Ant Design/layout text. Interactive elements still preserve discoverable names/text for targeting.
+- `schemaVersion: 3` and `semantics: "playwright-aria-ai-v1"` identify the ARIA-tree snapshot behavior.
+- `snapshot` is a compact YAML-like text tree, e.g. `- button "Submit" [ref=@e...]`.
+- `tree` is the same page state as structured JSON for clients that prefer data over text.
+- `refs` is the actionable reference index. It contains refs, roles, names, direct text, selectors, boxes, and safe input attributes.
+- The tree is built from visible or ARIA-visible nodes, includes generic roles only when they carry useful structure, normalizes text runs, collapses noisy single-child generic wrappers, and assigns refs only to visible pointer-receiving elements.
+- `boxes:true` adds viewport-relative boxes to the rendered snapshot text and tree.
+- If `snapshot` text exceeds 100k characters, Browser Control stores the full JSON snapshot as a local `snapshot` artifact, returns a short preview with `data.artifact`, and includes filtering guidance. Narrow large pages with `textIncludes`, `roles`, `tags`, `hasVisibleText:true`, or `viewportOnly:true`.
 - Likely sensitive input values, such as password/token/secret/session/cookie/API-key fields, are redacted by default with `attributes.redacted:true` and optional `valueLength`.
 - `@e` references use the format `@e<structureId>_<revision>`. They are page-state references scoped to the latest snapshot of the current document, not permanent selectors. For element actions, prefer `elementRef` for these strict snapshot references. `selector` remains available as the CSS selector / compatibility fallback. Refresh the snapshot after navigation, dialog reconstruction, filtering, list reordering, or significant DOM changes. Browser Control rejects stale revisions with `STALE_ELEMENT_REFERENCE` rather than clicking a changed element.
+- Design notes live in `docs/adr-snapshot-aria-ai.md`.
 
 Examples:
 
 ```bash
-node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"viewportOnly":true,"hasVisibleText":true,"maxElements":120}'
+node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"viewportOnly":true,"hasVisibleText":true}'
 node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"roles":["button","link","textbox","combobox"],"viewportOnly":true}'
 ```
 
@@ -242,18 +243,6 @@ Responses include `ok`, `target`, `strategyUsed`, `before`, `after`, `movedX`, `
 {"command":"scroll","args":{"deltaY":800,"strategy":"dom"}}
 {"command":"scroll","args":{"strategy":"wheel","x":400,"y":500,"deltaY":800}}
 ```
-
-### `select_option`
-
-Set a native `<select>` value.
-
-Arguments: `elementRef` or `selector`, plus `value`, required; optional `tabId`.
-
-### `set_checked`
-
-Set a checkbox or radio checked state.
-
-Arguments: `elementRef` or `selector`, plus `checked`, required; optional `tabId`.
 
 ### `wait_for`
 

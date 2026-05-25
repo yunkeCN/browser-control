@@ -15,6 +15,17 @@ const MIME_BY_KIND: Record<string, Record<string, string>> = {
   snapshot: { json: 'application/json' }
 };
 
+const SNAPSHOT_TEXT_ARTIFACT_THRESHOLD = 100_000;
+const SNAPSHOT_TEXT_PREVIEW_CHARS = 20_000;
+const SNAPSHOT_REF_PREVIEW_LIMIT = 200;
+const SNAPSHOT_FILTERING_HINTS = [
+  'Use textIncludes to narrow the snapshot around visible labels or nearby text.',
+  'Use roles for actionable targets such as button, link, textbox, checkbox, radio, combobox, option, menuitem, tab, and heading.',
+  'Use tags when a specific HTML element matters.',
+  'Use hasVisibleText:true and viewportOnly:true to focus on visible UI.',
+  'Use get_text when the task is mainly reading long prose instead of choosing an elementRef.'
+];
+
 function sanitizeName(name: unknown): string {
   return String(name || 'artifact')
     .replace(/[/\\?%*:|"<>]/g, '-')
@@ -94,12 +105,41 @@ export function extractArtifacts(command: string, result: any, store = new Artif
   }
 
   if (command === 'snapshot') {
-    const artifact = store.writeText('snapshot', JSON.stringify(result, null, 2), {
-      ext: 'json',
-      name: 'snapshot',
-      mimeType: 'application/json'
-    });
-    if (artifact) artifacts.push(artifact);
+    const snapshotText = typeof result.snapshot === 'string' ? result.snapshot : '';
+    if (snapshotText.length > SNAPSHOT_TEXT_ARTIFACT_THRESHOLD) {
+      const artifact = store.writeText('snapshot', JSON.stringify(result, null, 2), {
+        ext: 'json',
+        name: 'snapshot',
+        mimeType: 'application/json'
+      });
+      if (artifact) artifacts.push(artifact);
+      const refs = Array.isArray(result.refs) ? result.refs : [];
+      data.snapshot = `${snapshotText.slice(0, SNAPSHOT_TEXT_PREVIEW_CHARS)}\n... [truncated: snapshot text was ${snapshotText.length} chars; full JSON snapshot is available in data.artifact.path]`;
+      data.tree = [];
+      data.refs = refs.slice(0, SNAPSHOT_REF_PREVIEW_LIMIT);
+      data.truncated = true;
+      data.artifact = artifact;
+      data.artifactPath = artifact?.path;
+      data.omitted = {
+        fullSnapshot: true,
+        tree: true,
+        refs: refs.length > data.refs.length
+      };
+      data.caps = {
+        snapshotTextArtifactThreshold: SNAPSHOT_TEXT_ARTIFACT_THRESHOLD,
+        snapshotPreviewChars: SNAPSHOT_TEXT_PREVIEW_CHARS,
+        refPreviewLimit: SNAPSHOT_REF_PREVIEW_LIMIT,
+        fullSnapshotChars: snapshotText.length,
+        fullRefs: refs.length
+      };
+      data.stats = result.stats && typeof result.stats === 'object'
+        ? { ...result.stats, truncated: true, previewRefs: data.refs.length, fullRefs: refs.length }
+        : { truncated: true, previewRefs: data.refs.length, fullRefs: refs.length };
+      data.guidance = {
+        ...(result.guidance || {}),
+        filtering: SNAPSHOT_FILTERING_HINTS
+      };
+    }
   }
 
   if (command === 'save_as_pdf' && result.data) {
