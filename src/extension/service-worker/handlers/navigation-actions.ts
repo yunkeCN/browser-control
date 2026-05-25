@@ -92,6 +92,10 @@ function mergePressFocusDiagnostics(result: any, focusResult: any): any {
   };
 }
 
+function targetSelector(args: CommandArgs = {}): string | undefined {
+  return typeof args?.elementRef === 'string' && args.elementRef ? args.elementRef : args?.selector;
+}
+
 async function focusTargetForCdpKeyboard(tabId: number, selector: unknown): Promise<any> {
   const targetSelector = typeof selector === 'string' && selector ? selector : null;
   const results = await chrome.scripting.executeScript({
@@ -184,7 +188,8 @@ export async function handleSnapshot(args: CommandArgs = {}, session: SessionNam
 }
 
 export async function handleClick(args: CommandArgs = {}, session: SessionName): Promise<any> {
-  const { selector, tabId: argTabId } = args || {};
+  const { tabId: argTabId } = args || {};
+  const selector = targetSelector(args);
   if (!selector) throw new Error('selector is required for click');
 
   const tabId = argTabId || getActiveTabId(session);
@@ -193,7 +198,8 @@ export async function handleClick(args: CommandArgs = {}, session: SessionName):
 }
 
 export async function handleClickProbe(args: CommandArgs = {}, session: SessionName): Promise<any> {
-  const { selector, tabId: argTabId } = args || {};
+  const { tabId: argTabId } = args || {};
+  const selector = targetSelector(args);
   if (!selector) throw new Error('selector is required for click_probe');
 
   const tabId = argTabId || getActiveTabId(session);
@@ -218,7 +224,8 @@ export async function handleClickProbe(args: CommandArgs = {}, session: SessionN
 }
 
 async function performObservedClick(args: CommandArgs = {}, session: SessionName, tabId: number): Promise<any> {
-  const { selector } = args || {};
+  const selector = targetSelector(args);
+  if (!selector) throw new Error('selector is required for click');
   const strategy = args?.strategy || 'auto';
   const beforeIds = await beginNewTabWatch();
 
@@ -263,7 +270,8 @@ async function performObservedClick(args: CommandArgs = {}, session: SessionName
 }
 
 export async function handleFill(args: CommandArgs = {}, session: SessionName): Promise<any> {
-  const { selector, value } = args || {};
+  const { value } = args || {};
+  const selector = targetSelector(args);
   if (!selector) throw new Error('selector is required for fill');
   if (value === undefined) throw new Error('value is required for fill');
 
@@ -285,7 +293,8 @@ export async function handleFill(args: CommandArgs = {}, session: SessionName): 
 }
 
 export async function handlePress(args: CommandArgs = {}, session: SessionName): Promise<any> {
-  const { key, selector } = args || {};
+  const { key } = args || {};
+  const selector = targetSelector(args);
   if (!key) throw new Error('key is required for press');
 
   const tabId = args?.tabId || getActiveTabId(session);
@@ -333,6 +342,7 @@ export async function handlePress(args: CommandArgs = {}, session: SessionName):
 export async function handleScroll(args: CommandArgs = {}, session: SessionName): Promise<any> {
   const tabId = args?.tabId || getActiveTabId(session);
   if (!tabId) throw new Error('No active tab in session');
+  args = { ...args, selector: targetSelector(args) };
   const strategy = args?.strategy || 'auto';
 
   if (strategy === 'wheel' || (strategy === 'auto' && (args?.x !== undefined || args?.y !== undefined || args?.region))) {
@@ -363,7 +373,8 @@ export async function handleScroll(args: CommandArgs = {}, session: SessionName)
 }
 
 export async function handleSelectOption(args: CommandArgs = {}, session: SessionName): Promise<any> {
-  const { selector, value } = args || {};
+  const { value } = args || {};
+  const selector = targetSelector(args);
   if (!selector) throw new Error('selector is required for select_option');
   if (value === undefined) throw new Error('value is required for select_option');
 
@@ -384,7 +395,8 @@ export async function handleSelectOption(args: CommandArgs = {}, session: Sessio
 }
 
 export async function handleSetChecked(args: CommandArgs = {}, session: SessionName): Promise<any> {
-  const { selector, checked } = args || {};
+  const { checked } = args || {};
+  const selector = targetSelector(args);
   if (!selector) throw new Error('selector is required for set_checked');
   if (typeof checked !== 'boolean') throw new Error('checked is required for set_checked');
 

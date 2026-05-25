@@ -4,8 +4,13 @@ import { clearPersistedNetworkCapture, networkCaptures, removeNetworkTab } from 
 import { performUpload } from '../page-runtime/upload-find';
 import type { CommandArgs, SessionName } from '../../shared/types';
 
+function targetSelector(args: CommandArgs = {}): string | undefined {
+  return typeof args?.elementRef === 'string' && args.elementRef ? args.elementRef : args?.selector;
+}
+
 export async function handleUpload(args: CommandArgs = {}, session: SessionName): Promise<any> {
-  const { selector, files } = args || {};
+  const { files } = args || {};
+  const selector = targetSelector(args);
   if (!selector) throw new Error('selector is required for upload');
   if (!files || !files.length) throw new Error('files array is required for upload');
 

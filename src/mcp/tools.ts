@@ -141,7 +141,20 @@ async function executeEnvelope(command: CommandName, envelope: BrowserControlEnv
 
 function validateCommandArgs(command: CommandName, args: Record<string, unknown>): { ok: true; data: Record<string, unknown> } | { ok: false; issues: string[]; hints: string[] } {
   const parsed = commandArgSchemas[command].safeParse(args);
-  if (parsed.success) return { ok: true, data: parsed.data as Record<string, unknown> };
+  if (parsed.success) {
+    const requiredOneOf = COMMANDS[command].requiredOneOf || [];
+    if (requiredOneOf.length && !requiredOneOf.some(field => {
+      const value = (parsed.data as Record<string, unknown>)[field];
+      return value !== undefined && value !== null && value !== '';
+    })) {
+      return {
+        ok: false,
+        issues: [`args: one of ${requiredOneOf.join(', ')} is required`],
+        hints: [`Prefer args.elementRef with a fresh snapshot @e reference. Use args.selector only for CSS fallback.`]
+      };
+    }
+    return { ok: true, data: parsed.data as Record<string, unknown> };
+  }
   return {
     ok: false,
     issues: parsed.error.issues.map(issue => {
@@ -186,7 +199,7 @@ function hintsFor(command: CommandName, args: Record<string, unknown>, issues: u
   const hints: string[] = [];
   const keys = new Set(Object.keys(args));
   if (command === 'fill' && keys.has('text')) hints.push('fill uses args.value, not args.text.');
-  if (command === 'click' && keys.has('text')) hints.push('click uses args.selector. To click visible text, first call snapshot with args.textIncludes and args.maxElements, then click the returned @e selector.');
+  if (command === 'click' && keys.has('text')) hints.push('click uses args.elementRef for snapshot @e references. To click visible text, first call snapshot with args.textIncludes and args.maxElements, then click with the returned @e id.');
   if (command === 'get_text' && keys.has('selectors')) hints.push('get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes instead.');
   if (command === 'evaluate' && keys.has('expression')) hints.push('evaluate uses args.code, not args.expression.');
   if (command === 'wait_for' && keys.has('timeMs')) hints.push('wait_for uses args.timeoutMs, not args.timeMs.');
@@ -194,7 +207,10 @@ function hintsFor(command: CommandName, args: Record<string, unknown>, issues: u
   if (command === 'find_tab' && keys.has('urlContains')) hints.push('find_tab uses args.urlIncludes, not args.urlContains.');
   if (command === 'find_tab' && keys.has('titleContains')) hints.push('find_tab uses args.titleIncludes, not args.titleContains.');
   if (command === 'close_session') hints.push('Prefer the dedicated browser_control_close_session tool for cleanup.');
-  if (!hints.length && issues.length) hints.push(`Required args: ${(COMMANDS[command].required || []).join(', ') || 'none'}. Optional args: ${(COMMANDS[command].optional || []).join(', ') || 'none'}.`);
+  if (!hints.length && issues.length) {
+    const oneOf = COMMANDS[command].requiredOneOf?.length ? ` One of: ${COMMANDS[command].requiredOneOf?.join(', ')}.` : '';
+    hints.push(`Required args: ${(COMMANDS[command].required || []).join(', ') || 'none'}.${oneOf} Optional args: ${(COMMANDS[command].optional || []).join(', ') || 'none'}.`);
+  }
   return hints;
 }
 

@@ -4,6 +4,10 @@ export type BackendName = 'extension';
 export type ArtifactKind = 'screenshot' | 'pdf' | 'download' | 'network' | 'observation';
 export type ScrollLogicalPosition = 'start' | 'center' | 'end' | 'nearest';
 export type ScrollBehavior = 'auto' | 'instant' | 'smooth';
+export type ElementRef = `@e${string}_${number}`;
+export type ElementTarget =
+  | { elementRef: ElementRef; selector?: string }
+  | { selector: string; elementRef?: ElementRef };
 export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'UNKNOWN_COMMAND'
@@ -34,13 +38,13 @@ export interface CommandArgs {
   navigate: { url: string; newTab?: boolean; timeoutMs?: number };
   find_tab: { urlIncludes?: string; titleIncludes?: string; active?: boolean; attach?: boolean; tabId?: number };
   snapshot: { tabId?: number; maxDepth?: number; roles?: string[]; tags?: string[]; hasVisibleText?: boolean; textIncludes?: string; viewportOnly?: boolean; maxElements?: number };
-  click: { selector: string; tabId?: number; strategy?: 'auto' | 'cdp_mouse' | 'dom_pointer' | 'element_click'; force?: boolean; button?: 'left' | 'middle' | 'right'; clickCount?: number; modifiers?: string[]; expectChange?: boolean; observe?: ObserveOptions; observeNewTab?: boolean; expectNewTab?: boolean };
-  click_probe: { selector: string; tabId?: number; strategy?: 'auto' | 'cdp_mouse' | 'dom_pointer' | 'element_click'; force?: boolean; button?: 'left' | 'middle' | 'right'; clickCount?: number; modifiers?: string[]; observeNewTab?: boolean; expectNewTab?: boolean; waitMs?: number; filter?: string; includeHeaders?: boolean; includeBody?: boolean; redactSensitive?: boolean; maxRequests?: number };
-  fill: { selector: string; value: string; tabId?: number; strategy?: 'native_setter' | 'text_input' | 'paste_like'; clear?: boolean; commit?: 'change' | 'blur' | 'enter' | 'none'; expectChange?: boolean; observe?: ObserveOptions };
-  press: { key: string; selector?: string; tabId?: number; strategy?: 'auto' | 'cdp_keyboard' | 'dom_keyboard'; modifiers?: string[]; expectChange?: boolean; observe?: ObserveOptions; observeNewTab?: boolean; expectNewTab?: boolean };
-  scroll: { tabId?: number; selector?: string; strategy?: 'auto' | 'dom' | 'wheel'; deltaX?: number; deltaY?: number; x?: number; y?: number; region?: { x: number; y: number; width: number; height: number }; steps?: number; block?: ScrollLogicalPosition; behavior?: ScrollBehavior; waitMs?: number };
-  select_option: { selector: string; value: string; tabId?: number };
-  set_checked: { selector: string; checked: boolean; tabId?: number };
+  click: ElementTarget & { tabId?: number; strategy?: 'auto' | 'cdp_mouse' | 'dom_pointer' | 'element_click'; force?: boolean; button?: 'left' | 'middle' | 'right'; clickCount?: number; modifiers?: string[]; expectChange?: boolean; observe?: ObserveOptions; observeNewTab?: boolean; expectNewTab?: boolean };
+  click_probe: ElementTarget & { tabId?: number; strategy?: 'auto' | 'cdp_mouse' | 'dom_pointer' | 'element_click'; force?: boolean; button?: 'left' | 'middle' | 'right'; clickCount?: number; modifiers?: string[]; observeNewTab?: boolean; expectNewTab?: boolean; waitMs?: number; filter?: string; includeHeaders?: boolean; includeBody?: boolean; redactSensitive?: boolean; maxRequests?: number };
+  fill: ElementTarget & { value: string; tabId?: number; strategy?: 'native_setter' | 'text_input' | 'paste_like'; clear?: boolean; commit?: 'change' | 'blur' | 'enter' | 'none'; expectChange?: boolean; observe?: ObserveOptions };
+  press: { key: string; elementRef?: ElementRef; selector?: string; tabId?: number; strategy?: 'auto' | 'cdp_keyboard' | 'dom_keyboard'; modifiers?: string[]; expectChange?: boolean; observe?: ObserveOptions; observeNewTab?: boolean; expectNewTab?: boolean };
+  scroll: { elementRef?: ElementRef; tabId?: number; selector?: string; strategy?: 'auto' | 'dom' | 'wheel'; deltaX?: number; deltaY?: number; x?: number; y?: number; region?: { x: number; y: number; width: number; height: number }; steps?: number; block?: ScrollLogicalPosition; behavior?: ScrollBehavior; waitMs?: number };
+  select_option: ElementTarget & { value: string; tabId?: number };
+  set_checked: ElementTarget & { checked: boolean; tabId?: number };
   wait_for: { selector?: string; text?: string; state?: 'visible' | 'attached' | 'hidden' | 'detached'; timeoutMs?: number; tabId?: number; expression?: string };
   evaluate: { code: string; tabId?: number };
   screenshot: { tabId?: number; format?: 'png' | 'jpeg'; quality?: number; fullPage?: boolean; file_name?: string; fileName?: string };
@@ -51,7 +55,7 @@ export interface CommandArgs {
   network_list: { filter?: string; sinceTimestampMs?: number; limit?: number; tabId?: number; method?: string; statusCode?: number; type?: string };
   network_detail: { requestId: string };
   network_stop: Record<string, never>;
-  upload: { selector: string; files: string[]; tabId?: number };
+  upload: ElementTarget & { files: string[]; tabId?: number };
   download: { url: string; filename?: string; saveAs?: boolean };
   get_text: { tabId?: number; scope?: 'viewport' | 'document' | 'full'; maxChars?: number; includeRuns?: boolean; selector?: string };
   list_tabs: Record<string, never>;

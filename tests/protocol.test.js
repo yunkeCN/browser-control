@@ -23,6 +23,7 @@ test('protocol validates all supported command envelopes', () => {
     for (const field of COMMANDS[command].required) {
       args[field] = field === 'files' ? ['fixture.txt'] : field === 'checked' ? true : `${field}-value`;
     }
+    if (COMMANDS[command].requiredOneOf?.length) args.elementRef = '@e1jm0sbb_1';
     const req = validateRequest(normalizeRequest({ command, args, session: 's1' }));
     assert.equal(req.command, command);
     assert.equal(req.session, 's1');
@@ -46,11 +47,13 @@ test('protocol keeps action strategy diagnostics args backward compatible', () =
   assert.equal(click.args.strategy, 'dom_pointer');
   assert.equal(click.args.expectChange, true);
   assert.deepEqual(COMMANDS.click.strategies, ['auto', 'cdp_mouse', 'dom_pointer', 'element_click']);
+  assert.deepEqual(COMMANDS.click.requiredOneOf, ['elementRef', 'selector']);
 
   const fill = validateRequest(normalizeRequest({
     command: 'fill',
-    args: { selector: '@e2', value: 'draft', strategy: 'native_setter', clear: true, commit: 'change', expectChange: false }
+    args: { elementRef: '@e2abc_1', value: 'draft', strategy: 'native_setter', clear: true, commit: 'change', expectChange: false }
   }));
+  assert.equal(fill.args.selector, '@e2abc_1');
   assert.equal(fill.args.strategy, 'native_setter');
   assert.equal(fill.args.commit, 'change');
 
@@ -61,6 +64,41 @@ test('protocol keeps action strategy diagnostics args backward compatible', () =
   assert.equal(press.args.strategy, 'dom_keyboard');
   assert.equal(press.args.observeNewTab, true);
   assert.deepEqual(COMMANDS.press.strategies, ['auto', 'cdp_keyboard', 'dom_keyboard']);
+});
+
+test('elementRef is a strict @e alias for element-targeting commands', () => {
+  const click = validateRequest(normalizeRequest({
+    command: 'click',
+    args: { elementRef: '@e1abc_2', expectChange: true }
+  }));
+  assert.equal(click.args.selector, '@e1abc_2');
+  assert.equal(click.args.elementRef, '@e1abc_2');
+
+  const press = validateRequest(normalizeRequest({
+    command: 'press',
+    args: { key: 'Enter', elementRef: '@e2abc_1' }
+  }));
+  assert.equal(press.args.selector, '@e2abc_1');
+
+  assert.throws(
+    () => validateRequest(normalizeRequest({ command: 'click', args: { elementRef: '#save' } })),
+    err => err instanceof ProtocolError &&
+      err.code === 'VALIDATION_ERROR' &&
+      err.details?.field === 'elementRef' &&
+      /@e<structureId>_<revision>/.test(err.details?.expectedFormat)
+  );
+  assert.throws(
+    () => validateRequest(normalizeRequest({ command: 'fill', args: { value: 'draft' } })),
+    err => err instanceof ProtocolError &&
+      err.code === 'VALIDATION_ERROR' &&
+      err.details?.requiredOneOf?.includes('elementRef')
+  );
+  assert.throws(
+    () => validateRequest(normalizeRequest({ command: 'click', args: { elementRef: '@e1abc_1', selector: '#save' } })),
+    err => err instanceof ProtocolError &&
+      err.code === 'VALIDATION_ERROR' &&
+      /cannot target different elements/.test(err.message)
+  );
 });
 
 test('protocol validates click_probe args and keeps it separate from action observation', () => {
@@ -103,18 +141,19 @@ test('protocol docs and TypeScript contracts expose action observe options and n
   const api = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'references', 'api.md'), 'utf8');
 
   for (const option of ['strategy', 'force', 'button', 'clickCount', 'modifiers', 'expectChange', 'observe']) {
-    assert.match(contracts, new RegExp(`click: \\{[^}]*${option}`, 's'));
+    assert.match(contracts, new RegExp(`click: [^;\\n]*\\{[^}]*${option}`, 's'));
   }
   for (const option of ['strategy', 'force', 'button', 'clickCount', 'modifiers', 'waitMs', 'filter', 'includeHeaders', 'includeBody', 'redactSensitive', 'maxRequests']) {
-    assert.match(contracts, new RegExp(`click_probe: \\{[^}]*${option}`, 's'));
+    assert.match(contracts, new RegExp(`click_probe: [^;\\n]*\\{[^}]*${option}`, 's'));
   }
   for (const option of ['strategy', 'clear', 'commit', 'expectChange', 'observe']) {
-    assert.match(contracts, new RegExp(`fill: \\{[^}]*${option}`, 's'));
+    assert.match(contracts, new RegExp(`fill: [^;\\n]*\\{[^}]*${option}`, 's'));
   }
   for (const option of ['strategy', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab']) {
     assert.match(contracts, new RegExp(`press: \\{[^}]*${option}`, 's'));
   }
   assert.match(contracts, /export interface ObserveOptions/);
+  assert.match(contracts, /export type ElementRef/);
   assert.match(contracts, /export interface NavigateResult/);
   assert.match(contracts, /navigationComplete:\s*boolean/);
   assert.match(api, /Stable response fields:/);
@@ -278,7 +317,7 @@ test('artifact store persists raw outputs and returns metadata without base64 pa
 test('protocol exposes first-class scroll command with DOM and wheel strategies', () => {
   assert.ok(COMMANDS.scroll, 'scroll should be protocol-visible');
   assert.deepEqual(COMMANDS.scroll.strategies, ['auto', 'dom', 'wheel']);
-  for (const field of ['tabId', 'selector', 'strategy', 'deltaX', 'deltaY', 'x', 'y', 'region', 'steps', 'block', 'behavior', 'waitMs']) {
+  for (const field of ['elementRef', 'tabId', 'selector', 'strategy', 'deltaX', 'deltaY', 'x', 'y', 'region', 'steps', 'block', 'behavior', 'waitMs']) {
     assert.equal(COMMANDS.scroll.optional.includes(field), true, `${field} should be listed for scroll`);
   }
   assert.equal(COMMANDS.scroll.optional.includes('mode'), false, 'mode is a legacy runtime override, not a public scroll option');
@@ -328,9 +367,9 @@ test('validation details include optional fields, examples, and common recovery 
 });
 
 test('protocol command metadata lists documented optional args for file, tab, and artifact commands', () => {
-  assert.deepEqual(COMMANDS.select_option.optional, ['tabId']);
-  assert.deepEqual(COMMANDS.set_checked.optional, ['tabId']);
-  assert.deepEqual(COMMANDS.upload.optional, ['tabId']);
+  assert.deepEqual(COMMANDS.select_option.optional, ['elementRef', 'selector', 'tabId']);
+  assert.deepEqual(COMMANDS.set_checked.optional, ['elementRef', 'selector', 'tabId']);
+  assert.deepEqual(COMMANDS.upload.optional, ['elementRef', 'selector', 'tabId']);
   assert.deepEqual(COMMANDS.close_tab.optional, ['tabId']);
   for (const field of ['tabId', 'paper_format', 'landscape', 'scale', 'print_background', 'file_name']) {
     assert.equal(COMMANDS.save_as_pdf.optional.includes(field), true, `${field} should be listed for save_as_pdf`);

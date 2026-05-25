@@ -3650,17 +3650,20 @@
       warnings
     };
   }
+  function targetSelector(args = {}) {
+    return typeof args?.elementRef === "string" && args.elementRef ? args.elementRef : args?.selector;
+  }
   async function focusTargetForCdpKeyboard(tabId, selector) {
-    const targetSelector = typeof selector === "string" && selector ? selector : null;
+    const targetSelector3 = typeof selector === "string" && selector ? selector : null;
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       func: focusPressTarget,
-      args: [targetSelector],
+      args: [targetSelector3],
       world: "MAIN"
     });
     return results[0]?.result || {
       focused: false,
-      selector: targetSelector,
+      selector: targetSelector3,
       strategyUsed: "cdp_keyboard",
       error: "Focus script returned no result",
       recoverable: true
@@ -3729,14 +3732,16 @@
     return results[0]?.result || { elements: [], url: "" };
   }
   async function handleClick(args = {}, session) {
-    const { selector, tabId: argTabId } = args || {};
+    const { tabId: argTabId } = args || {};
+    const selector = targetSelector(args);
     if (!selector) throw new Error("selector is required for click");
     const tabId = argTabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
     return performObservedClick(args, session, tabId);
   }
   async function handleClickProbe(args = {}, session) {
-    const { selector, tabId: argTabId } = args || {};
+    const { tabId: argTabId } = args || {};
+    const selector = targetSelector(args);
     if (!selector) throw new Error("selector is required for click_probe");
     const tabId = argTabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
@@ -3758,7 +3763,8 @@
     };
   }
   async function performObservedClick(args = {}, session, tabId) {
-    const { selector } = args || {};
+    const selector = targetSelector(args);
+    if (!selector) throw new Error("selector is required for click");
     const strategy = args?.strategy || "auto";
     const beforeIds = await beginNewTabWatch();
     if (strategy === "auto" || strategy === "cdp_mouse") {
@@ -3798,7 +3804,8 @@
     }
   }
   async function handleFill(args = {}, session) {
-    const { selector, value } = args || {};
+    const { value } = args || {};
+    const selector = targetSelector(args);
     if (!selector) throw new Error("selector is required for fill");
     if (value === void 0) throw new Error("value is required for fill");
     const tabId = args?.tabId || getActiveTabId(session);
@@ -3816,7 +3823,8 @@
     return result;
   }
   async function handlePress(args = {}, session) {
-    const { key, selector } = args || {};
+    const { key } = args || {};
+    const selector = targetSelector(args);
     if (!key) throw new Error("key is required for press");
     const tabId = args?.tabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
@@ -3856,6 +3864,7 @@
   async function handleScroll(args = {}, session) {
     const tabId = args?.tabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
+    args = { ...args, selector: targetSelector(args) };
     const strategy = args?.strategy || "auto";
     if (strategy === "wheel" || strategy === "auto" && (args?.x !== void 0 || args?.y !== void 0 || args?.region)) {
       const cdpResult = await performCdpWheelScroll(tabId, args || {});
@@ -3882,7 +3891,8 @@
     return result;
   }
   async function handleSelectOption(args = {}, session) {
-    const { selector, value } = args || {};
+    const { value } = args || {};
+    const selector = targetSelector(args);
     if (!selector) throw new Error("selector is required for select_option");
     if (value === void 0) throw new Error("value is required for select_option");
     const tabId = args?.tabId || getActiveTabId(session);
@@ -3899,7 +3909,8 @@
     return result;
   }
   async function handleSetChecked(args = {}, session) {
-    const { selector, checked } = args || {};
+    const { checked } = args || {};
+    const selector = targetSelector(args);
     if (!selector) throw new Error("selector is required for set_checked");
     if (typeof checked !== "boolean") throw new Error("checked is required for set_checked");
     const tabId = args?.tabId || getActiveTabId(session);
@@ -4149,8 +4160,12 @@
   });
 
   // src/extension/service-worker/handlers/artifacts-tabs.ts
+  function targetSelector2(args = {}) {
+    return typeof args?.elementRef === "string" && args.elementRef ? args.elementRef : args?.selector;
+  }
   async function handleUpload(args = {}, session) {
-    const { selector, files } = args || {};
+    const { files } = args || {};
+    const selector = targetSelector2(args);
     if (!selector) throw new Error("selector is required for upload");
     if (!files || !files.length) throw new Error("files array is required for upload");
     const tabId = args?.tabId || getActiveTabId(session);

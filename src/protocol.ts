@@ -1,5 +1,6 @@
 export interface CommandSpec {
   required: string[];
+  requiredOneOf?: string[];
   optional?: string[];
   example?: Record<string, unknown>;
   strategies?: string[];
@@ -65,35 +66,38 @@ export const COMMANDS: Record<string, CommandSpec> = {
   find_tab: { required: [], optional: ['urlIncludes', 'titleIncludes', 'active', 'tabId', 'attach'] },
   snapshot: { required: [], optional: ['tabId', 'maxDepth', 'roles', 'tags', 'hasVisibleText', 'textIncludes', 'viewportOnly', 'maxElements'], example: { tabId: 123, roles: ['button', 'link'], hasVisibleText: true, maxElements: 50 } },
   click: {
-    required: ['selector'],
-    optional: ['tabId', 'strategy', 'force', 'button', 'clickCount', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab'],
-    example: { selector: '@e1jm0sbb_1', strategy: 'auto', expectChange: true },
+    required: [],
+    requiredOneOf: ['elementRef', 'selector'],
+    optional: ['elementRef', 'selector', 'tabId', 'strategy', 'force', 'button', 'clickCount', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab'],
+    example: { elementRef: '@e1jm0sbb_1', strategy: 'auto', expectChange: true },
     strategies: ['auto', 'cdp_mouse', 'dom_pointer', 'element_click']
   },
   click_probe: {
-    required: ['selector'],
-    optional: ['tabId', 'strategy', 'force', 'button', 'clickCount', 'modifiers', 'observeNewTab', 'expectNewTab', 'waitMs', 'filter', 'includeHeaders', 'includeBody', 'redactSensitive', 'maxRequests'],
-    example: { selector: '@e1jm0sbb_1', strategy: 'auto', filter: '/api/' },
+    required: [],
+    requiredOneOf: ['elementRef', 'selector'],
+    optional: ['elementRef', 'selector', 'tabId', 'strategy', 'force', 'button', 'clickCount', 'modifiers', 'observeNewTab', 'expectNewTab', 'waitMs', 'filter', 'includeHeaders', 'includeBody', 'redactSensitive', 'maxRequests'],
+    example: { elementRef: '@e1jm0sbb_1', strategy: 'auto', filter: '/api/' },
     strategies: ['auto', 'cdp_mouse', 'dom_pointer', 'element_click']
   },
   fill: {
-    required: ['selector', 'value'],
-    optional: ['tabId', 'strategy', 'clear', 'commit', 'expectChange', 'observe'],
+    required: ['value'],
+    requiredOneOf: ['elementRef', 'selector'],
+    optional: ['elementRef', 'selector', 'tabId', 'strategy', 'clear', 'commit', 'expectChange', 'observe'],
     strategies: ['native_setter', 'text_input', 'paste_like']
   },
   press: {
     required: ['key'],
-    optional: ['tabId', 'selector', 'strategy', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab'],
+    optional: ['elementRef', 'tabId', 'selector', 'strategy', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab'],
     strategies: ['auto', 'cdp_keyboard', 'dom_keyboard']
   },
   scroll: {
     required: [],
-    optional: ['tabId', 'selector', 'strategy', 'deltaX', 'deltaY', 'x', 'y', 'region', 'steps', 'block', 'behavior', 'waitMs'],
+    optional: ['elementRef', 'tabId', 'selector', 'strategy', 'deltaX', 'deltaY', 'x', 'y', 'region', 'steps', 'block', 'behavior', 'waitMs'],
     example: { deltaY: 800, strategy: 'dom' },
     strategies: ['auto', 'dom', 'wheel']
   },
-  select_option: { required: ['selector', 'value'], optional: ['tabId'] },
-  set_checked: { required: ['selector', 'checked'], optional: ['tabId'] },
+  select_option: { required: ['value'], requiredOneOf: ['elementRef', 'selector'], optional: ['elementRef', 'selector', 'tabId'] },
+  set_checked: { required: ['checked'], requiredOneOf: ['elementRef', 'selector'], optional: ['elementRef', 'selector', 'tabId'] },
   wait_for: { required: [], optional: ['selector', 'text', 'state', 'timeoutMs', 'tabId', 'expression'] },
   evaluate: { required: ['code'], optional: ['tabId'], example: { code: 'return { title: document.title }' } },
   screenshot: { required: [], optional: ['tabId', 'format', 'quality', 'fullPage', 'file_name', 'fileName'] },
@@ -104,13 +108,15 @@ export const COMMANDS: Record<string, CommandSpec> = {
   network_list: { required: [], optional: ['filter', 'sinceTimestampMs', 'limit', 'tabId', 'method', 'statusCode', 'type'], example: { filter: '/api/' } },
   network_detail: { required: ['requestId'], optional: [], example: { requestId: '<id from network_list>' } },
   network_stop: { required: [] },
-  upload: { required: ['selector', 'files'], optional: ['tabId'] },
+  upload: { required: ['files'], requiredOneOf: ['elementRef', 'selector'], optional: ['elementRef', 'selector', 'tabId'] },
   download: { required: ['url'], optional: ['filename', 'saveAs'] },
   get_text: { required: [], optional: ['tabId', 'scope', 'maxChars', 'includeRuns', 'selector'], example: { scope: 'full', maxChars: 4000, includeRuns: true } },
   list_tabs: { required: [] },
   close_tab: { required: [], optional: ['tabId'] },
   close_session: { required: [] }
 };
+
+const ELEMENT_REF_PATTERN = /^@e[^\s_]+_\d+$/;
 
 export const LEGACY_ACTION_ALIASES: Record<string, string> = {
   saveAsPdf: 'save_as_pdf',
@@ -181,6 +187,8 @@ export function validateRequest(request: any) {
     }
   }
   validateKnownArgs(request, spec);
+  validateAndNormalizeElementRef(request, spec);
+  validateRequiredOneOf(request, spec);
   if (request.command === 'set_checked' && typeof request.args.checked !== 'boolean') {
     throw new ProtocolError('VALIDATION_ERROR', 'checked must be a boolean for command \'set_checked\'', { field: 'checked' });
   }
@@ -217,7 +225,7 @@ function validateKnownArgs(request: any, spec: CommandSpec) {
     hints.unshift('Use args.requestId from network_list; numeric index is not part of the network_detail protocol.');
   }
   if (request.command === 'click' && field === 'text') {
-    hints.unshift('click uses args.selector. To click visible text, call snapshot with args.textIncludes and args.maxElements, then click the returned @e selector.');
+    hints.unshift('click uses args.elementRef for snapshot @e references. To click visible text, call snapshot with args.textIncludes and args.maxElements, then click the returned @e id.');
   }
   if (request.command === 'get_text' && field === 'selectors') {
     hints.unshift('get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes.');
@@ -233,6 +241,48 @@ function validateKnownArgs(request: any, spec: CommandSpec) {
     suggestion,
     hints,
     hint: hints[0] || undefined
+  });
+}
+
+function validateAndNormalizeElementRef(request: any, spec: CommandSpec) {
+  if (!Object.prototype.hasOwnProperty.call(request.args || {}, 'elementRef')) return;
+  const value = request.args.elementRef;
+  if (typeof value !== 'string' || value === '') {
+    throw new ProtocolError('VALIDATION_ERROR', `elementRef must be a non-empty string for command '${request.command}'`, {
+      ...validationDetails(request, spec, 'elementRef'),
+      expectedType: 'string',
+      actualType: Array.isArray(value) ? 'array' : typeof value,
+      hint: 'Run snapshot and pass an element id such as {"elementRef":"@e1jm0sbb_1"}.'
+    });
+  }
+  if (!ELEMENT_REF_PATTERN.test(value)) {
+    throw new ProtocolError('VALIDATION_ERROR', `elementRef must be an @e<structureId>_<revision> reference for command '${request.command}'`, {
+      ...validationDetails(request, spec, 'elementRef'),
+      expectedFormat: '@e<structureId>_<revision>',
+      value,
+      hint: 'Run snapshot and pass the returned element id, for example {"elementRef":"@e1jm0sbb_1"}. Use args.selector only for CSS fallback.'
+    });
+  }
+  const selector = request.args.selector;
+  if (selector !== undefined && selector !== null && selector !== '' && selector !== value) {
+    throw new ProtocolError('VALIDATION_ERROR', `elementRef and selector cannot target different elements for command '${request.command}'`, {
+      ...validationDetails(request, spec, 'elementRef'),
+      elementRef: value,
+      selector,
+      hint: 'Use either args.elementRef for a snapshot @e reference or args.selector for a CSS fallback, not both with different values.'
+    });
+  }
+  request.args.selector = value;
+}
+
+function validateRequiredOneOf(request: any, spec: CommandSpec) {
+  const fields = spec.requiredOneOf || [];
+  if (!fields.length) return;
+  if (fields.some(field => request.args[field] !== undefined && request.args[field] !== null && request.args[field] !== '')) return;
+  throw new ProtocolError('VALIDATION_ERROR', `${fields.join(' or ')} is required for command '${request.command}'`, {
+    ...validationDetails(request, spec, fields[0]),
+    requiredOneOf: fields,
+    hint: 'Prefer args.elementRef with a fresh snapshot @e reference. Use args.selector only for CSS fallback.'
   });
 }
 
@@ -313,6 +363,7 @@ function validationDetails(request: any, spec: CommandSpec, field: string): any 
     field,
     command: request.command,
     required: spec.required,
+    requiredOneOf: spec.requiredOneOf || [],
     optional: spec.optional || [],
     example: spec.example || null,
     provided: Object.keys(request.args || {})
@@ -330,7 +381,7 @@ function validationDetails(request: any, spec: CommandSpec, field: string): any 
     hints.push('Run observe_start first, then pass the returned baselineId to observe_diff.');
   }
   if (request.command === 'click' && Object.prototype.hasOwnProperty.call(request.args || {}, 'text')) {
-    hints.push('click uses args.selector. Run snapshot and click an @e selector; semantic click_text is deferred.');
+    hints.push('click uses args.elementRef for snapshot @e references. Run snapshot and click a returned element id; semantic click_text is deferred.');
   }
   if (hints.length) {
     details.hints = hints;

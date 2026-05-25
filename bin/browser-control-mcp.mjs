@@ -34601,35 +34601,38 @@ var COMMANDS = {
   find_tab: { required: [], optional: ["urlIncludes", "titleIncludes", "active", "tabId", "attach"] },
   snapshot: { required: [], optional: ["tabId", "maxDepth", "roles", "tags", "hasVisibleText", "textIncludes", "viewportOnly", "maxElements"], example: { tabId: 123, roles: ["button", "link"], hasVisibleText: true, maxElements: 50 } },
   click: {
-    required: ["selector"],
-    optional: ["tabId", "strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"],
-    example: { selector: "@e1jm0sbb_1", strategy: "auto", expectChange: true },
+    required: [],
+    requiredOneOf: ["elementRef", "selector"],
+    optional: ["elementRef", "selector", "tabId", "strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"],
+    example: { elementRef: "@e1jm0sbb_1", strategy: "auto", expectChange: true },
     strategies: ["auto", "cdp_mouse", "dom_pointer", "element_click"]
   },
   click_probe: {
-    required: ["selector"],
-    optional: ["tabId", "strategy", "force", "button", "clickCount", "modifiers", "observeNewTab", "expectNewTab", "waitMs", "filter", "includeHeaders", "includeBody", "redactSensitive", "maxRequests"],
-    example: { selector: "@e1jm0sbb_1", strategy: "auto", filter: "/api/" },
+    required: [],
+    requiredOneOf: ["elementRef", "selector"],
+    optional: ["elementRef", "selector", "tabId", "strategy", "force", "button", "clickCount", "modifiers", "observeNewTab", "expectNewTab", "waitMs", "filter", "includeHeaders", "includeBody", "redactSensitive", "maxRequests"],
+    example: { elementRef: "@e1jm0sbb_1", strategy: "auto", filter: "/api/" },
     strategies: ["auto", "cdp_mouse", "dom_pointer", "element_click"]
   },
   fill: {
-    required: ["selector", "value"],
-    optional: ["tabId", "strategy", "clear", "commit", "expectChange", "observe"],
+    required: ["value"],
+    requiredOneOf: ["elementRef", "selector"],
+    optional: ["elementRef", "selector", "tabId", "strategy", "clear", "commit", "expectChange", "observe"],
     strategies: ["native_setter", "text_input", "paste_like"]
   },
   press: {
     required: ["key"],
-    optional: ["tabId", "selector", "strategy", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"],
+    optional: ["elementRef", "tabId", "selector", "strategy", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"],
     strategies: ["auto", "cdp_keyboard", "dom_keyboard"]
   },
   scroll: {
     required: [],
-    optional: ["tabId", "selector", "strategy", "deltaX", "deltaY", "x", "y", "region", "steps", "block", "behavior", "waitMs"],
+    optional: ["elementRef", "tabId", "selector", "strategy", "deltaX", "deltaY", "x", "y", "region", "steps", "block", "behavior", "waitMs"],
     example: { deltaY: 800, strategy: "dom" },
     strategies: ["auto", "dom", "wheel"]
   },
-  select_option: { required: ["selector", "value"], optional: ["tabId"] },
-  set_checked: { required: ["selector", "checked"], optional: ["tabId"] },
+  select_option: { required: ["value"], requiredOneOf: ["elementRef", "selector"], optional: ["elementRef", "selector", "tabId"] },
+  set_checked: { required: ["checked"], requiredOneOf: ["elementRef", "selector"], optional: ["elementRef", "selector", "tabId"] },
   wait_for: { required: [], optional: ["selector", "text", "state", "timeoutMs", "tabId", "expression"] },
   evaluate: { required: ["code"], optional: ["tabId"], example: { code: "return { title: document.title }" } },
   screenshot: { required: [], optional: ["tabId", "format", "quality", "fullPage", "file_name", "fileName"] },
@@ -34640,13 +34643,14 @@ var COMMANDS = {
   network_list: { required: [], optional: ["filter", "sinceTimestampMs", "limit", "tabId", "method", "statusCode", "type"], example: { filter: "/api/" } },
   network_detail: { required: ["requestId"], optional: [], example: { requestId: "<id from network_list>" } },
   network_stop: { required: [] },
-  upload: { required: ["selector", "files"], optional: ["tabId"] },
+  upload: { required: ["files"], requiredOneOf: ["elementRef", "selector"], optional: ["elementRef", "selector", "tabId"] },
   download: { required: ["url"], optional: ["filename", "saveAs"] },
   get_text: { required: [], optional: ["tabId", "scope", "maxChars", "includeRuns", "selector"], example: { scope: "full", maxChars: 4e3, includeRuns: true } },
   list_tabs: { required: [] },
   close_tab: { required: [], optional: ["tabId"] },
   close_session: { required: [] }
 };
+var ELEMENT_REF_PATTERN = /^@e[^\s_]+_\d+$/;
 var LEGACY_ACTION_ALIASES = {
   saveAsPdf: "save_as_pdf",
   selectOption: "select_option",
@@ -34711,6 +34715,8 @@ function validateRequest(request) {
     }
   }
   validateKnownArgs(request, spec);
+  validateAndNormalizeElementRef(request, spec);
+  validateRequiredOneOf(request, spec);
   if (request.command === "set_checked" && typeof request.args.checked !== "boolean") {
     throw new ProtocolError("VALIDATION_ERROR", "checked must be a boolean for command 'set_checked'", { field: "checked" });
   }
@@ -34746,7 +34752,7 @@ function validateKnownArgs(request, spec) {
     hints.unshift("Use args.requestId from network_list; numeric index is not part of the network_detail protocol.");
   }
   if (request.command === "click" && field === "text") {
-    hints.unshift("click uses args.selector. To click visible text, call snapshot with args.textIncludes and args.maxElements, then click the returned @e selector.");
+    hints.unshift("click uses args.elementRef for snapshot @e references. To click visible text, call snapshot with args.textIncludes and args.maxElements, then click the returned @e id.");
   }
   if (request.command === "get_text" && field === "selectors") {
     hints.unshift("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes.");
@@ -34762,6 +34768,46 @@ function validateKnownArgs(request, spec) {
     suggestion,
     hints,
     hint: hints[0] || void 0
+  });
+}
+function validateAndNormalizeElementRef(request, spec) {
+  if (!Object.prototype.hasOwnProperty.call(request.args || {}, "elementRef")) return;
+  const value = request.args.elementRef;
+  if (typeof value !== "string" || value === "") {
+    throw new ProtocolError("VALIDATION_ERROR", `elementRef must be a non-empty string for command '${request.command}'`, {
+      ...validationDetails(request, spec, "elementRef"),
+      expectedType: "string",
+      actualType: Array.isArray(value) ? "array" : typeof value,
+      hint: 'Run snapshot and pass an element id such as {"elementRef":"@e1jm0sbb_1"}.'
+    });
+  }
+  if (!ELEMENT_REF_PATTERN.test(value)) {
+    throw new ProtocolError("VALIDATION_ERROR", `elementRef must be an @e<structureId>_<revision> reference for command '${request.command}'`, {
+      ...validationDetails(request, spec, "elementRef"),
+      expectedFormat: "@e<structureId>_<revision>",
+      value,
+      hint: 'Run snapshot and pass the returned element id, for example {"elementRef":"@e1jm0sbb_1"}. Use args.selector only for CSS fallback.'
+    });
+  }
+  const selector2 = request.args.selector;
+  if (selector2 !== void 0 && selector2 !== null && selector2 !== "" && selector2 !== value) {
+    throw new ProtocolError("VALIDATION_ERROR", `elementRef and selector cannot target different elements for command '${request.command}'`, {
+      ...validationDetails(request, spec, "elementRef"),
+      elementRef: value,
+      selector: selector2,
+      hint: "Use either args.elementRef for a snapshot @e reference or args.selector for a CSS fallback, not both with different values."
+    });
+  }
+  request.args.selector = value;
+}
+function validateRequiredOneOf(request, spec) {
+  const fields = spec.requiredOneOf || [];
+  if (!fields.length) return;
+  if (fields.some((field) => request.args[field] !== void 0 && request.args[field] !== null && request.args[field] !== "")) return;
+  throw new ProtocolError("VALIDATION_ERROR", `${fields.join(" or ")} is required for command '${request.command}'`, {
+    ...validationDetails(request, spec, fields[0]),
+    requiredOneOf: fields,
+    hint: "Prefer args.elementRef with a fresh snapshot @e reference. Use args.selector only for CSS fallback."
   });
 }
 function nearestArgName(field, candidates) {
@@ -34836,6 +34882,7 @@ function validationDetails(request, spec, field) {
     field,
     command: request.command,
     required: spec.required,
+    requiredOneOf: spec.requiredOneOf || [],
     optional: spec.optional || [],
     example: spec.example || null,
     provided: Object.keys(request.args || {})
@@ -34853,7 +34900,7 @@ function validationDetails(request, spec, field) {
     hints.push("Run observe_start first, then pass the returned baselineId to observe_diff.");
   }
   if (request.command === "click" && Object.prototype.hasOwnProperty.call(request.args || {}, "text")) {
-    hints.push("click uses args.selector. Run snapshot and click an @e selector; semantic click_text is deferred.");
+    hints.push("click uses args.elementRef for snapshot @e references. Run snapshot and click a returned element id; semantic click_text is deferred.");
   }
   if (hints.length) {
     details.hints = hints;
@@ -35011,6 +35058,7 @@ var envelopeSchema = {
 };
 var tabId = external_exports.number().int().positive().optional();
 var selector = external_exports.string().min(1);
+var elementRef = external_exports.string().min(1).regex(/^@e[^\s_]+_\d+$/, "must be an @e<structureId>_<revision> reference from snapshot");
 var observeOptions = external_exports.object({
   baselineId: external_exports.string().optional(),
   includeNetwork: external_exports.boolean().optional(),
@@ -35043,7 +35091,8 @@ var commandArgSchemas = {
     maxElements: external_exports.number().int().positive().optional()
   }).strict(),
   click: external_exports.object({
-    selector,
+    elementRef: elementRef.optional(),
+    selector: selector.optional(),
     tabId,
     strategy: external_exports.enum(["auto", "cdp_mouse", "dom_pointer", "element_click"]).optional(),
     force: external_exports.boolean().optional(),
@@ -35056,7 +35105,8 @@ var commandArgSchemas = {
     expectNewTab: external_exports.boolean().optional()
   }).strict(),
   click_probe: external_exports.object({
-    selector,
+    elementRef: elementRef.optional(),
+    selector: selector.optional(),
     tabId,
     strategy: external_exports.enum(["auto", "cdp_mouse", "dom_pointer", "element_click"]).optional(),
     force: external_exports.boolean().optional(),
@@ -35073,7 +35123,8 @@ var commandArgSchemas = {
     maxRequests: external_exports.number().int().positive().optional()
   }).strict(),
   fill: external_exports.object({
-    selector,
+    elementRef: elementRef.optional(),
+    selector: selector.optional(),
     value: external_exports.string(),
     tabId,
     strategy: external_exports.enum(["native_setter", "text_input", "paste_like"]).optional(),
@@ -35084,6 +35135,7 @@ var commandArgSchemas = {
   }).strict(),
   press: external_exports.object({
     key: external_exports.string().min(1),
+    elementRef: elementRef.optional(),
     selector: selector.optional(),
     tabId,
     strategy: external_exports.enum(["auto", "cdp_keyboard", "dom_keyboard"]).optional(),
@@ -35094,6 +35146,7 @@ var commandArgSchemas = {
     expectNewTab: external_exports.boolean().optional()
   }).strict(),
   scroll: external_exports.object({
+    elementRef: elementRef.optional(),
     tabId,
     selector: selector.optional(),
     strategy: external_exports.enum(["auto", "dom", "wheel"]).optional(),
@@ -35107,8 +35160,8 @@ var commandArgSchemas = {
     behavior: external_exports.enum(["auto", "instant", "smooth"]).optional(),
     waitMs: external_exports.number().nonnegative().optional()
   }).strict(),
-  select_option: external_exports.object({ selector, value: external_exports.string(), tabId }).strict(),
-  set_checked: external_exports.object({ selector, checked: external_exports.boolean(), tabId }).strict(),
+  select_option: external_exports.object({ elementRef: elementRef.optional(), selector: selector.optional(), value: external_exports.string(), tabId }).strict(),
+  set_checked: external_exports.object({ elementRef: elementRef.optional(), selector: selector.optional(), checked: external_exports.boolean(), tabId }).strict(),
   wait_for: external_exports.object({
     selector: selector.optional(),
     text: external_exports.string().optional(),
@@ -35164,7 +35217,7 @@ var commandArgSchemas = {
   }).strict(),
   network_detail: external_exports.object({ requestId: external_exports.string().min(1) }).strict(),
   network_stop: external_exports.object({}).strict(),
-  upload: external_exports.object({ selector, files: external_exports.array(external_exports.string().min(1)), tabId }).strict(),
+  upload: external_exports.object({ elementRef: elementRef.optional(), selector: selector.optional(), files: external_exports.array(external_exports.string().min(1)), tabId }).strict(),
   download: external_exports.object({ url: external_exports.string().min(1), filename: external_exports.string().optional(), saveAs: external_exports.boolean().optional() }).strict(),
   get_text: external_exports.object({
     tabId,
@@ -35195,6 +35248,7 @@ function assertSchemaRegistryMatchesProtocol() {
     const shape = schema.shape;
     const required2 = new Set(COMMANDS[command].required || []);
     const optional2 = new Set(COMMANDS[command].optional || []);
+    const requiredOneOf = new Set(COMMANDS[command].requiredOneOf || []);
     const schemaFields = new Set(Object.keys(shape));
     for (const field of required2) {
       if (!schemaFields.has(field)) throw new Error(`MCP schema for ${command} missing required field ${field}`);
@@ -35203,6 +35257,9 @@ function assertSchemaRegistryMatchesProtocol() {
     }
     for (const field of optional2) {
       if (!schemaFields.has(field)) throw new Error(`MCP schema for ${command} missing optional field ${field}`);
+    }
+    for (const field of requiredOneOf) {
+      if (!schemaFields.has(field)) throw new Error(`MCP schema for ${command} missing requiredOneOf field ${field}`);
     }
   }
 }
@@ -35732,7 +35789,20 @@ async function executeEnvelope(command, envelope, client) {
 }
 function validateCommandArgs(command, args) {
   const parsed = commandArgSchemas[command].safeParse(args);
-  if (parsed.success) return { ok: true, data: parsed.data };
+  if (parsed.success) {
+    const requiredOneOf = COMMANDS[command].requiredOneOf || [];
+    if (requiredOneOf.length && !requiredOneOf.some((field) => {
+      const value = parsed.data[field];
+      return value !== void 0 && value !== null && value !== "";
+    })) {
+      return {
+        ok: false,
+        issues: [`args: one of ${requiredOneOf.join(", ")} is required`],
+        hints: [`Prefer args.elementRef with a fresh snapshot @e reference. Use args.selector only for CSS fallback.`]
+      };
+    }
+    return { ok: true, data: parsed.data };
+  }
   return {
     ok: false,
     issues: parsed.error.issues.map((issue2) => {
@@ -35774,7 +35844,7 @@ function hintsFor(command, args, issues) {
   const hints = [];
   const keys = new Set(Object.keys(args));
   if (command === "fill" && keys.has("text")) hints.push("fill uses args.value, not args.text.");
-  if (command === "click" && keys.has("text")) hints.push("click uses args.selector. To click visible text, first call snapshot with args.textIncludes and args.maxElements, then click the returned @e selector.");
+  if (command === "click" && keys.has("text")) hints.push("click uses args.elementRef for snapshot @e references. To click visible text, first call snapshot with args.textIncludes and args.maxElements, then click with the returned @e id.");
   if (command === "get_text" && keys.has("selectors")) hints.push("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes instead.");
   if (command === "evaluate" && keys.has("expression")) hints.push("evaluate uses args.code, not args.expression.");
   if (command === "wait_for" && keys.has("timeMs")) hints.push("wait_for uses args.timeoutMs, not args.timeMs.");
@@ -35782,7 +35852,10 @@ function hintsFor(command, args, issues) {
   if (command === "find_tab" && keys.has("urlContains")) hints.push("find_tab uses args.urlIncludes, not args.urlContains.");
   if (command === "find_tab" && keys.has("titleContains")) hints.push("find_tab uses args.titleIncludes, not args.titleContains.");
   if (command === "close_session") hints.push("Prefer the dedicated browser_control_close_session tool for cleanup.");
-  if (!hints.length && issues.length) hints.push(`Required args: ${(COMMANDS[command].required || []).join(", ") || "none"}. Optional args: ${(COMMANDS[command].optional || []).join(", ") || "none"}.`);
+  if (!hints.length && issues.length) {
+    const oneOf = COMMANDS[command].requiredOneOf?.length ? ` One of: ${COMMANDS[command].requiredOneOf?.join(", ")}.` : "";
+    hints.push(`Required args: ${(COMMANDS[command].required || []).join(", ") || "none"}.${oneOf} Optional args: ${(COMMANDS[command].optional || []).join(", ") || "none"}.`);
+  }
   return hints;
 }
 function commandSuggestions(command) {
@@ -35860,8 +35933,8 @@ function registerBrowserControlPrompts(server) {
   }, () => textPrompt("Browser Control MCP usage", [
     "Use browser_control_command for browser actions and observations.",
     "The MCP server manages an active session automatically; omit session unless you intentionally need a separate session.",
-    "Typical loop: navigate -> snapshot -> use @e ids for click/fill/press -> get_text/screenshot for reading -> browser_control_close_session when done.",
-    "When you need to click or fill an element by visible text, do not request a huge snapshot. Use snapshot with textIncludes, hasVisibleText, viewportOnly, and maxElements to get a small list of @e references, then click/fill the chosen @e.",
+    "Typical loop: navigate -> snapshot -> use elementRef with @e ids for click/fill/press -> get_text/screenshot for reading -> browser_control_close_session when done.",
+    "When you need to click or fill an element by visible text, do not request a huge snapshot. Use snapshot with textIncludes, hasVisibleText, viewportOnly, and maxElements to get a small list of @e references, then click/fill with elementRef.",
     "Do not build Google or YouTube search URLs with query parameters when a task asks for real UI usage; navigate to the homepage and operate the search box.",
     "Prefer snapshot before element actions and prefer @e references from the latest snapshot."
   ].join("\n")));
@@ -35885,8 +35958,8 @@ function registerBrowserControlPrompts(server) {
       '{"command":"navigate","args":{"url":"https://example.com"}}',
       '{"command":"snapshot","args":{"viewportOnly":true,"maxElements":120}}',
       '{"command":"snapshot","args":{"textIncludes":"Submit","hasVisibleText":true,"viewportOnly":true,"maxElements":10}}',
-      '{"command":"click","args":{"selector":"@eabc_1","expectChange":true}}',
-      '{"command":"fill","args":{"selector":"@eabc_1","value":"draft","clear":true}}',
+      '{"command":"click","args":{"elementRef":"@eabc_1","expectChange":true}}',
+      '{"command":"fill","args":{"elementRef":"@eabc_1","value":"draft","clear":true}}',
       '{"command":"press","args":{"key":"Enter","expectChange":true}}',
       '{"command":"get_text","args":{"scope":"document","maxChars":6000}}'
     ].join("\n"));

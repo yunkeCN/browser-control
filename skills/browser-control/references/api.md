@@ -44,8 +44,8 @@ Browser command helper examples:
 
 ```bash
 node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{}'
-node skills/browser-control/scripts/browser-control.js command click --session demo --args '{"selector":"@e1jm0sbb_1"}'
-node skills/browser-control/scripts/browser-control.js command click_probe --session demo --args '{"selector":"@e1jm0sbb_1","filter":"/api/"}'
+node skills/browser-control/scripts/browser-control.js command click --session demo --args '{"elementRef":"@e1jm0sbb_1"}'
+node skills/browser-control/scripts/browser-control.js command click_probe --session demo --args '{"elementRef":"@e1jm0sbb_1","filter":"/api/"}'
 node skills/browser-control/scripts/browser-control.js command scroll --session demo --args '{"deltaY":800,"strategy":"dom"}'
 node skills/browser-control/scripts/browser-control.js command evaluate --session demo --code-file ./snippet.js
 ```
@@ -141,7 +141,7 @@ Response semantics:
 - `maxDepth` is enforced only when explicitly provided; omitting it preserves broad default element discovery for deeply nested SPA controls.
 - Generic containers prefer direct text instead of aggregating all descendant text, which reduces duplicated Ant Design/layout text. Interactive elements still preserve discoverable names/text for targeting.
 - Likely sensitive input values, such as password/token/secret/session/cookie/API-key fields, are redacted by default with `attributes.redacted:true` and optional `valueLength`.
-- `@e` references use the format `@e<structureId>_<revision>`. They are page-state references scoped to the latest snapshot of the current document, not permanent selectors. Refresh the snapshot after navigation, dialog reconstruction, filtering, list reordering, or significant DOM changes. Browser Control rejects stale revisions with `STALE_ELEMENT_REFERENCE` rather than clicking a changed element.
+- `@e` references use the format `@e<structureId>_<revision>`. They are page-state references scoped to the latest snapshot of the current document, not permanent selectors. For element actions, prefer `elementRef` for these strict snapshot references. `selector` remains available as the CSS selector / compatibility fallback. Refresh the snapshot after navigation, dialog reconstruction, filtering, list reordering, or significant DOM changes. Browser Control rejects stale revisions with `STALE_ELEMENT_REFERENCE` rather than clicking a changed element.
 
 Examples:
 
@@ -152,9 +152,9 @@ node skills/browser-control/scripts/browser-control.js command snapshot --sessio
 
 ### `click`
 
-Click an element by `@e` reference or CSS selector.
+Click an element by strict `elementRef` (`@e<structureId>_<revision>`) or CSS `selector` fallback.
 
-Arguments: `selector` required, optional `tabId`, `strategy`, `force`, `button`, `clickCount`, `modifiers`, `expectChange`, `observe`, `observeNewTab`, and `expectNewTab`.
+Arguments: `elementRef` or `selector` required, optional `tabId`, `strategy`, `force`, `button`, `clickCount`, `modifiers`, `expectChange`, `observe`, `observeNewTab`, and `expectNewTab`.
 
 Strategies:
 
@@ -166,28 +166,28 @@ Strategies:
 Diagnostics may include `strategyUsed`, `target`, `hitTest`, `focusBefore`, `focusAfter`, `newTab` / `newTabs` when the action opens another tab, and `warnings`. When a click opens a new tab, Browser Control attaches that tab to the session and extends session network capture so the next `snapshot` or `wait_for` continues on the new page. Covered targets fail by default with covering element details; use `force:true` only after confirming the overlay should be bypassed.
 
 ```json
-{"command":"click","args":{"selector":"@e1jm0sbb_1","strategy":"auto","expectChange":true}}
+{"command":"click","args":{"elementRef":"@e1jm0sbb_1","strategy":"auto","expectChange":true}}
 ```
 
 ### `click_probe`
 
 Click an element while blocking matching API requests before they reach the server. Use this to inspect write-like request URLs and parameters during exploration without intentionally creating server-side data.
 
-Arguments: `selector` required, optional `tabId`, `strategy`, `force`, `button`, `clickCount`, `modifiers`, `observeNewTab`, `expectNewTab`, `waitMs`, `filter`, `includeHeaders`, `includeBody`, `redactSensitive`, and `maxRequests`.
+Arguments: `elementRef` or `selector` required, optional `tabId`, `strategy`, `force`, `button`, `clickCount`, `modifiers`, `observeNewTab`, `expectNewTab`, `waitMs`, `filter`, `includeHeaders`, `includeBody`, `redactSensitive`, and `maxRequests`.
 
 Defaults: `waitMs:1000`, `includeHeaders:true`, `includeBody:true`, `redactSensitive:true`, and `maxRequests:100`. By default Browser Control blocks and returns fetch/XHR/XMLHttpRequest requests; when `filter` is set, only API requests whose URL includes the filter are blocked and returned. Nonmatching requests continue normally.
 
 `click_probe` is not a full dry run. The page click still happens and may change frontend state, storage, dialogs, route state, or newly opened tabs. The v1 guarantee is limited to matching requests intercepted on the current tab before reaching the server. If a click opens a new tab, Browser Control warns that the new tab's first requests may not be blocked.
 
 ```json
-{"command":"click_probe","args":{"selector":"@e1jm0sbb_1","filter":"/api/","waitMs":1000}}
+{"command":"click_probe","args":{"elementRef":"@e1jm0sbb_1","filter":"/api/","waitMs":1000}}
 ```
 
 ### `fill`
 
 Clear and fill an input, textarea, contenteditable element, or select.
 
-Arguments: `selector` and `value` required, optional `tabId`, `strategy`, `clear`, `commit`, `expectChange`, `observe`.
+Arguments: `elementRef` or `selector`, plus `value`, required; optional `tabId`, `strategy`, `clear`, `commit`, `expectChange`, `observe`.
 
 Strategies:
 
@@ -200,14 +200,14 @@ Strategies:
 Use `value` exactly:
 
 ```json
-{"command":"fill","args":{"selector":"@e0abc12_1","value":"draft text"}}
+{"command":"fill","args":{"elementRef":"@e0abc12_1","value":"draft text"}}
 ```
 
 ### `press`
 
 Press a keyboard key, optionally targeting an element first.
 
-Arguments: `key` required, optional `selector`, optional `tabId`, `strategy`, `modifiers`, `expectChange`, `observe`, `observeNewTab`, and `expectNewTab`.
+Arguments: `key` required, optional `elementRef`, optional CSS `selector`, optional `tabId`, `strategy`, `modifiers`, `expectChange`, `observe`, `observeNewTab`, and `expectNewTab`.
 
 Strategies:
 
@@ -228,7 +228,7 @@ Press diagnostics may include key/code/modifier data, focused target before and 
 
 Scroll the document, a selected scroll container, or a viewport point/region without relying on keyboard keys. Use this for pages where `Space`, `PageDown`, or `End` may be intercepted by a focused media/player area.
 
-Arguments: optional `tabId`, `selector`, `strategy` (`auto`, `dom`, or `wheel`), `deltaX`, `deltaY`, `x`, `y`, `region`, `steps`, `block`, `behavior`, and `waitMs`.
+Arguments: optional `elementRef`, CSS `selector`, `tabId`, `strategy` (`auto`, `dom`, or `wheel`), `deltaX`, `deltaY`, `x`, `y`, `region`, `steps`, `block`, `behavior`, and `waitMs`.
 
 Strategies:
 
@@ -247,13 +247,13 @@ Responses include `ok`, `target`, `strategyUsed`, `before`, `after`, `movedX`, `
 
 Set a native `<select>` value.
 
-Arguments: `selector` and `value` required, optional `tabId`.
+Arguments: `elementRef` or `selector`, plus `value`, required; optional `tabId`.
 
 ### `set_checked`
 
 Set a checkbox or radio checked state.
 
-Arguments: `selector` and `checked` required, optional `tabId`.
+Arguments: `elementRef` or `selector`, plus `checked`, required; optional `tabId`.
 
 ### `wait_for`
 
@@ -407,7 +407,7 @@ Constraints:
 
 ### File and tab commands
 
-- `upload`: args `selector`, `files`, optional `tabId`. Browser security may require user cooperation.
+- `upload`: args `elementRef` or `selector`, `files`, optional `tabId`. Browser security may require user cooperation.
 - `download`: args `url` required, optional `filename` and `saveAs`. The extension currently waits up to 30 seconds for Chrome download completion/interruption metadata.
 - `list_tabs`: list tabs known to the session.
 - `close_tab`: close the current tab, or pass optional `tabId` to close a specific session tab.

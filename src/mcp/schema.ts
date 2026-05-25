@@ -9,6 +9,7 @@ const envelopeSchema = {
 
 const tabId = z.number().int().positive().optional();
 const selector = z.string().min(1);
+const elementRef = z.string().min(1).regex(/^@e[^\s_]+_\d+$/, 'must be an @e<structureId>_<revision> reference from snapshot');
 const observeOptions = z.object({
   baselineId: z.string().optional(),
   includeNetwork: z.boolean().optional(),
@@ -42,7 +43,8 @@ export const commandArgSchemas = {
     maxElements: z.number().int().positive().optional()
   }).strict(),
   click: z.object({
-    selector,
+    elementRef: elementRef.optional(),
+    selector: selector.optional(),
     tabId,
     strategy: z.enum(['auto', 'cdp_mouse', 'dom_pointer', 'element_click']).optional(),
     force: z.boolean().optional(),
@@ -55,7 +57,8 @@ export const commandArgSchemas = {
     expectNewTab: z.boolean().optional()
   }).strict(),
   click_probe: z.object({
-    selector,
+    elementRef: elementRef.optional(),
+    selector: selector.optional(),
     tabId,
     strategy: z.enum(['auto', 'cdp_mouse', 'dom_pointer', 'element_click']).optional(),
     force: z.boolean().optional(),
@@ -72,7 +75,8 @@ export const commandArgSchemas = {
     maxRequests: z.number().int().positive().optional()
   }).strict(),
   fill: z.object({
-    selector,
+    elementRef: elementRef.optional(),
+    selector: selector.optional(),
     value: z.string(),
     tabId,
     strategy: z.enum(['native_setter', 'text_input', 'paste_like']).optional(),
@@ -83,6 +87,7 @@ export const commandArgSchemas = {
   }).strict(),
   press: z.object({
     key: z.string().min(1),
+    elementRef: elementRef.optional(),
     selector: selector.optional(),
     tabId,
     strategy: z.enum(['auto', 'cdp_keyboard', 'dom_keyboard']).optional(),
@@ -93,6 +98,7 @@ export const commandArgSchemas = {
     expectNewTab: z.boolean().optional()
   }).strict(),
   scroll: z.object({
+    elementRef: elementRef.optional(),
     tabId,
     selector: selector.optional(),
     strategy: z.enum(['auto', 'dom', 'wheel']).optional(),
@@ -106,8 +112,8 @@ export const commandArgSchemas = {
     behavior: z.enum(['auto', 'instant', 'smooth']).optional(),
     waitMs: z.number().nonnegative().optional()
   }).strict(),
-  select_option: z.object({ selector, value: z.string(), tabId }).strict(),
-  set_checked: z.object({ selector, checked: z.boolean(), tabId }).strict(),
+  select_option: z.object({ elementRef: elementRef.optional(), selector: selector.optional(), value: z.string(), tabId }).strict(),
+  set_checked: z.object({ elementRef: elementRef.optional(), selector: selector.optional(), checked: z.boolean(), tabId }).strict(),
   wait_for: z.object({
     selector: selector.optional(),
     text: z.string().optional(),
@@ -163,7 +169,7 @@ export const commandArgSchemas = {
   }).strict(),
   network_detail: z.object({ requestId: z.string().min(1) }).strict(),
   network_stop: z.object({}).strict(),
-  upload: z.object({ selector, files: z.array(z.string().min(1)), tabId }).strict(),
+  upload: z.object({ elementRef: elementRef.optional(), selector: selector.optional(), files: z.array(z.string().min(1)), tabId }).strict(),
   download: z.object({ url: z.string().min(1), filename: z.string().optional(), saveAs: z.boolean().optional() }).strict(),
   get_text: z.object({
     tabId,
@@ -200,6 +206,7 @@ export function assertSchemaRegistryMatchesProtocol(): void {
     const shape = schema.shape;
     const required = new Set(COMMANDS[command].required || []);
     const optional = new Set(COMMANDS[command].optional || []);
+    const requiredOneOf = new Set(COMMANDS[command].requiredOneOf || []);
     const schemaFields = new Set(Object.keys(shape));
     for (const field of required) {
       if (!schemaFields.has(field)) throw new Error(`MCP schema for ${command} missing required field ${field}`);
@@ -208,6 +215,9 @@ export function assertSchemaRegistryMatchesProtocol(): void {
     }
     for (const field of optional) {
       if (!schemaFields.has(field)) throw new Error(`MCP schema for ${command} missing optional field ${field}`);
+    }
+    for (const field of requiredOneOf) {
+      if (!schemaFields.has(field)) throw new Error(`MCP schema for ${command} missing requiredOneOf field ${field}`);
     }
   }
 }

@@ -1,61 +1,65 @@
-<!-- Updated: 2026-05-22 -->
+# AGENTS.md
 
-# browser-control
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
-## Purpose
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
-Browser Control is a local Chrome automation bridge for AI agents. Agents talk to a localhost daemon packaged inside the Browser Control skill; the daemon talks to a Chrome Manifest V3 extension over WebSocket; the extension operates the user's real Chrome DOM, tabs, downloads, screenshots, and network capture.
+## 1. Think Before Coding
 
-```text
-AI Agent → skills/browser-control/scripts/browser-control.js → localhost HTTP daemon → WebSocket → skills/browser-control/extension/ → Chrome DOM
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
 ```
 
-## Core source modules
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-| Path | Purpose |
-|------|---------|
-| `src/protocol.ts` | Editable protocol contract and validation source. |
-| `src/daemon/` | Editable daemon server and process-management source. |
-| `src/extension/` | Editable Chrome MV3 extension TypeScript source. |
-| `src/mcp/` | Editable MCP server source, independent from the skill package. |
-| `skills/browser-control/` | Self-contained Agent-facing skill package: `SKILL.md`, references, CLI/runtime scripts, generated daemon/protocol/MCP runtime, generated Chrome extension, diagnostics, artifact helpers, session utilities. |
-| `bin/browser-control-mcp.mjs` | Generated root copy of the single-file MCP runtime. |
+---
 
-Repository support paths:
-
-| Path | Purpose |
-|------|---------|
-| `.github/workflows/release.yml` | Builds the extension on tag pushes and publishes Skill and extension zip release assets. |
-| `tests/` | Unit, integration, fixture e2e, singleton daemon, and package entrypoint tests. |
-| `docs/` | Maintainer/testing documentation only. Runtime/operator docs live in the skill references. |
-| `contracts.ts` | TypeScript protocol contract used by maintainers/tests. |
-
-## For AI agents
-
-- Before browser operations, verify readiness with `node skills/browser-control/scripts/browser-control.js doctor --json` or `node skills/browser-control/scripts/health-check.js --json`.
-- Use `node skills/browser-control/scripts/screenshot.js` for screenshots; do not paste raw screenshot/PDF base64 into context.
-- Take a `snapshot` before `@e` interactions; prefer `@e` references over ad-hoc CSS selectors.
-- Use separate sessions for independent tasks and call `close_session` when done.
-- All communication is localhost-only by design; confirm before submitting sensitive, destructive, purchase, or account-affecting actions.
-
-## Development commands
-
-```bash
-npm run typecheck
-npm run lint
-npm test
-node skills/browser-control/scripts/browser-control.js start --json
-node skills/browser-control/scripts/browser-control.js doctor --json
-```
-
-Load the Chrome extension from `skills/browser-control/extension/`.
-
-## Documentation map
-
-- Project overview: `README.md`
-- Canonical skill: `skills/browser-control/SKILL.md`
-- API/CLI reference: `skills/browser-control/references/api.md`
-- Troubleshooting: `skills/browser-control/references/troubleshooting.md`
-- Chrome extension setup: `skills/browser-control/references/chrome-extension-setup.md`
-- Architecture notes: `docs/maintainer-architecture.md`
-- Test/release checks: `docs/testing.md`
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
