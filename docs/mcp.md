@@ -89,7 +89,7 @@ Use environment variables for non-default daemon settings:
 - `timeoutMs`: optional command timeout.
 - `id`: optional request id.
 
-For element actions, prefer `snapshot` to get `@e` references. Pass the chosen ref as `click` `target`, or as `elementRef` for `fill` and `press`. To avoid large snapshots when looking for visible text, filter first:
+For element actions, prefer `snapshot` to get `@e` references. Pass the chosen ref as `target`; use `target:"css=..."` only as an explicit CSS fallback. To avoid large snapshots when looking for visible text, filter first:
 
 ```json
 {

@@ -4333,7 +4333,7 @@
       if (args.target.startsWith("css=")) return args.target.slice(4).trim();
       return args.target;
     }
-    return typeof args?.elementRef === "string" && args.elementRef ? args.elementRef : args?.selector;
+    return args?.selector;
   }
   async function focusTargetForCdpKeyboard(tabId, selector) {
     const targetSelector3 = typeof selector === "string" && selector ? selector : null;
@@ -4424,7 +4424,7 @@
   async function handleClickProbe(args = {}, session) {
     const { tabId: argTabId } = args || {};
     const selector = targetSelector(args);
-    if (!selector) throw new Error("selector is required for click_probe");
+    if (!selector) throw new Error("target is required for click_probe");
     const tabId = argTabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
     const { result, probe } = await runClickProbeCapture(tabId, args, () => performObservedClick(args, session, tabId));
@@ -4488,7 +4488,7 @@
   async function handleFill(args = {}, session) {
     const { value } = args || {};
     const selector = targetSelector(args);
-    if (!selector) throw new Error("selector is required for fill");
+    if (!selector) throw new Error("target is required for fill");
     if (value === void 0) throw new Error("value is required for fill");
     const tabId = args?.tabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
@@ -4806,12 +4806,16 @@
 
   // src/extension/service-worker/handlers/artifacts-tabs.ts
   function targetSelector2(args = {}) {
-    return typeof args?.elementRef === "string" && args.elementRef ? args.elementRef : args?.selector;
+    if (typeof args?.target === "string" && args.target) {
+      if (args.target.startsWith("css=")) return args.target.slice(4).trim();
+      return args.target;
+    }
+    return args?.selector;
   }
   async function handleUpload(args = {}, session) {
     const { files } = args || {};
     const selector = targetSelector2(args);
-    if (!selector) throw new Error("selector is required for upload");
+    if (!selector) throw new Error("target is required for upload");
     if (!files || !files.length) throw new Error("files array is required for upload");
     const tabId = args?.tabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");

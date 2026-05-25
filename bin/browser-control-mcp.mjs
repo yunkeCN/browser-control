@@ -34607,26 +34607,24 @@ var COMMANDS = {
     example: { target: "@e1jm0sbb_1", after: "auto" }
   },
   click_probe: {
-    required: [],
-    requiredOneOf: ["elementRef", "selector"],
-    optional: ["elementRef", "selector", "tabId", "strategy", "force", "button", "clickCount", "modifiers", "observeNewTab", "expectNewTab", "waitMs", "filter", "includeHeaders", "includeBody", "redactSensitive", "maxRequests"],
-    example: { elementRef: "@e1jm0sbb_1", strategy: "auto", filter: "/api/" },
+    required: ["target"],
+    optional: ["tabId", "strategy", "force", "button", "clickCount", "modifiers", "observeNewTab", "expectNewTab", "waitMs", "filter", "includeHeaders", "includeBody", "redactSensitive", "maxRequests"],
+    example: { target: "@e1jm0sbb_1", strategy: "auto", filter: "/api/" },
     strategies: ["auto", "cdp_mouse", "dom_pointer", "element_click"]
   },
   fill: {
-    required: ["value"],
-    requiredOneOf: ["elementRef", "selector"],
-    optional: ["elementRef", "selector", "tabId", "strategy", "clear", "commit", "expectChange", "observe"],
+    required: ["target", "value"],
+    optional: ["tabId", "strategy", "clear", "commit", "expectChange", "observe"],
     strategies: ["native_setter", "text_input", "paste_like"]
   },
   press: {
     required: ["key"],
-    optional: ["elementRef", "tabId", "selector", "strategy", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"],
+    optional: ["target", "tabId", "strategy", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"],
     strategies: ["auto", "cdp_keyboard", "dom_keyboard"]
   },
   scroll: {
     required: [],
-    optional: ["elementRef", "tabId", "selector", "strategy", "deltaX", "deltaY", "x", "y", "region", "steps", "block", "behavior", "waitMs"],
+    optional: ["target", "tabId", "strategy", "deltaX", "deltaY", "x", "y", "region", "steps", "block", "behavior", "waitMs"],
     example: { deltaY: 800, strategy: "dom" },
     strategies: ["auto", "dom", "wheel"]
   },
@@ -34640,7 +34638,7 @@ var COMMANDS = {
   network_list: { required: [], optional: ["filter", "sinceTimestampMs", "limit", "tabId", "method", "statusCode", "type"], example: { filter: "/api/" } },
   network_detail: { required: ["requestId"], optional: [], example: { requestId: "<id from network_list>" } },
   network_stop: { required: [] },
-  upload: { required: ["files"], requiredOneOf: ["elementRef", "selector"], optional: ["elementRef", "selector", "tabId"] },
+  upload: { required: ["target", "files"], optional: ["tabId"] },
   download: { required: ["url"], optional: ["filename", "saveAs"] },
   get_text: { required: [], optional: ["tabId", "scope", "maxChars", "includeRuns", "selector"], example: { scope: "full", maxChars: 4e3, includeRuns: true } },
   list_tabs: { required: [] },
@@ -34648,6 +34646,8 @@ var COMMANDS = {
   close_session: { required: [] }
 };
 var ELEMENT_REF_PATTERN = /^@e[^\s_]+_\d+$/;
+var TARGET_COMMANDS = /* @__PURE__ */ new Set(["click", "click_probe", "fill", "press", "scroll", "upload"]);
+var LEGACY_TARGET_ARGS = ["elementRef", "selector"];
 var LEGACY_ACTION_ALIASES = {
   saveAsPdf: "save_as_pdf",
   waitFor: "wait_for",
@@ -34710,7 +34710,7 @@ function validateRequest(request) {
     }
   }
   validateKnownArgs(request, spec);
-  validateAndNormalizeElementRef(request, spec);
+  validateTargetArg(request, spec);
   validateRequiredOneOf(request, spec);
   if (request.command === "upload" && !Array.isArray(request.args.files)) {
     throw new ProtocolError("VALIDATION_ERROR", "files must be an array for command 'upload'", { field: "files" });
@@ -34720,7 +34720,6 @@ function validateRequest(request) {
     "network_start",
     "network_list"
   ]);
-  validateClickTarget(request, spec);
   validateClickAfter(request, spec);
   validateOptionalBooleanArgs(request, ["force", "observeNewTab", "expectNewTab", "includeHeaders", "includeBody", "redactSensitive"]);
   validateOptionalNumberArgs(request, ["tabId", "clickCount", "waitMs", "maxRequests"]);
@@ -34748,7 +34747,10 @@ function validateKnownArgs(request, spec) {
   if (request.command === "click" && field === "text") {
     hints.unshift("click uses args.target for snapshot @e references. To click visible text, call snapshot with args.textIncludes plus hasVisibleText and viewportOnly, then click the returned @e id as target.");
   }
-  if (request.command === "click" && ["elementRef", "selector", "strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].includes(field)) {
+  if (TARGET_COMMANDS.has(request.command) && LEGACY_TARGET_ARGS.includes(field)) {
+    hints.unshift(`${request.command} now accepts args.target for element targeting. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.`);
+  }
+  if (request.command === "click" && ["strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].includes(field)) {
     hints.unshift('click now accepts only args.target, optional args.after, and optional args.tabId. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.');
   }
   if (request.command === "get_text" && field === "selectors") {
@@ -34767,36 +34769,6 @@ function validateKnownArgs(request, spec) {
     hint: hints[0] || void 0
   });
 }
-function validateAndNormalizeElementRef(request, spec) {
-  if (!Object.prototype.hasOwnProperty.call(request.args || {}, "elementRef")) return;
-  const value = request.args.elementRef;
-  if (typeof value !== "string" || value === "") {
-    throw new ProtocolError("VALIDATION_ERROR", `elementRef must be a non-empty string for command '${request.command}'`, {
-      ...validationDetails(request, spec, "elementRef"),
-      expectedType: "string",
-      actualType: Array.isArray(value) ? "array" : typeof value,
-      hint: 'Run snapshot and pass an element id such as {"elementRef":"@e1jm0sbb_1"}.'
-    });
-  }
-  if (!ELEMENT_REF_PATTERN.test(value)) {
-    throw new ProtocolError("VALIDATION_ERROR", `elementRef must be an @e<structureId>_<revision> reference for command '${request.command}'`, {
-      ...validationDetails(request, spec, "elementRef"),
-      expectedFormat: "@e<structureId>_<revision>",
-      value,
-      hint: 'Run snapshot and pass the returned element id, for example {"elementRef":"@e1jm0sbb_1"}. Use args.selector only for CSS fallback.'
-    });
-  }
-  const selector2 = request.args.selector;
-  if (selector2 !== void 0 && selector2 !== null && selector2 !== "" && selector2 !== value) {
-    throw new ProtocolError("VALIDATION_ERROR", `elementRef and selector cannot target different elements for command '${request.command}'`, {
-      ...validationDetails(request, spec, "elementRef"),
-      elementRef: value,
-      selector: selector2,
-      hint: "Use either args.elementRef for a snapshot @e reference or args.selector for a CSS fallback, not both with different values."
-    });
-  }
-  request.args.selector = value;
-}
 function validateRequiredOneOf(request, spec) {
   const fields = spec.requiredOneOf || [];
   if (!fields.length) return;
@@ -34804,7 +34776,7 @@ function validateRequiredOneOf(request, spec) {
   throw new ProtocolError("VALIDATION_ERROR", `${fields.join(" or ")} is required for command '${request.command}'`, {
     ...validationDetails(request, spec, fields[0]),
     requiredOneOf: fields,
-    hint: "Prefer args.elementRef with a fresh snapshot @e reference. Use args.selector only for CSS fallback."
+    hint: 'Prefer args.target with a fresh snapshot @e reference. Use args.target:"css=..." only for CSS fallback.'
   });
 }
 function nearestArgName(field, candidates) {
@@ -34899,7 +34871,10 @@ function validationDetails(request, spec, field) {
   if (request.command === "click" && Object.prototype.hasOwnProperty.call(request.args || {}, "text")) {
     hints.push("click uses args.target for snapshot @e references. Run snapshot and click a returned element id; semantic click_text is deferred.");
   }
-  if (request.command === "click" && ["elementRef", "selector", "strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].some((arg) => Object.prototype.hasOwnProperty.call(request.args || {}, arg))) {
+  if (TARGET_COMMANDS.has(request.command) && LEGACY_TARGET_ARGS.some((arg) => Object.prototype.hasOwnProperty.call(request.args || {}, arg))) {
+    hints.push(`${request.command} now accepts args.target for element targeting. Use {"target":"@e..."} or {"target":"css=..."} instead.`);
+  }
+  if (request.command === "click" && ["strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].some((arg) => Object.prototype.hasOwnProperty.call(request.args || {}, arg))) {
     hints.push('click now accepts args.target, optional args.after, and optional args.tabId. Use {"target":"@e..."} or {"target":"css=..."} instead.');
   }
   if (hints.length) {
@@ -34970,7 +34945,12 @@ function createResultEnvelope(request, { ok, backend = "extension", tab = null, 
 function mapNetworkCommand(command, args) {
   switch (command) {
     case "click":
-      return { command, args: { ...args, selector: clickTargetToSelector(args?.target) } };
+    case "click_probe":
+    case "fill":
+    case "press":
+    case "scroll":
+    case "upload":
+      return { command, args: mapTargetArgs(args) };
     case "network_start":
       return { command: "network", args: { ...args, cmd: "start" } };
     case "network_list":
@@ -34983,19 +34963,20 @@ function mapNetworkCommand(command, args) {
       return { command, args };
   }
 }
-function validateClickTarget(request, spec) {
-  if (request.command !== "click") return;
+function validateTargetArg(request, spec) {
+  if (!TARGET_COMMANDS.has(request.command)) return;
+  if (!Object.prototype.hasOwnProperty.call(request.args || {}, "target")) return;
   const value = request.args.target;
   if (typeof value !== "string" || value.trim() === "") {
-    throw new ProtocolError("VALIDATION_ERROR", "target must be a non-empty string for command 'click'", {
+    throw new ProtocolError("VALIDATION_ERROR", `target must be a non-empty string for command '${request.command}'`, {
       ...validationDetails(request, spec, "target"),
       expectedType: "string",
       actualType: Array.isArray(value) ? "array" : typeof value,
       hint: 'Use {"target":"@e1jm0sbb_1"} from snapshot, or {"target":"css=#save"} for an explicit CSS fallback.'
     });
   }
-  if (clickTargetToSelector(value)) return;
-  throw new ProtocolError("VALIDATION_ERROR", "target must be an @e reference or explicit css= selector for command 'click'", {
+  if (targetToSelector(value)) return;
+  throw new ProtocolError("VALIDATION_ERROR", `target must be an @e reference or explicit css= selector for command '${request.command}'`, {
     ...validationDetails(request, spec, "target"),
     expectedFormat: "@e<structureId>_<revision> or css=<selector>",
     value,
@@ -35014,7 +34995,11 @@ function validateClickAfter(request, spec) {
     hint: 'Use after:"auto" for the default post-click summary, "snapshot" when you need the next page state, "changes" for compact diffs, or "none" for a raw click.'
   });
 }
-function clickTargetToSelector(target) {
+function mapTargetArgs(args) {
+  const selector2 = targetToSelector(args?.target);
+  return selector2 ? { ...args, selector: selector2 } : args;
+}
+function targetToSelector(target) {
   if (typeof target !== "string") return null;
   const value = target.trim();
   if (ELEMENT_REF_PATTERN.test(value)) return value;
@@ -35098,8 +35083,7 @@ var envelopeSchema = {
 };
 var tabId = external_exports.number().int().positive().optional();
 var selector = external_exports.string().min(1);
-var elementRef = external_exports.string().min(1).regex(/^@e[^\s_]+_\d+$/, "must be an @e<structureId>_<revision> reference from snapshot");
-var clickTarget = external_exports.string().min(1).refine((value) => /^@e[^\s_]+_\d+$/.test(value) || value.startsWith("css=") && value.slice(4).trim().length > 0, {
+var elementTarget = external_exports.string().min(1).refine((value) => /^@e[^\s_]+_\d+$/.test(value) || value.startsWith("css=") && value.slice(4).trim().length > 0, {
   message: "must be an @e<structureId>_<revision> reference from snapshot or an explicit css=<selector> fallback"
 });
 var observeOptions = external_exports.object({
@@ -35133,13 +35117,12 @@ var commandArgSchemas = {
     boxes: external_exports.boolean().optional()
   }).strict(),
   click: external_exports.object({
-    target: clickTarget,
+    target: elementTarget,
     tabId,
     after: external_exports.enum(["auto", "none", "changes", "snapshot"]).optional()
   }).strict(),
   click_probe: external_exports.object({
-    elementRef: elementRef.optional(),
-    selector: selector.optional(),
+    target: elementTarget,
     tabId,
     strategy: external_exports.enum(["auto", "cdp_mouse", "dom_pointer", "element_click"]).optional(),
     force: external_exports.boolean().optional(),
@@ -35156,8 +35139,7 @@ var commandArgSchemas = {
     maxRequests: external_exports.number().int().positive().optional()
   }).strict(),
   fill: external_exports.object({
-    elementRef: elementRef.optional(),
-    selector: selector.optional(),
+    target: elementTarget,
     value: external_exports.string(),
     tabId,
     strategy: external_exports.enum(["native_setter", "text_input", "paste_like"]).optional(),
@@ -35168,8 +35150,7 @@ var commandArgSchemas = {
   }).strict(),
   press: external_exports.object({
     key: external_exports.string().min(1),
-    elementRef: elementRef.optional(),
-    selector: selector.optional(),
+    target: elementTarget.optional(),
     tabId,
     strategy: external_exports.enum(["auto", "cdp_keyboard", "dom_keyboard"]).optional(),
     modifiers: external_exports.array(external_exports.string()).optional(),
@@ -35179,9 +35160,8 @@ var commandArgSchemas = {
     expectNewTab: external_exports.boolean().optional()
   }).strict(),
   scroll: external_exports.object({
-    elementRef: elementRef.optional(),
+    target: elementTarget.optional(),
     tabId,
-    selector: selector.optional(),
     strategy: external_exports.enum(["auto", "dom", "wheel"]).optional(),
     deltaX: external_exports.number().optional(),
     deltaY: external_exports.number().optional(),
@@ -35248,7 +35228,7 @@ var commandArgSchemas = {
   }).strict(),
   network_detail: external_exports.object({ requestId: external_exports.string().min(1) }).strict(),
   network_stop: external_exports.object({}).strict(),
-  upload: external_exports.object({ elementRef: elementRef.optional(), selector: selector.optional(), files: external_exports.array(external_exports.string().min(1)), tabId }).strict(),
+  upload: external_exports.object({ target: elementTarget, files: external_exports.array(external_exports.string().min(1)), tabId }).strict(),
   download: external_exports.object({ url: external_exports.string().min(1), filename: external_exports.string().optional(), saveAs: external_exports.boolean().optional() }).strict(),
   get_text: external_exports.object({
     tabId,
@@ -35713,6 +35693,7 @@ function createSessionId() {
 function browserCommandNames() {
   return Object.keys(COMMANDS);
 }
+var TARGET_COMMANDS2 = /* @__PURE__ */ new Set(["click", "click_probe", "fill", "press", "scroll", "upload"]);
 function registerBrowserControlTools(server, client = new DaemonClient(), sessions = new McpSessionManager()) {
   assertSchemaRegistryMatchesProtocol();
   registerCompactTools(server, client, sessions);
@@ -35725,7 +35706,7 @@ function registerCompactTools(server, client, sessions) {
       "Run any low-level Browser Control protocol command through the local daemon.",
       "Input shape: command, optional args object, optional session, timeoutMs, and id.",
       "Session is managed automatically by this MCP server process. Omit session for normal use; pass session only for advanced isolation.",
-      "Before clicking by visible text, call snapshot with args.textIncludes plus semantic filters such as roles, hasVisibleText, and viewportOnly to get focused @e references, then pass the ref as click target.",
+      "Before acting on visible text, call snapshot with args.textIncludes plus semantic filters such as roles, hasVisibleText, and viewportOnly to get focused @e references, then pass the ref as args.target.",
       "Use browser_control_close_session at the end of a task. The MCP server validates command args and returns structured hints, but does not perform user confirmation."
     ].join("\n\n"),
     inputSchema: unifiedCommandInputSchema
@@ -35829,7 +35810,7 @@ function validateCommandArgs(command, args) {
       return {
         ok: false,
         issues: [`args: one of ${requiredOneOf.join(", ")} is required`],
-        hints: [command === "click" ? 'Prefer args.target with a fresh snapshot @e reference. Use args.target:"css=..." only for CSS fallback.' : "Prefer args.elementRef with a fresh snapshot @e reference. Use args.selector only for CSS fallback."]
+        hints: ['Prefer args.target with a fresh snapshot @e reference. Use args.target:"css=..." only for CSS fallback.']
       };
     }
     return { ok: true, data: parsed.data };
@@ -35876,7 +35857,8 @@ function hintsFor(command, args, issues) {
   const keys = new Set(Object.keys(args));
   if (command === "fill" && keys.has("text")) hints.push("fill uses args.value, not args.text.");
   if (command === "click" && keys.has("text")) hints.push("click uses args.target for snapshot @e references. To click visible text, first call snapshot with args.textIncludes plus hasVisibleText and viewportOnly, then click with the returned @e id.");
-  if (command === "click" && ["elementRef", "selector", "strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].some((key) => keys.has(key))) hints.push('click now accepts only args.target, optional args.after, and optional args.tabId. Use {"target":"@e..."} or {"target":"css=..."} instead.');
+  if (TARGET_COMMANDS2.has(command) && ["elementRef", "selector"].some((key) => keys.has(key))) hints.push(`${command} now accepts args.target for element targeting. Use {"target":"@e..."} or {"target":"css=..."} instead.`);
+  if (command === "click" && ["strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].some((key) => keys.has(key))) hints.push('click now accepts only args.target, optional args.after, and optional args.tabId. Use {"target":"@e..."} or {"target":"css=..."} instead.');
   if (command === "get_text" && keys.has("selectors")) hints.push("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes instead.");
   if (command === "evaluate" && keys.has("expression")) hints.push("evaluate uses args.code, not args.expression.");
   if (command === "wait_for" && keys.has("timeMs")) hints.push("wait_for uses args.timeoutMs, not args.timeMs.");
@@ -35965,8 +35947,8 @@ function registerBrowserControlPrompts(server) {
   }, () => textPrompt("Browser Control MCP usage", [
     "Use browser_control_command for browser actions and observations.",
     "The MCP server manages an active session automatically; omit session unless you intentionally need a separate session.",
-    "Typical loop: navigate -> snapshot -> use @e ids as click target or elementRef for fill/press -> get_text/screenshot for reading -> browser_control_close_session when done.",
-    "When you need to click or fill an element by visible text, do not request a huge snapshot. Use snapshot with textIncludes, roles, tags, hasVisibleText, and viewportOnly to narrow the returned @e references, then click with target or fill with elementRef.",
+    "Typical loop: navigate -> snapshot -> use @e ids as target for click/fill/press/scroll/upload -> get_text/screenshot for reading -> browser_control_close_session when done.",
+    "When you need to act on an element by visible text, do not request a huge snapshot. Use snapshot with textIncludes, roles, tags, hasVisibleText, and viewportOnly to narrow the returned @e references, then pass the chosen ref as target.",
     "Do not build Google or YouTube search URLs with query parameters when a task asks for real UI usage; navigate to the homepage and operate the search box.",
     "Prefer snapshot before element actions and prefer @e references from the latest snapshot."
   ].join("\n")));
@@ -35991,7 +35973,7 @@ function registerBrowserControlPrompts(server) {
       '{"command":"snapshot","args":{"viewportOnly":true,"hasVisibleText":true}}',
       '{"command":"snapshot","args":{"textIncludes":"Submit","hasVisibleText":true,"viewportOnly":true,"roles":["button","link","textbox"]}}',
       '{"command":"click","args":{"target":"@eabc_1","after":"auto"}}',
-      '{"command":"fill","args":{"elementRef":"@eabc_1","value":"draft","clear":true}}',
+      '{"command":"fill","args":{"target":"@eabc_1","value":"draft","clear":true}}',
       '{"command":"press","args":{"key":"Enter","expectChange":true}}',
       '{"command":"get_text","args":{"scope":"document","maxChars":6000}}'
     ].join("\n"));
@@ -36049,7 +36031,7 @@ var SNAPSHOT_FILTERING_HINTS = [
   "Use roles for actionable targets such as button, link, textbox, checkbox, radio, combobox, option, menuitem, tab, and heading.",
   "Use tags when a specific HTML element matters.",
   "Use hasVisibleText:true and viewportOnly:true to focus on visible UI.",
-  "Use get_text when the task is mainly reading long prose instead of choosing an elementRef."
+  "Use get_text when the task is mainly reading long prose instead of choosing an element target."
 ];
 function sanitizeName(name) {
   return String(name || "artifact").replace(/[/\\?%*:|"<>]/g, "-").replace(/\s+/g, "-").slice(0, 120) || "artifact";

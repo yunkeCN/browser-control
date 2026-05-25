@@ -73,26 +73,24 @@ export const COMMANDS: Record<string, CommandSpec> = {
     example: { target: '@e1jm0sbb_1', after: 'auto' }
   },
   click_probe: {
-    required: [],
-    requiredOneOf: ['elementRef', 'selector'],
-    optional: ['elementRef', 'selector', 'tabId', 'strategy', 'force', 'button', 'clickCount', 'modifiers', 'observeNewTab', 'expectNewTab', 'waitMs', 'filter', 'includeHeaders', 'includeBody', 'redactSensitive', 'maxRequests'],
-    example: { elementRef: '@e1jm0sbb_1', strategy: 'auto', filter: '/api/' },
+    required: ['target'],
+    optional: ['tabId', 'strategy', 'force', 'button', 'clickCount', 'modifiers', 'observeNewTab', 'expectNewTab', 'waitMs', 'filter', 'includeHeaders', 'includeBody', 'redactSensitive', 'maxRequests'],
+    example: { target: '@e1jm0sbb_1', strategy: 'auto', filter: '/api/' },
     strategies: ['auto', 'cdp_mouse', 'dom_pointer', 'element_click']
   },
   fill: {
-    required: ['value'],
-    requiredOneOf: ['elementRef', 'selector'],
-    optional: ['elementRef', 'selector', 'tabId', 'strategy', 'clear', 'commit', 'expectChange', 'observe'],
+    required: ['target', 'value'],
+    optional: ['tabId', 'strategy', 'clear', 'commit', 'expectChange', 'observe'],
     strategies: ['native_setter', 'text_input', 'paste_like']
   },
   press: {
     required: ['key'],
-    optional: ['elementRef', 'tabId', 'selector', 'strategy', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab'],
+    optional: ['target', 'tabId', 'strategy', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab'],
     strategies: ['auto', 'cdp_keyboard', 'dom_keyboard']
   },
   scroll: {
     required: [],
-    optional: ['elementRef', 'tabId', 'selector', 'strategy', 'deltaX', 'deltaY', 'x', 'y', 'region', 'steps', 'block', 'behavior', 'waitMs'],
+    optional: ['target', 'tabId', 'strategy', 'deltaX', 'deltaY', 'x', 'y', 'region', 'steps', 'block', 'behavior', 'waitMs'],
     example: { deltaY: 800, strategy: 'dom' },
     strategies: ['auto', 'dom', 'wheel']
   },
@@ -106,7 +104,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   network_list: { required: [], optional: ['filter', 'sinceTimestampMs', 'limit', 'tabId', 'method', 'statusCode', 'type'], example: { filter: '/api/' } },
   network_detail: { required: ['requestId'], optional: [], example: { requestId: '<id from network_list>' } },
   network_stop: { required: [] },
-  upload: { required: ['files'], requiredOneOf: ['elementRef', 'selector'], optional: ['elementRef', 'selector', 'tabId'] },
+  upload: { required: ['target', 'files'], optional: ['tabId'] },
   download: { required: ['url'], optional: ['filename', 'saveAs'] },
   get_text: { required: [], optional: ['tabId', 'scope', 'maxChars', 'includeRuns', 'selector'], example: { scope: 'full', maxChars: 4000, includeRuns: true } },
   list_tabs: { required: [] },
@@ -115,6 +113,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
 };
 
 const ELEMENT_REF_PATTERN = /^@e[^\s_]+_\d+$/;
+const TARGET_COMMANDS = new Set(['click', 'click_probe', 'fill', 'press', 'scroll', 'upload']);
+const LEGACY_TARGET_ARGS = ['elementRef', 'selector'];
 
 export const LEGACY_ACTION_ALIASES: Record<string, string> = {
   saveAsPdf: 'save_as_pdf',
@@ -183,7 +183,7 @@ export function validateRequest(request: any) {
     }
   }
   validateKnownArgs(request, spec);
-  validateAndNormalizeElementRef(request, spec);
+  validateTargetArg(request, spec);
   validateRequiredOneOf(request, spec);
   if (request.command === 'upload' && !Array.isArray(request.args.files)) {
     throw new ProtocolError('VALIDATION_ERROR', 'files must be an array for command \'upload\'', { field: 'files' });
@@ -193,7 +193,6 @@ export function validateRequest(request: any) {
     'network_start',
     'network_list'
   ]);
-  validateClickTarget(request, spec);
   validateClickAfter(request, spec);
   validateOptionalBooleanArgs(request, ['force', 'observeNewTab', 'expectNewTab', 'includeHeaders', 'includeBody', 'redactSensitive']);
   validateOptionalNumberArgs(request, ['tabId', 'clickCount', 'waitMs', 'maxRequests']);
@@ -222,7 +221,10 @@ function validateKnownArgs(request: any, spec: CommandSpec) {
   if (request.command === 'click' && field === 'text') {
     hints.unshift('click uses args.target for snapshot @e references. To click visible text, call snapshot with args.textIncludes plus hasVisibleText and viewportOnly, then click the returned @e id as target.');
   }
-  if (request.command === 'click' && ['elementRef', 'selector', 'strategy', 'force', 'button', 'clickCount', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab'].includes(field)) {
+  if (TARGET_COMMANDS.has(request.command) && LEGACY_TARGET_ARGS.includes(field)) {
+    hints.unshift(`${request.command} now accepts args.target for element targeting. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.`);
+  }
+  if (request.command === 'click' && ['strategy', 'force', 'button', 'clickCount', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab'].includes(field)) {
     hints.unshift('click now accepts only args.target, optional args.after, and optional args.tabId. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.');
   }
   if (request.command === 'get_text' && field === 'selectors') {
@@ -242,37 +244,6 @@ function validateKnownArgs(request: any, spec: CommandSpec) {
   });
 }
 
-function validateAndNormalizeElementRef(request: any, spec: CommandSpec) {
-  if (!Object.prototype.hasOwnProperty.call(request.args || {}, 'elementRef')) return;
-  const value = request.args.elementRef;
-  if (typeof value !== 'string' || value === '') {
-    throw new ProtocolError('VALIDATION_ERROR', `elementRef must be a non-empty string for command '${request.command}'`, {
-      ...validationDetails(request, spec, 'elementRef'),
-      expectedType: 'string',
-      actualType: Array.isArray(value) ? 'array' : typeof value,
-      hint: 'Run snapshot and pass an element id such as {"elementRef":"@e1jm0sbb_1"}.'
-    });
-  }
-  if (!ELEMENT_REF_PATTERN.test(value)) {
-    throw new ProtocolError('VALIDATION_ERROR', `elementRef must be an @e<structureId>_<revision> reference for command '${request.command}'`, {
-      ...validationDetails(request, spec, 'elementRef'),
-      expectedFormat: '@e<structureId>_<revision>',
-      value,
-      hint: 'Run snapshot and pass the returned element id, for example {"elementRef":"@e1jm0sbb_1"}. Use args.selector only for CSS fallback.'
-    });
-  }
-  const selector = request.args.selector;
-  if (selector !== undefined && selector !== null && selector !== '' && selector !== value) {
-    throw new ProtocolError('VALIDATION_ERROR', `elementRef and selector cannot target different elements for command '${request.command}'`, {
-      ...validationDetails(request, spec, 'elementRef'),
-      elementRef: value,
-      selector,
-      hint: 'Use either args.elementRef for a snapshot @e reference or args.selector for a CSS fallback, not both with different values.'
-    });
-  }
-  request.args.selector = value;
-}
-
 function validateRequiredOneOf(request: any, spec: CommandSpec) {
   const fields = spec.requiredOneOf || [];
   if (!fields.length) return;
@@ -280,7 +251,7 @@ function validateRequiredOneOf(request: any, spec: CommandSpec) {
   throw new ProtocolError('VALIDATION_ERROR', `${fields.join(' or ')} is required for command '${request.command}'`, {
     ...validationDetails(request, spec, fields[0]),
     requiredOneOf: fields,
-    hint: 'Prefer args.elementRef with a fresh snapshot @e reference. Use args.selector only for CSS fallback.'
+    hint: 'Prefer args.target with a fresh snapshot @e reference. Use args.target:"css=..." only for CSS fallback.'
   });
 }
 
@@ -381,7 +352,10 @@ function validationDetails(request: any, spec: CommandSpec, field: string): any 
   if (request.command === 'click' && Object.prototype.hasOwnProperty.call(request.args || {}, 'text')) {
     hints.push('click uses args.target for snapshot @e references. Run snapshot and click a returned element id; semantic click_text is deferred.');
   }
-  if (request.command === 'click' && ['elementRef', 'selector', 'strategy', 'force', 'button', 'clickCount', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab'].some(arg => Object.prototype.hasOwnProperty.call(request.args || {}, arg))) {
+  if (TARGET_COMMANDS.has(request.command) && LEGACY_TARGET_ARGS.some(arg => Object.prototype.hasOwnProperty.call(request.args || {}, arg))) {
+    hints.push(`${request.command} now accepts args.target for element targeting. Use {"target":"@e..."} or {"target":"css=..."} instead.`);
+  }
+  if (request.command === 'click' && ['strategy', 'force', 'button', 'clickCount', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab'].some(arg => Object.prototype.hasOwnProperty.call(request.args || {}, arg))) {
     hints.push('click now accepts args.target, optional args.after, and optional args.tabId. Use {"target":"@e..."} or {"target":"css=..."} instead.');
   }
   if (hints.length) {
@@ -454,7 +428,13 @@ export function createResultEnvelope(request: any, { ok, backend = 'extension', 
 
 export function mapNetworkCommand(command: string, args: any) {
   switch (command) {
-    case 'click': return { command, args: { ...args, selector: clickTargetToSelector(args?.target) } };
+    case 'click':
+    case 'click_probe':
+    case 'fill':
+    case 'press':
+    case 'scroll':
+    case 'upload':
+      return { command, args: mapTargetArgs(args) };
     case 'network_start': return { command: 'network', args: { ...args, cmd: 'start' } };
     case 'network_list': return { command: 'network', args: { ...args, cmd: 'list' } };
     case 'network_detail': return { command: 'network', args: { ...args, cmd: 'detail' } };
@@ -463,19 +443,20 @@ export function mapNetworkCommand(command: string, args: any) {
   }
 }
 
-function validateClickTarget(request: any, spec: CommandSpec) {
-  if (request.command !== 'click') return;
+function validateTargetArg(request: any, spec: CommandSpec) {
+  if (!TARGET_COMMANDS.has(request.command)) return;
+  if (!Object.prototype.hasOwnProperty.call(request.args || {}, 'target')) return;
   const value = request.args.target;
   if (typeof value !== 'string' || value.trim() === '') {
-    throw new ProtocolError('VALIDATION_ERROR', 'target must be a non-empty string for command \'click\'', {
+    throw new ProtocolError('VALIDATION_ERROR', `target must be a non-empty string for command '${request.command}'`, {
       ...validationDetails(request, spec, 'target'),
       expectedType: 'string',
       actualType: Array.isArray(value) ? 'array' : typeof value,
       hint: 'Use {"target":"@e1jm0sbb_1"} from snapshot, or {"target":"css=#save"} for an explicit CSS fallback.'
     });
   }
-  if (clickTargetToSelector(value)) return;
-  throw new ProtocolError('VALIDATION_ERROR', 'target must be an @e reference or explicit css= selector for command \'click\'', {
+  if (targetToSelector(value)) return;
+  throw new ProtocolError('VALIDATION_ERROR', `target must be an @e reference or explicit css= selector for command '${request.command}'`, {
     ...validationDetails(request, spec, 'target'),
     expectedFormat: '@e<structureId>_<revision> or css=<selector>',
     value,
@@ -496,7 +477,12 @@ function validateClickAfter(request: any, spec: CommandSpec) {
   });
 }
 
-function clickTargetToSelector(target: unknown): string | null {
+function mapTargetArgs(args: any) {
+  const selector = targetToSelector(args?.target);
+  return selector ? { ...args, selector } : args;
+}
+
+function targetToSelector(target: unknown): string | null {
   if (typeof target !== 'string') return null;
   const value = target.trim();
   if (ELEMENT_REF_PATTERN.test(value)) return value;

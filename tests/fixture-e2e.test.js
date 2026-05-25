@@ -103,7 +103,7 @@ test('fixture E2E: daemon validates commands and dispatches through extension We
 
   for (const [command, args] of [
     ['snapshot', {}],
-    ['click_probe', { selector: '@e1', filter: '/api/', waitMs: 10 }],
+    ['click_probe', { target: '@e1abc_1', filter: '/api/', waitMs: 10 }],
     ['press', { key: 'Enter' }],
     ['scroll', { strategy: 'dom', deltaY: 600 }],
     ['wait_for', { selector: '#done' }],

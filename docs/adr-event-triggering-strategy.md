@@ -17,7 +17,7 @@ Introduce a strategy-aware action layer for state-changing commands:
 - `fill.strategy`: `native_setter`, `text_input`, or `paste_like`.
 - `press.strategy`: `auto`, `cdp_keyboard`, or `dom_keyboard`.
 
-The public click command is intentionally small: `click({ target, after? })`, where `target` is a snapshot `@e` ref or an explicit `css=` fallback. `fill({ selector, value })` and `press({ key })` continue to validate. Fill/press strategy and diagnostics fields are additive.
+The public element-action command surface is intentionally small: `click({ target, after? })`, `fill({ target, value })`, `press({ key, target? })`, `scroll({ target?, ... })`, `click_probe({ target, ... })`, and `upload({ target, files })`, where `target` is a snapshot `@e` ref or an explicit `css=` fallback. Fill/press strategy and diagnostics fields are additive.
 
 Default `click` prefers CDP mouse input when debugger ownership is safe, otherwise it uses DOM pointer fallback. The DOM pointer path dispatches one coherent pointer/mouse sequence and must not call `el.click()` after a successful sequence.
 

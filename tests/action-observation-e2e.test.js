@@ -97,7 +97,7 @@ test('click after attaches changes and fill expectChange warns on no-delta actio
 
   const noDelta = await request('POST', '/command', {
     command: 'fill',
-    args: { selector: '@e2', value: 'draft', expectChange: true, observe: { includeNetwork: false, waitMs: 0 } },
+    args: { target: '@e2abc_1', value: 'draft', expectChange: true, observe: { includeNetwork: false, waitMs: 0 } },
     session: 'action-observe'
   });
   assert.equal(noDelta.status, 200);
@@ -192,7 +192,7 @@ test('action observation warning considers lightweight non-structural deltas', a
   });
   const changed = await localRequest('POST', '/command', {
     command: 'fill',
-    args: { selector: '@e1', value: 'draft', expectChange: true, observe: { includeNetwork: false, waitMs: 0 } },
+    args: { target: '@e1abc_1', value: 'draft', expectChange: true, observe: { includeNetwork: false, waitMs: 0 } },
     session: 'lightweight-delta'
   });
   assert.equal(changed.status, 200);

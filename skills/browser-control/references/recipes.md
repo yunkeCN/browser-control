@@ -80,7 +80,7 @@ Use when preparing form fields but not sending the form yet.
 1. Snapshot and identify each input/select/checkbox by `@e`.
 2. Fill fields:
    ```bash
-   node scripts/browser-control.js command fill --session form-draft --args '{"selector":"@e0field_1","value":"example text"}'
+   node scripts/browser-control.js command fill --session form-draft --args '{"target":"@e0field_1","value":"example text"}'
    node scripts/browser-control.js command click --session form-draft --args '{"target":"@e0select_1"}'
    node scripts/browser-control.js command press --session form-draft --args '{"key":"ArrowDown"}'
    node scripts/browser-control.js command press --session form-draft --args '{"key":"Enter"}'

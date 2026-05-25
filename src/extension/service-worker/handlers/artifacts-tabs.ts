@@ -5,13 +5,17 @@ import { performUpload } from '../page-runtime/upload-find';
 import type { CommandArgs, SessionName } from '../../shared/types';
 
 function targetSelector(args: CommandArgs = {}): string | undefined {
-  return typeof args?.elementRef === 'string' && args.elementRef ? args.elementRef : args?.selector;
+  if (typeof args?.target === 'string' && args.target) {
+    if (args.target.startsWith('css=')) return args.target.slice(4).trim();
+    return args.target;
+  }
+  return args?.selector;
 }
 
 export async function handleUpload(args: CommandArgs = {}, session: SessionName): Promise<any> {
   const { files } = args || {};
   const selector = targetSelector(args);
-  if (!selector) throw new Error('selector is required for upload');
+  if (!selector) throw new Error('target is required for upload');
   if (!files || !files.length) throw new Error('files array is required for upload');
 
   const tabId = args?.tabId || getActiveTabId(session);

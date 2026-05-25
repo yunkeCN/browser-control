@@ -23,7 +23,7 @@ const SNAPSHOT_FILTERING_HINTS = [
   'Use roles for actionable targets such as button, link, textbox, checkbox, radio, combobox, option, menuitem, tab, and heading.',
   'Use tags when a specific HTML element matters.',
   'Use hasVisibleText:true and viewportOnly:true to focus on visible UI.',
-  'Use get_text when the task is mainly reading long prose instead of choosing an elementRef.'
+  'Use get_text when the task is mainly reading long prose instead of choosing an element target.'
 ];
 
 function sanitizeName(name: unknown): string {

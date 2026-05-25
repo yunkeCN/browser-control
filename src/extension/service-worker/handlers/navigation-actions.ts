@@ -96,7 +96,7 @@ function targetSelector(args: CommandArgs = {}): string | undefined {
     if (args.target.startsWith('css=')) return args.target.slice(4).trim();
     return args.target;
   }
-  return typeof args?.elementRef === 'string' && args.elementRef ? args.elementRef : args?.selector;
+  return args?.selector;
 }
 
 async function focusTargetForCdpKeyboard(tabId: number, selector: unknown): Promise<any> {
@@ -203,7 +203,7 @@ export async function handleClick(args: CommandArgs = {}, session: SessionName):
 export async function handleClickProbe(args: CommandArgs = {}, session: SessionName): Promise<any> {
   const { tabId: argTabId } = args || {};
   const selector = targetSelector(args);
-  if (!selector) throw new Error('selector is required for click_probe');
+  if (!selector) throw new Error('target is required for click_probe');
 
   const tabId = argTabId || getActiveTabId(session);
   if (!tabId) throw new Error('No active tab in session');
@@ -275,7 +275,7 @@ async function performObservedClick(args: CommandArgs = {}, session: SessionName
 export async function handleFill(args: CommandArgs = {}, session: SessionName): Promise<any> {
   const { value } = args || {};
   const selector = targetSelector(args);
-  if (!selector) throw new Error('selector is required for fill');
+  if (!selector) throw new Error('target is required for fill');
   if (value === undefined) throw new Error('value is required for fill');
 
   const tabId = args?.tabId || getActiveTabId(session);

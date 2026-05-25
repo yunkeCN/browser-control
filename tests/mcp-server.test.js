@@ -234,13 +234,13 @@ test('mcp command covers every protocol command', async (t) => {
   const requiredArgs = {
     navigate: { url: 'https://example.com' },
     click: { target: '@e1jm0sbb_1' },
-    click_probe: { selector: '@e1jm0sbb_1' },
-    fill: { selector: '@e1jm0sbb_1', value: 'hello' },
+    click_probe: { target: '@e1jm0sbb_1' },
+    fill: { target: '@e1jm0sbb_1', value: 'hello' },
     press: { key: 'Enter' },
     evaluate: { code: 'return document.title' },
     observe_diff: { baselineId: 'obs_test' },
     network_detail: { requestId: 'req_test' },
-    upload: { selector: '@e1jm0sbb_1', files: ['/tmp/example.txt'] },
+    upload: { target: '@e1jm0sbb_1', files: ['/tmp/example.txt'] },
     download: { url: 'https://example.com/file.txt' }
   };
 
@@ -319,7 +319,7 @@ test('mcp command returns structured validation feedback', async (t) => {
 
   const hint = await client.callTool({
     name: 'browser_control_command',
-    arguments: { command: 'fill', args: { selector: '@e1', text: 'wrong' } }
+    arguments: { command: 'fill', args: { target: '@e1jm0sbb_1', text: 'wrong' } }
   });
   assert.equal(hint.isError, true);
   assert.match(JSON.stringify(hint.structuredContent.error.hints), /value.*text/);

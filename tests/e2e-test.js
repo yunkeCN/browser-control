@@ -202,14 +202,14 @@ async function main() {
 
     if (inputRef) {
       info('Test 5: Fill in the email input');
-      const fill = await apiCall('fill', { selector: inputRef, value: 'test@agentbrowser.dev' });
+      const fill = await apiCall('fill', { target: inputRef, value: 'test@agentbrowser.dev' });
       check('fill ok', true, fill?.ok === true);
       info(`  Fill mode: ${fill?.data?.mode || 'unknown'}`);
     }
 
     if (probeRef) {
       info('Test 5b: Probe click captures and blocks API request');
-      const probe = await apiCall('click_probe', { selector: probeRef, filter: '/probe-write', waitMs: 500 });
+      const probe = await apiCall('click_probe', { target: probeRef, filter: '/probe-write', waitMs: 500 });
       check('click_probe ok', true, probe?.ok === true);
       check('click_probe intercepted one request', 1, probe?.data?.probe?.interceptedCount || 0);
       check('click_probe method', 'POST', probe?.data?.probe?.requests?.[0]?.method || '');
@@ -221,7 +221,7 @@ async function main() {
     info('Test 6: Interact with form controls');
     check('checkbox click ok', true, (await apiCall('click', { target: 'css=#active' }))?.ok === true);
     check('wait_for ok', true, (await apiCall('wait_for', { selector: '#dynamic', timeoutMs: 5000 }))?.ok === true);
-    check('press ok', true, (await apiCall('press', { selector: '#email', key: 'Enter' }))?.ok === true);
+    check('press ok', true, (await apiCall('press', { target: 'css=#email', key: 'Enter' }))?.ok === true);
 
     if (buttonRef) {
       info('Test 7: Click the submit button and trigger fixture API request');

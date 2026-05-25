@@ -9,8 +9,7 @@ const envelopeSchema = {
 
 const tabId = z.number().int().positive().optional();
 const selector = z.string().min(1);
-const elementRef = z.string().min(1).regex(/^@e[^\s_]+_\d+$/, 'must be an @e<structureId>_<revision> reference from snapshot');
-const clickTarget = z.string().min(1).refine(value => /^@e[^\s_]+_\d+$/.test(value) || (value.startsWith('css=') && value.slice(4).trim().length > 0), {
+const elementTarget = z.string().min(1).refine(value => /^@e[^\s_]+_\d+$/.test(value) || (value.startsWith('css=') && value.slice(4).trim().length > 0), {
   message: 'must be an @e<structureId>_<revision> reference from snapshot or an explicit css=<selector> fallback'
 });
 const observeOptions = z.object({
@@ -45,13 +44,12 @@ export const commandArgSchemas = {
     boxes: z.boolean().optional()
   }).strict(),
   click: z.object({
-    target: clickTarget,
+    target: elementTarget,
     tabId,
     after: z.enum(['auto', 'none', 'changes', 'snapshot']).optional()
   }).strict(),
   click_probe: z.object({
-    elementRef: elementRef.optional(),
-    selector: selector.optional(),
+    target: elementTarget,
     tabId,
     strategy: z.enum(['auto', 'cdp_mouse', 'dom_pointer', 'element_click']).optional(),
     force: z.boolean().optional(),
@@ -68,8 +66,7 @@ export const commandArgSchemas = {
     maxRequests: z.number().int().positive().optional()
   }).strict(),
   fill: z.object({
-    elementRef: elementRef.optional(),
-    selector: selector.optional(),
+    target: elementTarget,
     value: z.string(),
     tabId,
     strategy: z.enum(['native_setter', 'text_input', 'paste_like']).optional(),
@@ -80,8 +77,7 @@ export const commandArgSchemas = {
   }).strict(),
   press: z.object({
     key: z.string().min(1),
-    elementRef: elementRef.optional(),
-    selector: selector.optional(),
+    target: elementTarget.optional(),
     tabId,
     strategy: z.enum(['auto', 'cdp_keyboard', 'dom_keyboard']).optional(),
     modifiers: z.array(z.string()).optional(),
@@ -91,9 +87,8 @@ export const commandArgSchemas = {
     expectNewTab: z.boolean().optional()
   }).strict(),
   scroll: z.object({
-    elementRef: elementRef.optional(),
+    target: elementTarget.optional(),
     tabId,
-    selector: selector.optional(),
     strategy: z.enum(['auto', 'dom', 'wheel']).optional(),
     deltaX: z.number().optional(),
     deltaY: z.number().optional(),
@@ -160,7 +155,7 @@ export const commandArgSchemas = {
   }).strict(),
   network_detail: z.object({ requestId: z.string().min(1) }).strict(),
   network_stop: z.object({}).strict(),
-  upload: z.object({ elementRef: elementRef.optional(), selector: selector.optional(), files: z.array(z.string().min(1)), tabId }).strict(),
+  upload: z.object({ target: elementTarget, files: z.array(z.string().min(1)), tabId }).strict(),
   download: z.object({ url: z.string().min(1), filename: z.string().optional(), saveAs: z.boolean().optional() }).strict(),
   get_text: z.object({
     tabId,
