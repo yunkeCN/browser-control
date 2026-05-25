@@ -11,7 +11,8 @@ const MIME_BY_KIND: Record<string, Record<string, string>> = {
   pdf: { pdf: 'application/pdf' },
   download: { bin: 'application/octet-stream' },
   network: { txt: 'text/plain', json: 'application/json', bin: 'application/octet-stream' },
-  observation: { json: 'application/json', txt: 'text/plain' }
+  observation: { json: 'application/json', txt: 'text/plain' },
+  snapshot: { json: 'application/json' }
 };
 
 function sanitizeName(name: unknown): string {
@@ -90,6 +91,15 @@ export function extractArtifacts(command: string, result: any, store = new Artif
     if (artifact) artifacts.push(artifact);
     delete data.data;
     data.artifact = artifact;
+  }
+
+  if (command === 'snapshot') {
+    const artifact = store.writeText('snapshot', JSON.stringify(result, null, 2), {
+      ext: 'json',
+      name: 'snapshot',
+      mimeType: 'application/json'
+    });
+    if (artifact) artifacts.push(artifact);
   }
 
   if (command === 'save_as_pdf' && result.data) {

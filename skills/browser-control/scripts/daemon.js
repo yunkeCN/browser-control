@@ -3831,7 +3831,10 @@ function validateKnownArgs(request, spec) {
     hints.unshift("Use args.requestId from network_list; numeric index is not part of the network_detail protocol.");
   }
   if (request.command === "click" && field === "text") {
-    hints.unshift("click uses args.selector. Run snapshot and click an @e selector; semantic click_text is deferred.");
+    hints.unshift("click uses args.selector. To click visible text, call snapshot with args.textIncludes and args.maxElements, then click the returned @e selector.");
+  }
+  if (request.command === "get_text" && field === "selectors") {
+    hints.unshift("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes.");
   }
   throw new ProtocolError("VALIDATION_ERROR", `Unknown argument '${field}' for command '${request.command}'`, {
     field,
@@ -3993,11 +3996,11 @@ function createResultEnvelope(request, { ok, backend = "extension", tab = null, 
     backend,
     session: request.session,
     tab,
+    artifacts,
     startedAt: started,
     endedAt,
     durationMs: Math.max(0, new Date(endedAt).getTime() - new Date(started).getTime()),
     data,
-    artifacts,
     error,
     diagnostics
   };
@@ -4029,7 +4032,8 @@ var MIME_BY_KIND = {
   pdf: { pdf: "application/pdf" },
   download: { bin: "application/octet-stream" },
   network: { txt: "text/plain", json: "application/json", bin: "application/octet-stream" },
-  observation: { json: "application/json", txt: "text/plain" }
+  observation: { json: "application/json", txt: "text/plain" },
+  snapshot: { json: "application/json" }
 };
 function sanitizeName(name) {
   return String(name || "artifact").replace(/[/\\?%*:|"<>]/g, "-").replace(/\s+/g, "-").slice(0, 120) || "artifact";
@@ -4096,6 +4100,14 @@ function extractArtifacts(command, result, store = new ArtifactStore()) {
     if (artifact) artifacts.push(artifact);
     delete data.data;
     data.artifact = artifact;
+  }
+  if (command === "snapshot") {
+    const artifact = store.writeText("snapshot", JSON.stringify(result, null, 2), {
+      ext: "json",
+      name: "snapshot",
+      mimeType: "application/json"
+    });
+    if (artifact) artifacts.push(artifact);
   }
   if (command === "save_as_pdf" && result.data) {
     const artifact = store.writeBase64("pdf", result.data, {

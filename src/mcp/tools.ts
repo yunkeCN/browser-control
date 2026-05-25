@@ -31,6 +31,7 @@ function registerCompactTools(server: McpServer, client: DaemonClient, sessions:
       'Run any low-level Browser Control protocol command through the local daemon.',
       'Input shape: command, optional args object, optional session, timeoutMs, and id.',
       'Session is managed automatically by this MCP server process. Omit session for normal use; pass session only for advanced isolation.',
+      'Before clicking by visible text, call snapshot with args.textIncludes plus maxElements to get a small set of @e references.',
       'Use browser_control_close_session at the end of a task. The MCP server validates command args and returns structured hints, but does not perform user confirmation.'
     ].join('\n\n'),
     inputSchema: unifiedCommandInputSchema
@@ -185,6 +186,11 @@ function hintsFor(command: CommandName, args: Record<string, unknown>, issues: u
   const hints: string[] = [];
   const keys = new Set(Object.keys(args));
   if (command === 'fill' && keys.has('text')) hints.push('fill uses args.value, not args.text.');
+  if (command === 'click' && keys.has('text')) hints.push('click uses args.selector. To click visible text, first call snapshot with args.textIncludes and args.maxElements, then click the returned @e selector.');
+  if (command === 'get_text' && keys.has('selectors')) hints.push('get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes instead.');
+  if (command === 'evaluate' && keys.has('expression')) hints.push('evaluate uses args.code, not args.expression.');
+  if (command === 'wait_for' && keys.has('timeMs')) hints.push('wait_for uses args.timeoutMs, not args.timeMs.');
+  if (command === 'network_detail' && keys.has('index')) hints.push('network_detail uses args.requestId from network_list.requests[].id, not a numeric index.');
   if (command === 'find_tab' && keys.has('urlContains')) hints.push('find_tab uses args.urlIncludes, not args.urlContains.');
   if (command === 'find_tab' && keys.has('titleContains')) hints.push('find_tab uses args.titleIncludes, not args.titleContains.');
   if (command === 'close_session') hints.push('Prefer the dedicated browser_control_close_session tool for cleanup.');

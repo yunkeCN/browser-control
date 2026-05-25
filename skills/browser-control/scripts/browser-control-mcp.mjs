@@ -34746,7 +34746,10 @@ function validateKnownArgs(request, spec) {
     hints.unshift("Use args.requestId from network_list; numeric index is not part of the network_detail protocol.");
   }
   if (request.command === "click" && field === "text") {
-    hints.unshift("click uses args.selector. Run snapshot and click an @e selector; semantic click_text is deferred.");
+    hints.unshift("click uses args.selector. To click visible text, call snapshot with args.textIncludes and args.maxElements, then click the returned @e selector.");
+  }
+  if (request.command === "get_text" && field === "selectors") {
+    hints.unshift("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes.");
   }
   throw new ProtocolError("VALIDATION_ERROR", `Unknown argument '${field}' for command '${request.command}'`, {
     field,
@@ -34908,11 +34911,11 @@ function createResultEnvelope(request, { ok, backend = "extension", tab = null, 
     backend,
     session: request.session,
     tab,
+    artifacts,
     startedAt: started,
     endedAt,
     durationMs: Math.max(0, new Date(endedAt).getTime() - new Date(started).getTime()),
     data,
-    artifacts,
     error: error51,
     diagnostics
   };
@@ -35634,6 +35637,7 @@ function registerCompactTools(server, client, sessions) {
       "Run any low-level Browser Control protocol command through the local daemon.",
       "Input shape: command, optional args object, optional session, timeoutMs, and id.",
       "Session is managed automatically by this MCP server process. Omit session for normal use; pass session only for advanced isolation.",
+      "Before clicking by visible text, call snapshot with args.textIncludes plus maxElements to get a small set of @e references.",
       "Use browser_control_close_session at the end of a task. The MCP server validates command args and returns structured hints, but does not perform user confirmation."
     ].join("\n\n"),
     inputSchema: unifiedCommandInputSchema
@@ -35770,6 +35774,11 @@ function hintsFor(command, args, issues) {
   const hints = [];
   const keys = new Set(Object.keys(args));
   if (command === "fill" && keys.has("text")) hints.push("fill uses args.value, not args.text.");
+  if (command === "click" && keys.has("text")) hints.push("click uses args.selector. To click visible text, first call snapshot with args.textIncludes and args.maxElements, then click the returned @e selector.");
+  if (command === "get_text" && keys.has("selectors")) hints.push("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes instead.");
+  if (command === "evaluate" && keys.has("expression")) hints.push("evaluate uses args.code, not args.expression.");
+  if (command === "wait_for" && keys.has("timeMs")) hints.push("wait_for uses args.timeoutMs, not args.timeMs.");
+  if (command === "network_detail" && keys.has("index")) hints.push("network_detail uses args.requestId from network_list.requests[].id, not a numeric index.");
   if (command === "find_tab" && keys.has("urlContains")) hints.push("find_tab uses args.urlIncludes, not args.urlContains.");
   if (command === "find_tab" && keys.has("titleContains")) hints.push("find_tab uses args.titleIncludes, not args.titleContains.");
   if (command === "close_session") hints.push("Prefer the dedicated browser_control_close_session tool for cleanup.");
@@ -35852,6 +35861,7 @@ function registerBrowserControlPrompts(server) {
     "Use browser_control_command for browser actions and observations.",
     "The MCP server manages an active session automatically; omit session unless you intentionally need a separate session.",
     "Typical loop: navigate -> snapshot -> use @e ids for click/fill/press -> get_text/screenshot for reading -> browser_control_close_session when done.",
+    "When you need to click or fill an element by visible text, do not request a huge snapshot. Use snapshot with textIncludes, hasVisibleText, viewportOnly, and maxElements to get a small list of @e references, then click/fill the chosen @e.",
     "Do not build Google or YouTube search URLs with query parameters when a task asks for real UI usage; navigate to the homepage and operate the search box.",
     "Prefer snapshot before element actions and prefer @e references from the latest snapshot."
   ].join("\n")));
@@ -35874,6 +35884,7 @@ function registerBrowserControlPrompts(server) {
       "Common examples:",
       '{"command":"navigate","args":{"url":"https://example.com"}}',
       '{"command":"snapshot","args":{"viewportOnly":true,"maxElements":120}}',
+      '{"command":"snapshot","args":{"textIncludes":"Submit","hasVisibleText":true,"viewportOnly":true,"maxElements":10}}',
       '{"command":"click","args":{"selector":"@eabc_1","expectChange":true}}',
       '{"command":"fill","args":{"selector":"@eabc_1","value":"draft","clear":true}}',
       '{"command":"press","args":{"key":"Enter","expectChange":true}}',
@@ -35922,7 +35933,8 @@ var MIME_BY_KIND = {
   pdf: { pdf: "application/pdf" },
   download: { bin: "application/octet-stream" },
   network: { txt: "text/plain", json: "application/json", bin: "application/octet-stream" },
-  observation: { json: "application/json", txt: "text/plain" }
+  observation: { json: "application/json", txt: "text/plain" },
+  snapshot: { json: "application/json" }
 };
 function sanitizeName(name) {
   return String(name || "artifact").replace(/[/\\?%*:|"<>]/g, "-").replace(/\s+/g, "-").slice(0, 120) || "artifact";
@@ -35989,6 +36001,14 @@ function extractArtifacts(command, result, store = new ArtifactStore()) {
     if (artifact) artifacts.push(artifact);
     delete data.data;
     data.artifact = artifact;
+  }
+  if (command === "snapshot") {
+    const artifact = store.writeText("snapshot", JSON.stringify(result, null, 2), {
+      ext: "json",
+      name: "snapshot",
+      mimeType: "application/json"
+    });
+    if (artifact) artifacts.push(artifact);
   }
   if (command === "save_as_pdf" && result.data) {
     const artifact = store.writeBase64("pdf", result.data, {

@@ -28,6 +28,24 @@ test('large network bodies are artifacted by default', () => {
   assert.ok(result.data.bodyArtifact.path.endsWith('.txt'));
 });
 
+test('snapshot writes a JSON artifact without changing returned data', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-control-snapshot-'));
+  const snapshot = {
+    schemaVersion: 2,
+    elements: [{ id: '@e1', tag: 'button', visibleText: 'Submit' }],
+    returned: 1,
+    truncated: false
+  };
+  const result = extractArtifacts('snapshot', snapshot, new ArtifactStore(dir));
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].kind, 'snapshot');
+  assert.equal(result.artifacts[0].mimeType, 'application/json');
+  assert.deepEqual(result.data, snapshot);
+  assert.ok(fs.existsSync(result.artifacts[0].path));
+  const saved = JSON.parse(fs.readFileSync(result.artifacts[0].path, 'utf8'));
+  assert.deepEqual(saved, snapshot);
+});
+
 test('truncated get_text full output is artifacted and stripped from response', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-control-get-text-'));
   const result = extractArtifacts('get_text', {

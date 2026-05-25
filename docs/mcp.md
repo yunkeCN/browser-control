@@ -89,6 +89,25 @@ Use environment variables for non-default daemon settings:
 - `timeoutMs`: optional command timeout.
 - `id`: optional request id.
 
+For element actions, prefer `snapshot` to get `@e` references, then pass the chosen `@e` as `click`/`fill`/`press` `selector`. To avoid large snapshots when looking for visible text, filter first:
+
+```json
+{
+  "name": "browser_control_command",
+  "arguments": {
+    "command": "snapshot",
+    "args": {
+      "textIncludes": "新增工单",
+      "hasVisibleText": true,
+      "viewportOnly": true,
+      "maxElements": 10
+    }
+  }
+}
+```
+
+Snapshot responses keep their existing `data` shape and clipping behavior, and also include a top-level `artifacts` entry before `data`, so clients can find the same snapshot payload as a JSON artifact even when they truncate large tool output.
+
 The server also provides prompts:
 
 - `browser_control_usage`

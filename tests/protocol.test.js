@@ -193,6 +193,7 @@ test('result envelope contains stable agent-facing metadata', () => {
   assert.equal(envelope.durationMs, 1000);
   assert.equal(envelope.artifacts[0].kind, 'pdf');
   assert.equal(envelope.error, null);
+  assert.ok(Object.keys(envelope).indexOf('artifacts') < Object.keys(envelope).indexOf('data'));
 });
 
 test('discrete network commands map to extension network command shape', () => {

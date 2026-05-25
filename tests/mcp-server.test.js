@@ -159,6 +159,7 @@ test('mcp server registers default tools plus prompts', async (t) => {
   const reference = await client.getPrompt({ name: 'browser_control_command_reference' });
   assert.match(reference.messages[0].content.text, /navigate/);
   assert.match(reference.messages[0].content.text, /get_text/);
+  assert.match(reference.messages[0].content.text, /textIncludes/);
 });
 
 test('mcp command forwards protocol envelopes and manages sessions', async (t) => {
