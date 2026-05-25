@@ -18,8 +18,8 @@ AI Agent → skills/browser-control/scripts/browser-control.js → localhost HTT
 | `src/daemon/` | Editable daemon server and process-management source. |
 | `src/extension/` | Editable Chrome MV3 extension TypeScript source. |
 | `src/mcp/` | Editable MCP server source, independent from the skill package. |
-| `skills/browser-control/` | Self-contained Agent-facing skill package: `SKILL.md`, references, CLI/runtime scripts, generated daemon/protocol runtime, generated Chrome extension, diagnostics, artifact helpers, session utilities. |
-| `bin/browser-control-mcp.mjs` | Generated single-file MCP runtime. |
+| `skills/browser-control/` | Self-contained Agent-facing skill package: `SKILL.md`, references, CLI/runtime scripts, generated daemon/protocol/MCP runtime, generated Chrome extension, diagnostics, artifact helpers, session utilities. |
+| `bin/browser-control-mcp.mjs` | Generated root copy of the single-file MCP runtime. |
 
 Repository support paths:
 

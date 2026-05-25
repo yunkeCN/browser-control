@@ -46,24 +46,29 @@ test('skill-local script package points at browser-control.js', () => {
   const pkg = require(path.join(root, 'skills', 'browser-control', 'scripts', 'package.json'));
   assert.equal(pkg.version, rootPkg.version);
   assert.equal(pkg.bin['browser-control'], './browser-control.js');
-  assert.equal(pkg.bin['browser-control-mcp'], undefined);
+  assert.equal(pkg.bin['browser-control-mcp'], './browser-control-mcp.mjs');
   assert.equal(pkg.scripts.cli, 'node browser-control.js');
+  assert.match(pkg.scripts.typecheck, /browser-control-mcp\.mjs/);
   assert.equal(pkg.scripts.build, undefined);
   assert.equal(pkg.dependencies, undefined);
   assert.doesNotMatch(JSON.stringify(pkg), /cli\\.js/);
 });
 
 test('mcp helper is generated and syntactically valid', () => {
-  const script = path.join(root, 'bin', 'browser-control-mcp.mjs');
-  assert.equal(fs.existsSync(script), true, 'browser-control-mcp.mjs should exist after npm run build');
-  const syntax = spawnSync(process.execPath, ['--check', script], { encoding: 'utf8' });
-  assert.equal(syntax.status, 0, syntax.stderr || syntax.stdout);
-  const source = fs.readFileSync(script, 'utf8');
-  assert.match(source, /browser_control_command/);
-  assert.match(source, /browser_control_close_session/);
-  assert.match(source, /browser_control_status/);
-  assert.match(source, /browser_control_doctor/);
-  assert.match(source, /McpServer/);
+  for (const script of [
+    path.join(root, 'bin', 'browser-control-mcp.mjs'),
+    path.join(root, 'skills', 'browser-control', 'scripts', 'browser-control-mcp.mjs')
+  ]) {
+    assert.equal(fs.existsSync(script), true, `${path.relative(root, script)} should exist after npm run build`);
+    const syntax = spawnSync(process.execPath, ['--check', script], { encoding: 'utf8' });
+    assert.equal(syntax.status, 0, syntax.stderr || syntax.stdout);
+    const source = fs.readFileSync(script, 'utf8');
+    assert.match(source, /browser_control_command/);
+    assert.match(source, /browser_control_close_session/);
+    assert.match(source, /browser_control_status/);
+    assert.match(source, /browser_control_doctor/);
+    assert.match(source, /McpServer/);
+  }
 });
 
 test('screenshot helper is syntactically valid and handles artifact-backed responses', () => {

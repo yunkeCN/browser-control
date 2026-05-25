@@ -11,6 +11,7 @@ const rootPkg = require('../package.json');
 
 const root = path.resolve(__dirname, '..');
 const mcpServer = path.join(root, 'bin', 'browser-control-mcp.mjs');
+const skillMcpServer = path.join(root, 'skills', 'browser-control', 'scripts', 'browser-control-mcp.mjs');
 
 function createFakeDaemon(handler = {}) {
   const requests = [];
@@ -384,14 +385,38 @@ test('copied mcp helper runs with bundled protocol and daemon module runtime', a
   assert.equal(fs.existsSync(path.join(home, 'mcp-runtime')), false);
 });
 
-test('root mcp docs stay independent from the skill package', () => {
+test('skill-packaged mcp helper runs with bundled protocol and daemon module runtime', async (t) => {
+  assert.equal(fs.existsSync(skillMcpServer), true);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-control-mcp-skill-home-'));
+  const port = await freePort();
+  const { client } = await withMcpClient(t, {
+    BROWSER_CONTROL_PORT: String(port),
+    BROWSER_CONTROL_HOME: home
+  }, { server: skillMcpServer, cwd: path.dirname(skillMcpServer) });
+  t.after(async () => {
+    await stopDaemonFromHome(home);
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const listed = await client.listTools();
+  assert.ok(listed.tools.some(tool => tool.name === 'browser_control_command'));
+  const result = await client.callTool({ name: 'browser_control_status', arguments: {} });
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.compatible, true);
+  assert.ok(['started', 'reused'].includes(result.structuredContent.action));
+  assert.equal(result.structuredContent.status.version, rootPkg.version);
+});
+
+test('root mcp docs describe skill-packaged runtime without adding skill docs', () => {
   const docs = fs.readFileSync(path.join(root, 'docs', 'mcp.md'), 'utf8');
   assert.match(docs, /"mcpServers"/);
   assert.match(docs, /browser-control-mcp/);
   assert.match(docs, /bin\/browser-control-mcp\.mjs/);
-  assert.match(docs, /single-file/i);
-  assert.match(docs, /independent from the `skills\/browser-control` package/);
-  assert.match(docs, /does not perform user confirmation/i);
+  assert.match(docs, /skills\/browser-control\/scripts\/browser-control-mcp\.mjs/);
+  assert.match(docs, /self-contained/i);
+  assert.match(docs, /stdio MCP server/i);
+  assert.match(docs, /installed Skill package/i);
+  assert.match(docs, /does not ask the user for confirmation/i);
 
   assert.equal(fs.existsSync(path.join(root, 'skills', 'browser-control', 'references', 'mcp.md')), false);
   assert.equal(fs.existsSync(path.join(root, 'skills', 'browser-control', 'scripts', 'mcp-server.mjs')), false);

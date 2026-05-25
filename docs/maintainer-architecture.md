@@ -26,7 +26,7 @@ MCP client
   -> Chrome DOM
 ```
 
-The MCP server is independent from the Skill package. It reuses the same protocol source and daemon module, but its code, prompts, docs, and generated runtime live outside `skills/browser-control/`.
+The MCP server reuses the same protocol source and daemon module. Its source, prompts, and docs live outside `skills/browser-control/`; `npm run build:mcp` copies the generated single-file runtime into the Skill scripts directory for release.
 
 ## Maintainer Source
 
@@ -40,7 +40,7 @@ The MCP server is independent from the Skill package. It reuses the same protoco
 | `scripts/build-extension.mjs` | Builds the loadable extension into the Skill package. |
 | `scripts/build-protocol.mjs` | Bundles the protocol runtime into the Skill package. |
 | `scripts/build-daemon.mjs` | Bundles the daemon runtime into the Skill package. |
-| `scripts/build-mcp.mjs` | Bundles the MCP runtime into `bin/browser-control-mcp.mjs`. |
+| `scripts/build-mcp.mjs` | Bundles the MCP runtime into `bin/browser-control-mcp.mjs` and `skills/browser-control/scripts/browser-control-mcp.mjs`. |
 | `scripts/check-extension-build-drift.mjs` | Verifies generated extension output is in sync. |
 | `.github/workflows/release.yml` | Builds release assets on tag pushes. |
 | `tests/` | Protocol, daemon, package entrypoint, artifact, extension, and e2e regression tests. |
@@ -52,7 +52,7 @@ The MCP server is independent from the Skill package. It reuses the same protoco
 | --- | --- |
 | `skills/browser-control/SKILL.md` | Agent-facing instructions and safety boundaries. |
 | `skills/browser-control/references/` | Progressive-disclosure API docs, recipes, setup, and troubleshooting. |
-| `skills/browser-control/scripts/` | CLI, generated daemon/protocol runtime, diagnostics, screenshot helper, support helpers, and session cleanup. |
+| `skills/browser-control/scripts/` | CLI, generated daemon/protocol/MCP runtime, diagnostics, screenshot helper, support helpers, and session cleanup. |
 | `skills/browser-control/extension/` | Generated Chrome extension directory for Load unpacked. |
 
 The Skill package is intentionally self-contained so a user can install only `skills/browser-control/`, start the daemon, and load the bundled extension without running `npm install` or building TypeScript.
@@ -61,7 +61,7 @@ Tag-triggered GitHub releases publish two zip files: a complete `browser-control
 
 ## Build Boundary
 
-Maintain extension behavior in `src/extension/**`, daemon behavior in `src/daemon/**`, and protocol validation in `src/protocol.ts`. Run `npm run build` after source changes to regenerate `skills/browser-control/extension/**`, `skills/browser-control/scripts/protocol.js`, `skills/browser-control/scripts/daemon.js`, and the MCP runtime.
+Maintain extension behavior in `src/extension/**`, daemon behavior in `src/daemon/**`, MCP behavior in `src/mcp/**`, and protocol validation in `src/protocol.ts`. Run `npm run build` after source changes to regenerate `skills/browser-control/extension/**`, `skills/browser-control/scripts/protocol.js`, `skills/browser-control/scripts/daemon.js`, `skills/browser-control/scripts/browser-control-mcp.mjs`, and `bin/browser-control-mcp.mjs`.
 
 Do not hand-edit generated extension output unless the change is part of debugging and is immediately carried back to `src/extension/**`.
 

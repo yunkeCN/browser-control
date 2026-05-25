@@ -5,8 +5,10 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outFile = path.join(root, 'bin', 'browser-control-mcp.mjs');
+const skillOutFile = path.join(root, 'skills', 'browser-control', 'scripts', 'browser-control-mcp.mjs');
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 fs.mkdirSync(path.dirname(outFile), { recursive: true });
+fs.mkdirSync(path.dirname(skillOutFile), { recursive: true });
 
 await build({
   entryPoints: [path.join(root, 'src', 'mcp', 'server.ts')],
@@ -32,4 +34,6 @@ await build({
 });
 
 fs.chmodSync(outFile, 0o755);
-console.log(`mcp build ok: ${path.relative(root, outFile)}`);
+fs.copyFileSync(outFile, skillOutFile);
+fs.chmodSync(skillOutFile, 0o755);
+console.log(`mcp build ok: ${path.relative(root, outFile)} and ${path.relative(root, skillOutFile)}`);

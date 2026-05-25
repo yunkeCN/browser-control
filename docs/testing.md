@@ -19,9 +19,9 @@ These checks cover protocol validation, artifact extraction, daemon HTTP behavio
 - `src/extension/` -> `skills/browser-control/extension/`
 - `src/protocol.ts` -> `skills/browser-control/scripts/protocol.js`
 - `src/daemon/**` -> `skills/browser-control/scripts/daemon.js`
-- `src/mcp/**` plus daemon/protocol modules -> `bin/browser-control-mcp.mjs`
+- `src/mcp/**` plus daemon/protocol modules -> `bin/browser-control-mcp.mjs` and `skills/browser-control/scripts/browser-control-mcp.mjs`
 
-The generated extension, protocol, and daemon output are part of the published Skill package. The generated MCP runtime is the root package's `browser-control-mcp` bin target. Keep all generated output in sync with TypeScript source before releasing.
+The generated extension, protocol, daemon, and Skill-packaged MCP output are part of the published Skill package. The generated root MCP runtime is the root package's `browser-control-mcp` bin target. Keep all generated output in sync with TypeScript source before releasing.
 
 ## Fixture E2E
 

@@ -122,7 +122,7 @@ Snapshot and observation commands redact likely sensitive field values such as p
 
 Tagged GitHub releases publish two archives:
 
-- `browser-control-skill-<tag>.zip`: the complete `browser-control/` Skill directory, including `SKILL.md`, `scripts/`, `references/`, `extension/`, and the bundled daemon runtime.
+- `browser-control-skill-<tag>.zip`: the complete `browser-control/` Skill directory, including `SKILL.md`, `scripts/`, `references/`, `extension/`, the bundled daemon runtime, and `scripts/browser-control-mcp.mjs`.
 - `browser-control-extension-<tag>.zip`: only the Chrome `extension/` directory, for users who just want to load the browser extension.
 
 Download release packages from <https://github.com/yunkeCN/browser-control/releases>.
@@ -144,7 +144,7 @@ browser-control/
 └── package.json               # Development scripts and dependencies
 ```
 
-Generated Skill output is committed under `skills/browser-control/`: the loadable extension lives in `extension/`, and generated protocol/daemon runtime files live in `scripts/`. The MCP runtime is generated at `bin/browser-control-mcp.mjs`.
+Generated Skill output is committed under `skills/browser-control/`: the loadable extension lives in `extension/`, and generated protocol/daemon/MCP runtime files live in `scripts/`. A root copy of the MCP runtime is also generated at `bin/browser-control-mcp.mjs`.
 
 ## Development
 
