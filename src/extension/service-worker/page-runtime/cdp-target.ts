@@ -37,6 +37,68 @@ export function resolveClickTargetForCdp(selector: string, options: any = {}): a
     };
   }
 
+  function localOwnerDocument(el: Element): Document {
+    return el.ownerDocument || document;
+  }
+
+  function localOwnerWindow(el: Element): Window {
+    return localOwnerDocument(el).defaultView || window;
+  }
+
+  function localFramePath(ownerWindow: Window, frameClientX: number, frameClientY: number): any {
+    let topClientX = frameClientX;
+    let topClientY = frameClientY;
+    const frames: any[] = [];
+    let currentWindow: any = ownerWindow;
+
+    while (currentWindow && currentWindow !== window) {
+      let frameElement: Element | null = null;
+      try {
+        frameElement = currentWindow.frameElement as Element | null;
+      } catch {
+        frameElement = null;
+      }
+      if (!frameElement)
+        break;
+
+      const rect = frameElement.getBoundingClientRect();
+      const clientLeft = Number((frameElement as HTMLElement).clientLeft || 0);
+      const clientTop = Number((frameElement as HTMLElement).clientTop || 0);
+      topClientX += rect.left + clientLeft;
+      topClientY += rect.top + clientTop;
+      frames.push({ element: frameElement, rect, clientLeft, clientTop });
+
+      try {
+        if (!currentWindow.parent || currentWindow.parent === currentWindow)
+          break;
+        currentWindow = currentWindow.parent;
+      } catch {
+        break;
+      }
+    }
+
+    return {
+      frames,
+      frameDepth: frames.length,
+      topFrameElement: frames.length ? frames[frames.length - 1].element : null,
+      topClientX: Math.round(topClientX),
+      topClientY: Math.round(topClientY)
+    };
+  }
+
+  function localFramePathSummary(frames: any[]): any[] {
+    return frames.map((frame, index) => ({
+      index,
+      element: localDescribeElement(frame.element),
+      rect: frame.rect ? {
+        x: Math.round(frame.rect.left),
+        y: Math.round(frame.rect.top),
+        width: Math.round(frame.rect.width),
+        height: Math.round(frame.rect.height)
+      } : null
+    }));
+  }
+
   const found = localFindElement(selector);
   if (found?.error) return found.error;
   const el = found?.element;
@@ -48,16 +110,35 @@ export function resolveClickTargetForCdp(selector: string, options: any = {}): a
     return { error: `Element is not clickable because it has no visible box: ${selector}`, recoverable: true, strategyUsed: 'cdp_mouse' };
   }
 
-  const clientX = Math.round(rect.left + rect.width / 2);
-  const clientY = Math.round(rect.top + rect.height / 2);
-  const hit = document.elementFromPoint?.(clientX, clientY) || el;
-  const hitWithinTarget = hit === el || Boolean(el.contains?.(hit));
+  const ownerDocument = localOwnerDocument(el);
+  const ownerWindow = localOwnerWindow(el);
+  const frameClientX = Math.round(rect.left + rect.width / 2);
+  const frameClientY = Math.round(rect.top + rect.height / 2);
+  const framePath = localFramePath(ownerWindow, frameClientX, frameClientY);
+  const frameHit = ownerDocument.elementFromPoint?.(frameClientX, frameClientY) || el;
+  const frameHitWithinTarget = frameHit === el || Boolean(el.contains?.(frameHit));
+  const topHit = framePath.frameDepth
+    ? document.elementFromPoint?.(framePath.topClientX, framePath.topClientY) || framePath.topFrameElement
+    : frameHit;
+  const topHitWithinTarget = framePath.frameDepth
+    ? Boolean(framePath.topFrameElement && (topHit === framePath.topFrameElement || framePath.topFrameElement.contains?.(topHit)))
+    : frameHitWithinTarget;
+  const hitWithinTarget = frameHitWithinTarget && topHitWithinTarget;
+  const coveredBy = !frameHitWithinTarget ? frameHit : !topHitWithinTarget ? topHit : null;
   const hitTest = {
-    clientX,
-    clientY,
+    clientX: framePath.topClientX,
+    clientY: framePath.topClientY,
+    frameClientX,
+    frameClientY,
+    topClientX: framePath.topClientX,
+    topClientY: framePath.topClientY,
+    frameDepth: framePath.frameDepth,
     hitWithinTarget,
-    hit: localDescribeElement(hit),
-    coveredBy: hitWithinTarget ? null : localDescribeElement(hit)
+    frameHitWithinTarget,
+    topHitWithinTarget,
+    hit: localDescribeElement(frameHit),
+    topHit: framePath.frameDepth ? localDescribeElement(topHit) : null,
+    coveredBy: hitWithinTarget ? null : localDescribeElement(coveredBy)
   };
   if (!hitWithinTarget && options?.force !== true) {
     return {
@@ -77,6 +158,8 @@ export function resolveClickTargetForCdp(selector: string, options: any = {}): a
     strategyUsed: 'cdp_mouse',
     target: localDescribeElement(el),
     hitTest,
+    frameDepth: framePath.frameDepth,
+    framePath: localFramePathSummary(framePath.frames),
     warnings: hitWithinTarget ? [] : ['force:true bypassed covered-element hit-test for cdp_mouse.']
   };
 }

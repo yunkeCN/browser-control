@@ -814,27 +814,29 @@ export async function performCdpMouseClick(tabId: number, selector: string, opti
   const button = options?.button === 'right' ? 'right' : options?.button === 'middle' ? 'middle' : 'left';
   const clickCount = Math.max(1, Number(options?.clickCount || 1));
   const modifiers = cdpModifierMask(options?.modifiers);
+  const clickX = geometry.hitTest.topClientX ?? geometry.hitTest.clientX;
+  const clickY = geometry.hitTest.topClientY ?? geometry.hitTest.clientY;
 
   try {
     await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
       type: 'mouseMoved',
-      x: geometry.hitTest.clientX,
-      y: geometry.hitTest.clientY,
+      x: clickX,
+      y: clickY,
       button: 'none',
       modifiers
     });
     await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
       type: 'mousePressed',
-      x: geometry.hitTest.clientX,
-      y: geometry.hitTest.clientY,
+      x: clickX,
+      y: clickY,
       button,
       clickCount,
       modifiers
     });
     await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
       type: 'mouseReleased',
-      x: geometry.hitTest.clientX,
-      y: geometry.hitTest.clientY,
+      x: clickX,
+      y: clickY,
       button,
       clickCount,
       modifiers

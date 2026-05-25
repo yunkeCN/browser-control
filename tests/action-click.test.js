@@ -45,6 +45,8 @@ class FakeElement {
     this.bubbledClickCount = 0;
     this.rect = attrs.rect || { left: 10, top: 20, width: 100, height: 30 };
     this.attributes = attrs.attributes || {};
+    this.clientLeft = attrs.clientLeft || 0;
+    this.clientTop = attrs.clientTop || 0;
   }
 
   appendChild(child) {
@@ -89,7 +91,9 @@ class FakeElement {
 
 function loadRuntime({ target, hit = target }) {
   const body = new FakeElement('body');
+  const topWindow = { screenX: 0, screenY: 0, MouseEvent: FakeEvent, PointerEvent: FakeEvent };
   const document = {
+    defaultView: topWindow,
     activeElement: body,
     querySelector(selector) {
       if (selector === '#target' || selector === '[data-agent-id="@e1"]') return target;
@@ -100,17 +104,61 @@ function loadRuntime({ target, hit = target }) {
       return hit;
     }
   };
+  topWindow.parent = topWindow;
+  topWindow.frameElement = null;
   body.ownerDocument = document;
   for (const el of [target, ...target.children]) el.ownerDocument = document;
 
   const sandbox = {
     document,
-    window: { screenX: 0, screenY: 0 },
+    window: topWindow,
     MouseEvent: FakeEvent,
     PointerEvent: FakeEvent,
     globalThis: {}
   };
-  vm.runInNewContext(`globalThis.api = { performClick: (${extractFunction(serviceWorkerSource, 'performClick')}) };`, sandbox);
+  vm.runInNewContext(`globalThis.api = { performClick: (${extractFunction(serviceWorkerSource, 'performClick')}), resolveClickTargetForCdp: (${extractFunction(serviceWorkerSource, 'resolveClickTargetForCdp')}) };`, sandbox);
+  return sandbox.globalThis.api;
+}
+
+function loadFrameRuntime({ target, frameHit = target, topHit } = {}) {
+  const iframe = new FakeElement('iframe', { id: 'frame', rect: { left: 100, top: 50, width: 300, height: 180 } });
+  const topBody = new FakeElement('body');
+  const frameBody = new FakeElement('body');
+  const topWindow = { screenX: 5, screenY: 7, MouseEvent: FakeEvent, PointerEvent: FakeEvent };
+  const frameWindow = { screenX: 5, screenY: 7, MouseEvent: FakeEvent, PointerEvent: FakeEvent, parent: topWindow, frameElement: iframe };
+  const topDocument = {
+    defaultView: topWindow,
+    activeElement: topBody,
+    querySelector() { return null; },
+    elementFromPoint() { return topHit || iframe; }
+  };
+  const frameDocument = {
+    defaultView: frameWindow,
+    activeElement: frameBody,
+    querySelector(selector) { return selector === '#target' ? target : null; },
+    elementFromPoint() { return frameHit; }
+  };
+  topWindow.parent = topWindow;
+  topWindow.frameElement = null;
+  topWindow.__browserControlAgentRef = {
+    resolve(ref) {
+      return ref === '@e1_1' ? { element: target } : { error: `Element not found: ${ref}` };
+    }
+  };
+  topBody.ownerDocument = topDocument;
+  frameBody.ownerDocument = frameDocument;
+  iframe.ownerDocument = topDocument;
+  target.ownerDocument = frameDocument;
+  for (const child of target.children) child.ownerDocument = frameDocument;
+
+  const sandbox = {
+    document: topDocument,
+    window: topWindow,
+    MouseEvent: FakeEvent,
+    PointerEvent: FakeEvent,
+    globalThis: {}
+  };
+  vm.runInNewContext(`globalThis.api = { performClick: (${extractFunction(serviceWorkerSource, 'performClick')}), resolveClickTargetForCdp: (${extractFunction(serviceWorkerSource, 'resolveClickTargetForCdp')}) };`, sandbox);
   return sandbox.globalThis.api;
 }
 
@@ -154,6 +202,25 @@ test('dom_pointer click dispatches to nested hit target and bubbles to parent on
   assert.equal(target.nativeClickCount, 0);
 });
 
+test('dom_pointer click targets same-origin iframe elements with frame-local events', () => {
+  const target = new FakeElement('button', { id: 'target', textContent: 'Inside frame' });
+  const api = loadFrameRuntime({ target });
+
+  const result = api.performClick('@e1_1', { strategy: 'dom_pointer' });
+
+  assert.equal(result.clicked, true);
+  assert.equal(result.hitTest.hitWithinTarget, true);
+  assert.equal(result.hitTest.frameDepth, 1);
+  assert.equal(result.hitTest.frameClientX, 60);
+  assert.equal(result.hitTest.frameClientY, 35);
+  assert.equal(result.hitTest.topClientX, 160);
+  assert.equal(result.hitTest.topClientY, 85);
+  assert.equal(result.hitTest.topHit.tag, 'iframe');
+  assert.equal(target.events.find(event => event.type === 'click').clientX, 60);
+  assert.equal(target.events.find(event => event.type === 'click').screenX, 165);
+  assert.equal(target.bubbledClickCount, 1);
+});
+
 test('dom_pointer click reports covered targets unless force is explicit', () => {
   const target = new FakeElement('button', { id: 'target' });
   const cover = new FakeElement('div', { id: 'cover' });
@@ -170,6 +237,52 @@ test('dom_pointer click reports covered targets unless force is explicit', () =>
   assert.equal(forced.clicked, true);
   assert.match(forced.warnings.join(' '), /force:true/);
   assert.equal(target.bubbledClickCount, 1);
+});
+
+test('dom_pointer click distinguishes iframe-internal and top-page covers', () => {
+  const target = new FakeElement('button', { id: 'target' });
+  const innerCover = new FakeElement('div', { id: 'inner-cover' });
+  const topCover = new FakeElement('div', { id: 'top-cover' });
+
+  const innerBlocked = loadFrameRuntime({ target, frameHit: innerCover }).performClick('@e1_1', { strategy: 'dom_pointer' });
+  assert.equal(innerBlocked.code, 'COVERED_TARGET');
+  assert.equal(innerBlocked.hitTest.coveredBy.id, 'inner-cover');
+  assert.equal(innerBlocked.hitTest.frameHitWithinTarget, false);
+  assert.equal(target.events.length, 0);
+
+  const topBlocked = loadFrameRuntime({ target, topHit: topCover }).performClick('@e1_1', { strategy: 'dom_pointer' });
+  assert.equal(topBlocked.code, 'COVERED_TARGET');
+  assert.equal(topBlocked.hitTest.coveredBy.id, 'top-cover');
+  assert.equal(topBlocked.hitTest.topHitWithinTarget, false);
+  assert.equal(target.events.length, 0);
+});
+
+test('dom_pointer clickCount 2 dispatches a dblclick after two clicks', () => {
+  const target = new FakeElement('button', { id: 'target' });
+  const api = loadRuntime({ target });
+
+  const result = api.performClick('#target', { strategy: 'dom_pointer', clickCount: 2 });
+
+  assert.equal(result.clicked, true);
+  assert.equal(target.events.filter(event => event.type === 'click').length, 2);
+  assert.equal(target.events.filter(event => event.type === 'dblclick').length, 1);
+  assert.equal(target.events.at(-1).type, 'dblclick');
+  assert.equal(target.events.at(-1).detail, 2);
+});
+
+test('cdp target resolution returns top-frame coordinates for iframe elements', () => {
+  const target = new FakeElement('button', { id: 'target', textContent: 'Inside frame' });
+  const api = loadFrameRuntime({ target });
+
+  const result = api.resolveClickTargetForCdp('@e1_1', {});
+
+  assert.equal(result.strategyUsed, 'cdp_mouse');
+  assert.equal(result.hitTest.hitWithinTarget, true);
+  assert.equal(result.hitTest.clientX, 160);
+  assert.equal(result.hitTest.clientY, 85);
+  assert.equal(result.hitTest.frameClientX, 60);
+  assert.equal(result.hitTest.frameDepth, 1);
+  assert.equal(result.hitTest.topHit.tag, 'iframe');
 });
 
 test('element_click strategy is explicit and only calls native click', () => {

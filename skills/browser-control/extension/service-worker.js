@@ -184,6 +184,60 @@
         } : null
       };
     }
+    function localOwnerDocument(el2) {
+      return el2.ownerDocument || document;
+    }
+    function localOwnerWindow(el2) {
+      return localOwnerDocument(el2).defaultView || window;
+    }
+    function localFramePath(ownerWindow2, frameClientX2, frameClientY2) {
+      let topClientX = frameClientX2;
+      let topClientY = frameClientY2;
+      const frames = [];
+      let currentWindow = ownerWindow2;
+      while (currentWindow && currentWindow !== window) {
+        let frameElement = null;
+        try {
+          frameElement = currentWindow.frameElement;
+        } catch {
+          frameElement = null;
+        }
+        if (!frameElement)
+          break;
+        const rect2 = frameElement.getBoundingClientRect();
+        const clientLeft = Number(frameElement.clientLeft || 0);
+        const clientTop = Number(frameElement.clientTop || 0);
+        topClientX += rect2.left + clientLeft;
+        topClientY += rect2.top + clientTop;
+        frames.push({ element: frameElement, rect: rect2, clientLeft, clientTop });
+        try {
+          if (!currentWindow.parent || currentWindow.parent === currentWindow)
+            break;
+          currentWindow = currentWindow.parent;
+        } catch {
+          break;
+        }
+      }
+      return {
+        frames,
+        frameDepth: frames.length,
+        topFrameElement: frames.length ? frames[frames.length - 1].element : null,
+        topClientX: Math.round(topClientX),
+        topClientY: Math.round(topClientY)
+      };
+    }
+    function localFramePathSummary(frames) {
+      return frames.map((frame, index) => ({
+        index,
+        element: localDescribeElement(frame.element),
+        rect: frame.rect ? {
+          x: Math.round(frame.rect.left),
+          y: Math.round(frame.rect.top),
+          width: Math.round(frame.rect.width),
+          height: Math.round(frame.rect.height)
+        } : null
+      }));
+    }
     const found = localFindElement(selector);
     if (found?.error) return found.error;
     const el = found?.element;
@@ -193,16 +247,31 @@
     if (!rect || rect.width <= 0 || rect.height <= 0) {
       return { error: `Element is not clickable because it has no visible box: ${selector}`, recoverable: true, strategyUsed: "cdp_mouse" };
     }
-    const clientX = Math.round(rect.left + rect.width / 2);
-    const clientY = Math.round(rect.top + rect.height / 2);
-    const hit = document.elementFromPoint?.(clientX, clientY) || el;
-    const hitWithinTarget = hit === el || Boolean(el.contains?.(hit));
+    const ownerDocument = localOwnerDocument(el);
+    const ownerWindow = localOwnerWindow(el);
+    const frameClientX = Math.round(rect.left + rect.width / 2);
+    const frameClientY = Math.round(rect.top + rect.height / 2);
+    const framePath = localFramePath(ownerWindow, frameClientX, frameClientY);
+    const frameHit = ownerDocument.elementFromPoint?.(frameClientX, frameClientY) || el;
+    const frameHitWithinTarget = frameHit === el || Boolean(el.contains?.(frameHit));
+    const topHit = framePath.frameDepth ? document.elementFromPoint?.(framePath.topClientX, framePath.topClientY) || framePath.topFrameElement : frameHit;
+    const topHitWithinTarget = framePath.frameDepth ? Boolean(framePath.topFrameElement && (topHit === framePath.topFrameElement || framePath.topFrameElement.contains?.(topHit))) : frameHitWithinTarget;
+    const hitWithinTarget = frameHitWithinTarget && topHitWithinTarget;
+    const coveredBy = !frameHitWithinTarget ? frameHit : !topHitWithinTarget ? topHit : null;
     const hitTest = {
-      clientX,
-      clientY,
+      clientX: framePath.topClientX,
+      clientY: framePath.topClientY,
+      frameClientX,
+      frameClientY,
+      topClientX: framePath.topClientX,
+      topClientY: framePath.topClientY,
+      frameDepth: framePath.frameDepth,
       hitWithinTarget,
-      hit: localDescribeElement(hit),
-      coveredBy: hitWithinTarget ? null : localDescribeElement(hit)
+      frameHitWithinTarget,
+      topHitWithinTarget,
+      hit: localDescribeElement(frameHit),
+      topHit: framePath.frameDepth ? localDescribeElement(topHit) : null,
+      coveredBy: hitWithinTarget ? null : localDescribeElement(coveredBy)
     };
     if (!hitWithinTarget && options?.force !== true) {
       return {
@@ -221,6 +290,8 @@
       strategyUsed: "cdp_mouse",
       target: localDescribeElement(el),
       hitTest,
+      frameDepth: framePath.frameDepth,
+      framePath: localFramePathSummary(framePath.frames),
       warnings: hitWithinTarget ? [] : ["force:true bypassed covered-element hit-test for cdp_mouse."]
     };
   }
@@ -908,26 +979,28 @@
     const button = options?.button === "right" ? "right" : options?.button === "middle" ? "middle" : "left";
     const clickCount = Math.max(1, Number(options?.clickCount || 1));
     const modifiers = cdpModifierMask(options?.modifiers);
+    const clickX = geometry.hitTest.topClientX ?? geometry.hitTest.clientX;
+    const clickY = geometry.hitTest.topClientY ?? geometry.hitTest.clientY;
     try {
       await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
         type: "mouseMoved",
-        x: geometry.hitTest.clientX,
-        y: geometry.hitTest.clientY,
+        x: clickX,
+        y: clickY,
         button: "none",
         modifiers
       });
       await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
         type: "mousePressed",
-        x: geometry.hitTest.clientX,
-        y: geometry.hitTest.clientY,
+        x: clickX,
+        y: clickY,
         button,
         clickCount,
         modifiers
       });
       await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
         type: "mouseReleased",
-        x: geometry.hitTest.clientX,
-        y: geometry.hitTest.clientY,
+        x: clickX,
+        y: clickY,
         button,
         clickCount,
         modifiers
@@ -3173,13 +3246,115 @@
         shiftKey: list.some((m) => /^shift$/i.test(m))
       };
     }
+    function localOwnerDocument(el) {
+      return el.ownerDocument || document;
+    }
+    function localOwnerWindow(el) {
+      return localOwnerDocument(el).defaultView || window;
+    }
+    function localFramePath(ownerWindow, frameClientX, frameClientY) {
+      let topClientX = frameClientX;
+      let topClientY = frameClientY;
+      const frames = [];
+      let currentWindow = ownerWindow;
+      while (currentWindow && currentWindow !== window) {
+        let frameElement = null;
+        try {
+          frameElement = currentWindow.frameElement;
+        } catch {
+          frameElement = null;
+        }
+        if (!frameElement)
+          break;
+        const rect = frameElement.getBoundingClientRect();
+        const clientLeft = Number(frameElement.clientLeft || 0);
+        const clientTop = Number(frameElement.clientTop || 0);
+        topClientX += rect.left + clientLeft;
+        topClientY += rect.top + clientTop;
+        frames.push({ element: frameElement, rect, clientLeft, clientTop });
+        try {
+          if (!currentWindow.parent || currentWindow.parent === currentWindow)
+            break;
+          currentWindow = currentWindow.parent;
+        } catch {
+          break;
+        }
+      }
+      return {
+        frames,
+        frameDepth: frames.length,
+        topFrameElement: frames.length ? frames[frames.length - 1].element : null,
+        topClientX: Math.round(topClientX),
+        topClientY: Math.round(topClientY)
+      };
+    }
+    function localFramePathSummary(frames) {
+      return frames.map((frame, index) => ({
+        index,
+        element: localDescribeElement(frame.element),
+        rect: frame.rect ? {
+          x: Math.round(frame.rect.left),
+          y: Math.round(frame.rect.top),
+          width: Math.round(frame.rect.width),
+          height: Math.round(frame.rect.height)
+        } : null
+      }));
+    }
+    function localClickGeometry(el) {
+      const ownerDocument = localOwnerDocument(el);
+      const ownerWindow = localOwnerWindow(el);
+      const rect = el.getBoundingClientRect();
+      if (!rect || rect.width <= 0 || rect.height <= 0)
+        return { error: `Element is not clickable because it has no visible box: ${selector}` };
+      const frameClientX = Math.round(rect.left + rect.width / 2);
+      const frameClientY = Math.round(rect.top + rect.height / 2);
+      const framePath = localFramePath(ownerWindow, frameClientX, frameClientY);
+      const frameHit = ownerDocument.elementFromPoint?.(frameClientX, frameClientY) || el;
+      const frameHitWithinTarget = frameHit === el || Boolean(el.contains?.(frameHit));
+      const topHit = framePath.frameDepth ? document.elementFromPoint?.(framePath.topClientX, framePath.topClientY) || framePath.topFrameElement : frameHit;
+      const topHitWithinTarget = framePath.frameDepth ? Boolean(framePath.topFrameElement && (topHit === framePath.topFrameElement || framePath.topFrameElement.contains?.(topHit))) : frameHitWithinTarget;
+      const hitWithinTarget = frameHitWithinTarget && topHitWithinTarget;
+      const coveredBy = !frameHitWithinTarget ? frameHit : !topHitWithinTarget ? topHit : null;
+      return {
+        ownerDocument,
+        ownerWindow,
+        frameClientX,
+        frameClientY,
+        topClientX: framePath.topClientX,
+        topClientY: framePath.topClientY,
+        frameDepth: framePath.frameDepth,
+        framePath: localFramePathSummary(framePath.frames),
+        frameHit,
+        topHit,
+        frameHitWithinTarget,
+        topHitWithinTarget,
+        hitWithinTarget,
+        coveredBy,
+        hitTest: {
+          clientX: framePath.topClientX,
+          clientY: framePath.topClientY,
+          frameClientX,
+          frameClientY,
+          topClientX: framePath.topClientX,
+          topClientY: framePath.topClientY,
+          frameDepth: framePath.frameDepth,
+          hitWithinTarget,
+          frameHitWithinTarget,
+          topHitWithinTarget,
+          hit: localDescribeElement(frameHit),
+          topHit: framePath.frameDepth ? localDescribeElement(topHit) : null,
+          coveredBy: hitWithinTarget ? null : localDescribeElement(coveredBy)
+        }
+      };
+    }
     function localElementClick() {
       const found = localFindElement(selector);
       if (found?.error) return found.error;
       const el = found?.element;
       if (!el) return { error: `Element not found: ${selector}` };
       if (typeof el.click !== "function") return { error: `Element cannot be clicked directly: ${selector}` };
-      const focusBefore = localDescribeElement(document.activeElement);
+      const ownerDocument = localOwnerDocument(el);
+      const focusBefore = localDescribeElement(ownerDocument.activeElement);
       el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
       el.click();
       return {
@@ -3189,7 +3364,7 @@
         synthetic: true,
         target: localDescribeElement(el),
         focusBefore,
-        focusAfter: localDescribeElement(document.activeElement),
+        focusAfter: localDescribeElement(ownerDocument.activeElement),
         warnings: ["element_click calls el.click() directly and may bypass pointer/mouse semantics and overlay hit-testing."]
       };
     }
@@ -3199,16 +3374,13 @@
       const el = found?.element;
       if (!el) return { error: `Element not found: ${selector}` };
       const warnings = [...Array.isArray(options?.warnings) ? options.warnings : []];
-      const focusBefore = localDescribeElement(document.activeElement);
+      const ownerDocument = localOwnerDocument(el);
+      const ownerWindow = localOwnerWindow(el);
+      const focusBefore = localDescribeElement(ownerDocument.activeElement);
       el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
-      const rect = el.getBoundingClientRect();
-      if (!rect || rect.width <= 0 || rect.height <= 0) return { error: `Element is not clickable because it has no visible box: ${selector}` };
-      const clientX = Math.round(rect.left + rect.width / 2);
-      const clientY = Math.round(rect.top + rect.height / 2);
-      const hit = document.elementFromPoint?.(clientX, clientY) || el;
-      const hitWithinTarget = hit === el || Boolean(el.contains?.(hit));
-      const hitTest = { clientX, clientY, hitWithinTarget, hit: localDescribeElement(hit), coveredBy: hitWithinTarget ? null : localDescribeElement(hit) };
-      if (!hitWithinTarget && options?.force !== true) {
+      const geometry = localClickGeometry(el);
+      if (geometry.error) return { error: geometry.error };
+      if (!geometry.hitWithinTarget && options?.force !== true) {
         return {
           error: `Element is covered at click point: ${selector}`,
           code: "COVERED_TARGET",
@@ -3216,46 +3388,57 @@
           selector,
           strategyUsed: options?.strategyUsed || "dom_pointer",
           target: localDescribeElement(el),
-          hitTest,
+          hitTest: geometry.hitTest,
           warnings: ["Target center is covered. Use a fresh snapshot, close the overlay, choose a visible child target, or retry with force:true only after confirming intent."]
         };
       }
-      if (!hitWithinTarget) warnings.push("force:true bypassed covered-element hit-test; dispatched events to the requested element.");
-      const dispatchTarget = hitWithinTarget ? hit : el;
+      if (!geometry.hitWithinTarget) warnings.push("force:true bypassed covered-element hit-test; dispatched events to the requested element.");
+      const dispatchTarget = geometry.frameHitWithinTarget ? geometry.frameHit : el;
       const button = localMouseButton(options?.button);
       const clickCount = Math.max(1, Number(options?.clickCount || 1));
+      const MouseCtor = ownerWindow.MouseEvent || MouseEvent;
+      const PointerCtor = ownerWindow.PointerEvent || (typeof PointerEvent === "function" ? PointerEvent : MouseCtor);
       const base = {
         bubbles: true,
         cancelable: true,
         composed: true,
-        view: window,
-        clientX,
-        clientY,
-        screenX: Math.round((window.screenX || 0) + clientX),
-        screenY: Math.round((window.screenY || 0) + clientY),
+        view: ownerWindow,
+        clientX: geometry.frameClientX,
+        clientY: geometry.frameClientY,
+        screenX: Math.round((window.screenX || 0) + geometry.topClientX),
+        screenY: Math.round((window.screenY || 0) + geometry.topClientY),
         button,
         buttons: button === 0 ? 1 : button === 1 ? 4 : button === 2 ? 2 : 1,
-        detail: clickCount,
         ...localModifiers(options?.modifiers)
       };
-      const pointerBase = { ...base, pointerId: 1, pointerType: "mouse", isPrimary: true, width: 1, height: 1, pressure: 0.5 };
-      const PointerCtor = typeof PointerEvent === "function" ? PointerEvent : MouseEvent;
+      const hoverBase = { ...base, buttons: 0, detail: 0 };
+      const pointerHoverBase = { ...hoverBase, pointerId: 1, pointerType: "mouse", isPrimary: true, width: 1, height: 1, pressure: 0 };
       for (const [type, Ctor, init] of [
-        ["pointerover", PointerCtor, pointerBase],
-        ["pointerenter", PointerCtor, { ...pointerBase, bubbles: false }],
-        ["mouseover", MouseEvent, base],
-        ["mouseenter", MouseEvent, { ...base, bubbles: false }],
-        ["pointermove", PointerCtor, pointerBase],
-        ["mousemove", MouseEvent, base],
-        ["pointerdown", PointerCtor, pointerBase],
-        ["mousedown", MouseEvent, base],
-        ["pointerup", PointerCtor, { ...pointerBase, buttons: 0, pressure: 0 }],
-        ["mouseup", MouseEvent, { ...base, buttons: 0 }],
-        ["click", MouseEvent, { ...base, buttons: 0 }]
+        ["pointerover", PointerCtor, pointerHoverBase],
+        ["pointerenter", PointerCtor, { ...pointerHoverBase, bubbles: false }],
+        ["mouseover", MouseCtor, hoverBase],
+        ["mouseenter", MouseCtor, { ...hoverBase, bubbles: false }],
+        ["pointermove", PointerCtor, pointerHoverBase],
+        ["mousemove", MouseCtor, hoverBase]
       ]) {
-        if (type === "pointerup" && typeof el.focus === "function") el.focus({ preventScroll: true });
         dispatchTarget.dispatchEvent(new Ctor(type, init));
       }
+      for (let detail = 1; detail <= clickCount; detail += 1) {
+        const downBase = { ...base, detail };
+        const pointerDownBase = { ...downBase, pointerId: 1, pointerType: "mouse", isPrimary: true, width: 1, height: 1, pressure: 0.5 };
+        for (const [type, Ctor, init] of [
+          ["pointerdown", PointerCtor, pointerDownBase],
+          ["mousedown", MouseCtor, downBase],
+          ["pointerup", PointerCtor, { ...pointerDownBase, buttons: 0, pressure: 0 }],
+          ["mouseup", MouseCtor, { ...downBase, buttons: 0 }],
+          ["click", MouseCtor, { ...downBase, buttons: 0 }]
+        ]) {
+          if (type === "pointerup" && detail === 1 && typeof el.focus === "function") el.focus({ preventScroll: true });
+          dispatchTarget.dispatchEvent(new Ctor(type, init));
+        }
+      }
+      if (clickCount >= 2)
+        dispatchTarget.dispatchEvent(new MouseCtor("dblclick", { ...base, buttons: 0, detail: 2 }));
       return {
         clicked: true,
         selector,
@@ -3263,9 +3446,11 @@
         synthetic: true,
         target: localDescribeElement(el),
         dispatchedTo: localDescribeElement(dispatchTarget),
-        hitTest,
+        hitTest: geometry.hitTest,
+        frameDepth: geometry.frameDepth,
+        framePath: geometry.framePath,
         focusBefore,
-        focusAfter: localDescribeElement(document.activeElement),
+        focusAfter: localDescribeElement(ownerDocument.activeElement),
         warnings
       };
     }
