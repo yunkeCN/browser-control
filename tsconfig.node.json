@@ -3,16 +3,12 @@
   "compilerOptions": {
     "module": "ES2022",
     "moduleResolution": "bundler",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
-    "types": [
-      "chrome"
-    ]
+    "resolveJsonModule": true,
+    "types": ["node"]
   },
   "include": [
-    "src/extension/**/*.ts"
+    "src/protocol.ts",
+    "src/daemon/**/*.ts",
+    "src/mcp/**/*.ts"
   ]
 }

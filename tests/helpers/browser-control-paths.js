@@ -12,6 +12,5 @@ module.exports = {
   scriptsDir,
   cliScript: path.join(scriptsDir, 'browser-control.js'),
   daemonScript: path.join(scriptsDir, 'daemon.js'),
-  artifactStoreModule: path.join(scriptsDir, 'artifact-store.js'),
   protocolModule: path.join(scriptsDir, 'protocol.js')
 };

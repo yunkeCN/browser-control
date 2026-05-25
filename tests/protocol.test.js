@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { protocolModule, artifactStoreModule } = require('./helpers/browser-control-paths');
+const { loadSourceModule } = require('./helpers/load-source-module');
 const {
   COMMANDS,
   normalizeRequest,
@@ -15,7 +15,7 @@ const {
   protocolErrorFrom,
   ProtocolError
 } = require('../skills/browser-control/scripts/protocol');
-const { ArtifactStore, extractArtifacts } = require('../skills/browser-control/scripts/artifact-store');
+const { ArtifactStore, extractArtifacts } = loadSourceModule('src/daemon/artifact-store.ts');
 
 test('protocol validates all supported command envelopes', () => {
   for (const command of Object.keys(COMMANDS)) {

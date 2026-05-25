@@ -7,8 +7,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 const watchedRoots = [
-  'skills/browser-control/extension',
-  'skills/browser-control/scripts/vendor/ws'
+  'skills/browser-control/extension'
 ];
 
 function listFiles(relativeRoot) {
@@ -57,7 +56,7 @@ for (const file of allFiles) {
 
 if (changed.length) {
   console.error(`extension build drift detected: ${changed.join(', ')}`);
-  console.error('Run npm run build:extension and commit the generated skill extension/vendor output.');
+  console.error('Run npm run build:extension and commit the generated skill extension output.');
   process.exit(1);
 }
 

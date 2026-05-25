@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { ArtifactStore, extractArtifacts } = require('../skills/browser-control/scripts/artifact-store');
+const { loadSourceModule } = require('./helpers/load-source-module');
+const { ArtifactStore, extractArtifacts } = loadSourceModule('src/daemon/artifact-store.ts');
 
 test('artifact store writes base64 and strips screenshot data from response', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-control-artifacts-'));

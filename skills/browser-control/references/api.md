@@ -425,11 +425,7 @@ skills/browser-control/
 │   ├── browser-control.js
 │   ├── daemon.js
 │   ├── protocol.js
-│   ├── artifact-store.js
 │   ├── support.js
-│   ├── vendor/ws/
-│   ├── check-daemon.js
-│   ├── check-extension.js
 │   ├── health-check.js
 │   ├── open-chrome.js
 │   ├── screenshot.js

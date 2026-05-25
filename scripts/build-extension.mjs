@@ -9,8 +9,6 @@ const root = path.resolve(__dirname, '..');
 const srcRoot = path.join(root, 'src', 'extension');
 const skillRoot = path.join(root, 'skills', 'browser-control');
 const skillOutRoot = path.join(skillRoot, 'extension');
-const wsSourceRoot = path.join(root, 'node_modules', 'ws');
-const wsVendorRoot = path.join(skillRoot, 'scripts', 'vendor', 'ws');
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const packageVersion = packageJson.version;
 
@@ -38,28 +36,6 @@ const declaredOutputs = new Set([
   ...scriptOutputs.map(item => item.out),
   ...staticCopies.map(([, out]) => out)
 ]);
-
-const vendorWsFiles = [
-  'LICENSE',
-  'README.md',
-  'browser.js',
-  'index.js',
-  'lib/buffer-util.js',
-  'lib/constants.js',
-  'lib/event-target.js',
-  'lib/extension.js',
-  'lib/limiter.js',
-  'lib/permessage-deflate.js',
-  'lib/receiver.js',
-  'lib/sender.js',
-  'lib/stream.js',
-  'lib/subprotocol.js',
-  'lib/validation.js',
-  'lib/websocket-server.js',
-  'lib/websocket.js',
-  'package.json',
-  'wrapper.mjs'
-];
 
 function ensureParent(file) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -134,21 +110,6 @@ function buildExtensionTo(outRoot) {
   }
 }
 
-function syncVendoredWs() {
-  if (!fs.existsSync(path.join(wsSourceRoot, 'package.json'))) {
-    throw new Error('Missing node_modules/ws. Run npm install before building the self-contained skill package.');
-  }
-  fs.rmSync(wsVendorRoot, { recursive: true, force: true });
-  for (const relativePath of vendorWsFiles) {
-    const src = path.join(wsSourceRoot, relativePath);
-    const out = path.join(wsVendorRoot, relativePath);
-    if (!fs.existsSync(src)) throw new Error(`Missing ws vendor input: ${relativePath}`);
-    ensureParent(out);
-    fs.copyFileSync(src, out);
-  }
-}
-
 buildExtensionTo(skillOutRoot);
-syncVendoredWs();
 
-console.log(`extension build ok: bundled ${scriptOutputs.length} entries and wrote ${declaredOutputs.size} declared outputs to ${path.relative(root, skillOutRoot)} with manifest version ${packageVersion}; vendored ws into ${path.relative(root, wsVendorRoot)}/`);
+console.log(`extension build ok: bundled ${scriptOutputs.length} entries and wrote ${declaredOutputs.size} declared outputs to ${path.relative(root, skillOutRoot)} with manifest version ${packageVersion}`);

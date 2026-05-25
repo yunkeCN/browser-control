@@ -14,8 +14,12 @@ AI Agent → skills/browser-control/scripts/browser-control.js → localhost HTT
 
 | Path | Purpose |
 |------|---------|
+| `src/protocol.ts` | Editable protocol contract and validation source. |
+| `src/daemon/` | Editable daemon server and process-management source. |
 | `src/extension/` | Editable Chrome MV3 extension TypeScript source. |
-| `skills/browser-control/` | Self-contained Agent-facing skill package: `SKILL.md`, references, daemon/runtime scripts, vendored runtime dependency, generated Chrome extension, diagnostics, artifact helpers, session utilities. |
+| `src/mcp/` | Editable MCP server source, independent from the skill package. |
+| `skills/browser-control/` | Self-contained Agent-facing skill package: `SKILL.md`, references, CLI/runtime scripts, generated daemon/protocol runtime, generated Chrome extension, diagnostics, artifact helpers, session utilities. |
+| `bin/browser-control-mcp.mjs` | Generated single-file MCP runtime. |
 
 Repository support paths:
 

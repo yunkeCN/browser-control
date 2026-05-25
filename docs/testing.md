@@ -14,9 +14,14 @@ These checks cover protocol validation, artifact extraction, daemon HTTP behavio
 
 ## Build Output
 
-`npm run build` compiles the editable extension source from `src/extension/` into the committed loadable extension at `skills/browser-control/extension/`.
+`npm run build` refreshes every generated runtime:
 
-The generated extension output is part of the published Skill package. Keep it in sync with the TypeScript source before releasing.
+- `src/extension/` -> `skills/browser-control/extension/`
+- `src/protocol.ts` -> `skills/browser-control/scripts/protocol.js`
+- `src/daemon/**` -> `skills/browser-control/scripts/daemon.js`
+- `src/mcp/**` plus daemon/protocol modules -> `bin/browser-control-mcp.mjs`
+
+The generated extension, protocol, and daemon output are part of the published Skill package. The generated MCP runtime is the root package's `browser-control-mcp` bin target. Keep all generated output in sync with TypeScript source before releasing.
 
 ## Fixture E2E
 
@@ -24,8 +29,9 @@ The generated extension output is part of the published Skill package. Keep it i
 
 Use this when changing:
 
-- daemon or CLI code under `skills/browser-control/scripts/`
-- command protocol shape
+- daemon source under `src/daemon/` or generated daemon output under `skills/browser-control/scripts/`
+- CLI code under `skills/browser-control/scripts/browser-control.js`
+- command protocol shape in `src/protocol.ts`
 - artifact persistence or response stripping
 - extension transport contracts
 
@@ -57,7 +63,10 @@ If the extension is not loaded, `tests/e2e-test.js` exits with code `2` and prin
 
 | Change | Required action |
 | --- | --- |
-| `skills/browser-control/scripts/` daemon or CLI code | Run `browser-control restart` or `node skills/browser-control/scripts/browser-control.js restart`. |
+| `src/daemon/**` or `skills/browser-control/scripts/daemon.js` | Run `npm run build:daemon`, then `browser-control restart` or `node skills/browser-control/scripts/browser-control.js restart`. |
+| `skills/browser-control/scripts/browser-control.js` CLI code | Run `browser-control restart` or `node skills/browser-control/scripts/browser-control.js restart` if the daemon was already running. |
+| `src/protocol.ts` | Run `npm run build:protocol`; restart the daemon if protocol validation changed. |
+| `src/mcp/**` | Run `npm run build:mcp`; restart the MCP client/server process. |
 | `src/extension` service worker or `manifest.json` source | Run `npm run build`, then reload the unpacked extension in `chrome://extensions`. |
 | `src/extension` content script source | Run `npm run build`, reload the unpacked extension, then refresh already-open target pages. |
 | Docs or tests only | No daemon restart or extension reload required. |

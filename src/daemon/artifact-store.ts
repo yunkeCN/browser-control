@@ -1,14 +1,12 @@
-'use strict';
-
-const fs = require('node:fs');
-const path = require('node:path');
-const os = require('node:os');
-const crypto = require('node:crypto');
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import crypto from 'node:crypto';
 
 const BROWSER_CONTROL_HOME = process.env.BROWSER_CONTROL_HOME || path.join(os.homedir(), '.browser-control');
-const DEFAULT_ARTIFACT_DIR = process.env.BROWSER_CONTROL_ARTIFACT_DIR || path.join(BROWSER_CONTROL_HOME, 'artifacts');
+export const DEFAULT_ARTIFACT_DIR = process.env.BROWSER_CONTROL_ARTIFACT_DIR || path.join(BROWSER_CONTROL_HOME, 'artifacts');
 
-const MIME_BY_KIND = {
+const MIME_BY_KIND: Record<string, Record<string, string>> = {
   screenshot: { png: 'image/png', jpeg: 'image/jpeg' },
   pdf: { pdf: 'application/pdf' },
   download: { bin: 'application/octet-stream' },
@@ -16,25 +14,27 @@ const MIME_BY_KIND = {
   observation: { json: 'application/json', txt: 'text/plain' }
 };
 
-function sanitizeName(name) {
+function sanitizeName(name: unknown): string {
   return String(name || 'artifact')
     .replace(/[/\\?%*:|"<>]/g, '-')
     .replace(/\s+/g, '-')
     .slice(0, 120) || 'artifact';
 }
 
-class ArtifactStore {
+export class ArtifactStore {
+  rootDir: string;
+
   constructor(rootDir = DEFAULT_ARTIFACT_DIR) {
     this.rootDir = rootDir;
   }
 
-  ensureDir(kind) {
+  ensureDir(kind: string): string {
     const dir = path.join(this.rootDir, kind, new Date().toISOString().slice(0, 10));
     fs.mkdirSync(dir, { recursive: true });
     return dir;
   }
 
-  writeBase64(kind, base64, options = {}) {
+  writeBase64(kind: string, base64: string, options: Record<string, string> = {}) {
     if (!base64 || typeof base64 !== 'string') return null;
     const ext = (options.ext || options.format || 'bin').replace(/^\./, '').toLowerCase();
     const dir = this.ensureDir(kind);
@@ -54,7 +54,7 @@ class ArtifactStore {
     };
   }
 
-  writeText(kind, text, options = {}) {
+  writeText(kind: string, text: unknown, options: Record<string, string> = {}) {
     if (text === undefined || text === null) return null;
     const ext = (options.ext || 'txt').replace(/^\./, '').toLowerCase();
     const dir = this.ensureDir(kind);
@@ -75,8 +75,8 @@ class ArtifactStore {
   }
 }
 
-function extractArtifacts(command, result, store = new ArtifactStore()) {
-  const artifacts = [];
+export function extractArtifacts(command: string, result: any, store = new ArtifactStore()) {
+  const artifacts: any[] = [];
   const data = result && typeof result === 'object' ? { ...result } : result;
 
   if (!result || typeof result !== 'object') return { data, artifacts };
@@ -136,5 +136,3 @@ function extractArtifacts(command, result, store = new ArtifactStore()) {
 
   return { data, artifacts };
 }
-
-module.exports = { ArtifactStore, extractArtifacts, DEFAULT_ARTIFACT_DIR };

@@ -12,7 +12,7 @@ It runs a localhost daemon that talks to a Chrome Manifest V3 extension over Web
 AI Agent -> Browser Control skill scripts -> localhost HTTP daemon -> WebSocket -> Chrome extension -> Chrome DOM
 ```
 
-The published Skill lives in `skills/browser-control/`. That directory is self-contained: it includes the agent-facing `SKILL.md`, command-line scripts, reference docs, a loadable Chrome extension build, and the vendored WebSocket runtime needed by the daemon.
+The published Skill lives in `skills/browser-control/`. That directory is self-contained: it includes the agent-facing `SKILL.md`, command-line scripts, reference docs, a loadable Chrome extension build, and a generated daemon bundle that carries its WebSocket runtime.
 
 ## What It Can Do
 
@@ -122,7 +122,7 @@ Snapshot and observation commands redact likely sensitive field values such as p
 
 Tagged GitHub releases publish two archives:
 
-- `browser-control-skill-<tag>.zip`: the complete `browser-control/` Skill directory, including `SKILL.md`, `scripts/`, `references/`, `extension/`, and vendored `ws`.
+- `browser-control-skill-<tag>.zip`: the complete `browser-control/` Skill directory, including `SKILL.md`, `scripts/`, `references/`, `extension/`, and the bundled daemon runtime.
 - `browser-control-extension-<tag>.zip`: only the Chrome `extension/` directory, for users who just want to load the browser extension.
 
 Download release packages from <https://github.com/yunkeCN/browser-control/releases>.
@@ -131,7 +131,11 @@ Download release packages from <https://github.com/yunkeCN/browser-control/relea
 
 ```text
 browser-control/
+├── src/protocol.ts            # Editable protocol contract and validation source
+├── src/daemon/                # Editable daemon server and process-management source
 ├── src/extension/             # Editable Chrome MV3 extension TypeScript source
+├── src/mcp/                   # Editable MCP server source
+├── bin/                       # Generated MCP single-file runtime
 ├── skills/browser-control/    # Self-contained published Skill package
 ├── .github/workflows/         # Tag-triggered release packaging
 ├── tests/                     # Unit, integration, and fixture e2e tests
@@ -140,7 +144,7 @@ browser-control/
 └── package.json               # Development scripts and dependencies
 ```
 
-Generated extension output is committed under `skills/browser-control/extension/` so users can load the extension after installing the Skill without running a build first.
+Generated Skill output is committed under `skills/browser-control/`: the loadable extension lives in `extension/`, and generated protocol/daemon runtime files live in `scripts/`. The MCP runtime is generated at `bin/browser-control-mcp.mjs`.
 
 ## Development
 
@@ -169,4 +173,5 @@ See `docs/testing.md` for the full validation workflow and reload matrix.
 - Troubleshooting: `skills/browser-control/references/troubleshooting.md`
 - Chrome extension setup: `skills/browser-control/references/chrome-extension-setup.md`
 - Maintainer architecture: `docs/maintainer-architecture.md`
+- MCP server: `docs/mcp.md`
 - Testing and release checks: `docs/testing.md`
