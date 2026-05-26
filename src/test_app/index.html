@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Browser Control Debug Console</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="./src/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Debug console navigation">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M5 7.5A2.5 2.5 0 0 1 7.5 5h9A2.5 2.5 0 0 1 19 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 5 16.5z"/>
+              <path d="M8.5 9.5h7M8.5 12h4M8.5 14.5h6"/>
+            </svg>
+          </div>
+          <div class="brand-copy">
+            <p>Browser Control</p>
+            <h1>Debug Console</h1>
+          </div>
+          <span id="connectionPill" class="status-pill neutral">Idle</span>
+        </div>
+
+        <form class="connection-form" id="connectionForm">
+          <label class="field-label" for="endpointInput">Daemon endpoint</label>
+          <div class="input-with-action">
+            <input id="endpointInput" name="endpoint" type="url" value="http://127.0.0.1:10087" autocomplete="url" spellcheck="false">
+            <button type="submit" class="icon-button" aria-label="Refresh daemon status" title="Refresh daemon status">
+              <svg viewBox="0 0 24 24" focusable="false"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
+            </button>
+          </div>
+        </form>
+
+        <div class="sidebar-scroll">
+          <section class="side-section" aria-labelledby="sessionsHeading">
+            <div class="section-heading">
+              <h2 id="sessionsHeading">Sessions</h2>
+              <button type="button" class="ghost-button compact" id="newSessionButton">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M12 5v14M5 12h14"/></svg>
+                New
+              </button>
+            </div>
+            <div class="session-list" id="sessionList"></div>
+          </section>
+
+          <section class="side-section" aria-labelledby="presetsHeading">
+            <div class="section-heading">
+              <h2 id="presetsHeading">Presets</h2>
+            </div>
+            <div class="preset-list" id="presetList"></div>
+          </section>
+        </div>
+      </aside>
+
+      <main class="console-shell" id="mainContent">
+        <header class="topbar">
+          <div class="topbar-title">
+            <p>Local Automation Bridge</p>
+            <h2>Command Workbench</h2>
+          </div>
+          <div class="metric-strip" aria-label="Daemon summary">
+            <div class="metric">
+              <span class="metric-label">Extension</span>
+              <strong id="extensionMetric">Unknown</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Sessions</span>
+              <strong id="sessionsMetric">0</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Pending</span>
+              <strong id="pendingMetric">0</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Uptime</span>
+              <strong id="uptimeMetric">--</strong>
+            </div>
+          </div>
+        </header>
+
+        <section class="workbench" aria-label="Command and diagnostics panels">
+          <section class="panel command-panel" aria-labelledby="commandHeading">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Composer</p>
+                <h3 id="commandHeading">Command</h3>
+              </div>
+              <button type="button" class="ghost-button" id="copyEnvelopeButton">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M8 7h10v12H8z"/><path d="M6 17H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1"/></svg>
+                Copy envelope
+              </button>
+            </div>
+
+            <form id="commandForm" class="command-form">
+              <div class="form-grid">
+                <label class="field">
+                  <span class="field-label">Command</span>
+                  <select id="commandSelect" name="command"></select>
+                </label>
+                <label class="field">
+                  <span class="field-label">Session</span>
+                  <input id="sessionInput" name="session" value="default" autocomplete="off" spellcheck="false">
+                </label>
+                <label class="field">
+                  <span class="field-label">Timeout</span>
+                  <input id="timeoutInput" name="timeout" type="number" min="1000" step="1000" value="30000">
+                </label>
+              </div>
+
+              <label class="field args-field">
+                <span class="field-label">Args JSON</span>
+                <textarea id="argsInput" spellcheck="false" rows="12"></textarea>
+              </label>
+              <div id="validationMessage" class="validation-message" role="alert"></div>
+
+              <div class="command-actions">
+                <button type="button" class="ghost-button" id="validateButton">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="m20 6-11 11-5-5"/></svg>
+                  Validate
+                </button>
+                <button type="submit" class="primary-button" id="sendButton">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M22 2 11 13"/><path d="m22 2-7 20-4-9-9-4z"/></svg>
+                  Send command
+                </button>
+              </div>
+            </form>
+
+            <div class="history-block" id="historyBlock">
+              <div class="subheader">
+                <button type="button" class="history-toggle" id="toggleHistoryButton" aria-expanded="false" aria-controls="historyList">
+                  <svg class="chevron-icon" viewBox="0 0 24 24" focusable="false"><path d="m9 18 6-6-6-6"/></svg>
+                  <span>History</span>
+                  <span class="history-count" id="historyCount">0</span>
+                </button>
+                <button type="button" class="icon-button subtle" id="clearHistoryButton" aria-label="Clear command history" title="Clear command history">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/></svg>
+                </button>
+              </div>
+              <div class="history-list scroll-region" id="historyList" tabindex="-1" aria-label="Command history" hidden></div>
+            </div>
+          </section>
+
+          <section class="panel inspector-panel" aria-labelledby="inspectorHeading">
+            <div class="panel-header inspector-header">
+              <div>
+                <p class="eyebrow">Inspector</p>
+                <h3 id="inspectorHeading">Diagnostics</h3>
+              </div>
+              <div class="tab-list" role="tablist" aria-label="Diagnostics views">
+                <button type="button" class="tab-button active" id="tab-result" role="tab" aria-selected="true" aria-controls="panel-result" data-tab="result">Result</button>
+                <button type="button" class="tab-button" id="tab-network" role="tab" aria-selected="false" aria-controls="panel-network" data-tab="network">Network</button>
+                <button type="button" class="tab-button" id="tab-logs" role="tab" aria-selected="false" aria-controls="panel-logs" data-tab="logs">Logs</button>
+              </div>
+            </div>
+
+            <div class="inspector-body">
+              <section class="tab-panel result-panel active" id="panel-result" role="tabpanel" aria-labelledby="tab-result">
+                <div class="result-toolbar">
+                  <div>
+                    <p class="eyebrow">Response</p>
+                    <h4>Last result</h4>
+                  </div>
+                  <div class="result-actions">
+                    <div class="segmented-control result-view-toggle" aria-label="Result payload view">
+                      <button type="button" class="segment active" data-result-view="daemon">Daemon</button>
+                      <button type="button" class="segment" data-result-view="agent">LLM payload</button>
+                    </div>
+                    <button type="button" class="ghost-button compact" id="copyResultButton">
+                      <svg viewBox="0 0 24 24" focusable="false"><path d="M8 7h10v12H8z"/><path d="M6 17H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1"/></svg>
+                      Copy result
+                    </button>
+                  </div>
+                </div>
+                <div class="result-summary" id="resultSummary"></div>
+                <pre class="json-view scroll-region" id="resultOutput" tabindex="0"></pre>
+              </section>
+
+              <section class="tab-panel" id="panel-network" role="tabpanel" aria-labelledby="tab-network" hidden>
+                <div class="table-toolbar">
+                  <label class="search-field">
+                    <span class="sr-only">Filter network rows</span>
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="m21 21-4.35-4.35"/><circle cx="11" cy="11" r="7"/></svg>
+                    <input id="networkFilterInput" type="search" placeholder="Filter requests">
+                  </label>
+                  <button type="button" class="ghost-button compact" id="refreshNetworkButton">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
+                    Refresh
+                  </button>
+                </div>
+                <div class="table-scroll scroll-region" tabindex="0" aria-label="Network requests">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th scope="col">Method</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">URL</th>
+                        <th scope="col">Type</th>
+                        <th scope="col">Time</th>
+                      </tr>
+                    </thead>
+                    <tbody id="networkTableBody"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="tab-panel" id="panel-logs" role="tabpanel" aria-labelledby="tab-logs" hidden>
+                <div class="table-toolbar">
+                  <div class="segmented-control" aria-label="Log severity filter">
+                    <button type="button" class="segment active" data-log-filter="all">All</button>
+                    <button type="button" class="segment" data-log-filter="info">Info</button>
+                    <button type="button" class="segment" data-log-filter="warn">Warn</button>
+                    <button type="button" class="segment" data-log-filter="error">Error</button>
+                  </div>
+                  <button type="button" class="ghost-button compact" id="clearLogsButton">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/></svg>
+                    Clear
+                  </button>
+                </div>
+                <div class="log-list scroll-region" id="logList" tabindex="0" aria-label="Runtime logs"></div>
+              </section>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" aria-live="polite" aria-atomic="true"></div>
+    <script src="./src/app.js" defer></script>
+  </body>
+</html>
