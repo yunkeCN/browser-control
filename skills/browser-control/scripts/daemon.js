@@ -4274,6 +4274,7 @@ var package_default = {
     lint: "node scripts/lint.mjs",
     "e2e:fixture": "npm run build:extension && npm run build:protocol && npm run build:daemon && node tests/fixture-e2e.test.js",
     "e2e:live": "node tests/e2e-test.js",
+    "serve:test-app": "node scripts/serve-test-app.mjs",
     build: "npm run build:extension && npm run build:protocol && npm run build:daemon && npm run build:mcp",
     "build:extension": "node scripts/build-extension.mjs",
     "build:protocol": "node scripts/build-protocol.mjs",
