@@ -4516,41 +4516,71 @@
     if (!selector) throw new Error("target is required for click");
     const strategy = args?.strategy || "auto";
     const beforeIds = await beginNewTabWatch();
-    if (strategy === "auto" || strategy === "cdp_mouse") {
-      const cdpResult = await performCdpMouseClick(tabId, selector, args || {});
-      if (!cdpResult.error) return observeNewTabResult(cdpResult);
-      if (cdpResult.code === "STALE_ELEMENT_REFERENCE") return cdpResult;
-      if (strategy === "cdp_mouse") return cdpResult;
-      args = {
-        ...args,
-        strategy: "dom_pointer",
-        warnings: [
-          ...args?.warnings || [],
-          `cdp_mouse unavailable in auto mode; fell back to dom_pointer: ${cdpResult.error}`
-        ]
+    const networkUrls = [];
+    const networkStart = Date.now();
+    let networkListener2 = null;
+    if (chrome.webRequest?.onBeforeRequest) {
+      networkListener2 = (details) => {
+        if (details.tabId === tabId && typeof details.url === "string" && details.url.startsWith("http")) {
+          networkUrls.push(details.url);
+        }
       };
+      chrome.webRequest.onBeforeRequest.addListener(networkListener2, { urls: ["<all_urls>"] });
     }
-    const results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: performClick,
-      args: [selector, {
-        strategy: args?.strategy,
-        force: args?.force,
-        button: args?.button,
-        clickCount: args?.clickCount,
-        modifiers: args?.modifiers,
-        warnings: args?.warnings
-      }],
-      world: "MAIN"
-    });
-    const result = results[0]?.result;
-    if (result?.error && result?.recoverable) return result;
-    if (result?.error) throw new Error(result.error);
-    return observeNewTabResult(result);
-    async function observeNewTabResult(result2) {
-      const observed = await attachNewTabsIfAny(session, tabId, beforeIds, args || {});
-      return mergeNewTabObservation(result2, observed);
+    let clickResult;
+    try {
+      if (strategy === "auto" || strategy === "cdp_mouse") {
+        const cdpResult = await performCdpMouseClick(tabId, selector, args || {});
+        if (!cdpResult.error) {
+          clickResult = cdpResult;
+          return;
+        }
+        if (cdpResult.code === "STALE_ELEMENT_REFERENCE") {
+          clickResult = cdpResult;
+          return;
+        }
+        if (strategy === "cdp_mouse") {
+          clickResult = cdpResult;
+          return;
+        }
+        args = {
+          ...args,
+          strategy: "dom_pointer",
+          warnings: [
+            ...args?.warnings || [],
+            `cdp_mouse unavailable in auto mode; fell back to dom_pointer: ${cdpResult.error}`
+          ]
+        };
+      }
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: performClick,
+        args: [selector, {
+          strategy: args?.strategy,
+          force: args?.force,
+          button: args?.button,
+          clickCount: args?.clickCount,
+          modifiers: args?.modifiers,
+          warnings: args?.warnings
+        }],
+        world: "MAIN"
+      });
+      clickResult = results[0]?.result;
+    } finally {
+      const elapsed = Date.now() - networkStart;
+      const remaining = Math.max(0, 700 - elapsed);
+      if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
+      if (networkListener2) {
+        chrome.webRequest.onBeforeRequest.removeListener(networkListener2);
+      }
     }
+    if (clickResult?.error && !clickResult?.recoverable) throw new Error(clickResult.error);
+    const observed = await attachNewTabsIfAny(session, tabId, beforeIds, args || {});
+    const merged = mergeNewTabObservation(clickResult, observed);
+    if (networkUrls.length > 0) {
+      merged.network = { requests: [...new Set(networkUrls)], count: new Set(networkUrls).size };
+    }
+    return merged;
   }
   async function handleFill(args = {}, session) {
     const { value } = args || {};

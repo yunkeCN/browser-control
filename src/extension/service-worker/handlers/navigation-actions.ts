@@ -232,44 +232,70 @@ async function performObservedClick(args: CommandArgs = {}, session: SessionName
   const strategy = args?.strategy || 'auto';
   const beforeIds = await beginNewTabWatch();
 
-  if (strategy === 'auto' || strategy === 'cdp_mouse') {
-    const cdpResult = await performCdpMouseClick(tabId, selector, args || {});
-    if (!cdpResult.error) return observeNewTabResult(cdpResult);
-    if (cdpResult.code === 'STALE_ELEMENT_REFERENCE') return cdpResult;
-    if (strategy === 'cdp_mouse') return cdpResult;
-    args = {
-      ...args,
-      strategy: 'dom_pointer',
-      warnings: [
-        ...(args?.warnings || []),
-        `cdp_mouse unavailable in auto mode; fell back to dom_pointer: ${cdpResult.error}`
-      ]
+  // ── 轻量级网络捕获: 点击前开始监听，700ms 后收集触发的接口请求 ──
+  const networkUrls: string[] = [];
+  const networkStart = Date.now();
+  let networkListener: any = null;
+  if (chrome.webRequest?.onBeforeRequest) {
+    networkListener = (details: any) => {
+      if (details.tabId === tabId && typeof details.url === 'string' && details.url.startsWith('http')) {
+        networkUrls.push(details.url);
+      }
     };
+    chrome.webRequest.onBeforeRequest.addListener(networkListener, { urls: ['<all_urls>'] });
   }
 
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: performClick,
-    args: [selector, {
-      strategy: args?.strategy,
-      force: args?.force,
-      button: args?.button,
-      clickCount: args?.clickCount,
-      modifiers: args?.modifiers,
-      warnings: args?.warnings
-    }],
-    world: 'MAIN'
-  });
+  let clickResult: any;
 
-  const result = results[0]?.result as any;
-  if (result?.error && result?.recoverable) return result;
-  if (result?.error) throw new Error(result.error);
-  return observeNewTabResult(result);
+  try {
+    if (strategy === 'auto' || strategy === 'cdp_mouse') {
+      const cdpResult = await performCdpMouseClick(tabId, selector, args || {});
+      if (!cdpResult.error) { clickResult = cdpResult; return; }
+      if (cdpResult.code === 'STALE_ELEMENT_REFERENCE') { clickResult = cdpResult; return; }
+      if (strategy === 'cdp_mouse') { clickResult = cdpResult; return; }
+      args = {
+        ...args,
+        strategy: 'dom_pointer',
+        warnings: [
+          ...(args?.warnings || []),
+          `cdp_mouse unavailable in auto mode; fell back to dom_pointer: ${cdpResult.error}`
+        ]
+      };
+    }
 
-  async function observeNewTabResult(result: any): Promise<any> {
-    const observed = await attachNewTabsIfAny(session, tabId, beforeIds, args || {});
-    return mergeNewTabObservation(result, observed);
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: performClick,
+      args: [selector, {
+        strategy: args?.strategy,
+        force: args?.force,
+        button: args?.button,
+        clickCount: args?.clickCount,
+        modifiers: args?.modifiers,
+        warnings: args?.warnings
+      }],
+      world: 'MAIN'
+    });
+
+    clickResult = results[0]?.result as any;
+  } finally {
+    // 等够 700ms 确保捕获到点击触发的请求，再清理
+    const elapsed = Date.now() - networkStart;
+    const remaining = Math.max(0, 700 - elapsed);
+    if (remaining > 0) await new Promise(r => setTimeout(r, remaining));
+    if (networkListener) {
+      chrome.webRequest.onBeforeRequest.removeListener(networkListener);
+    }
   }
+
+  if (clickResult?.error && !clickResult?.recoverable) throw new Error(clickResult.error);
+
+  const observed = await attachNewTabsIfAny(session, tabId, beforeIds, args || {});
+  const merged = mergeNewTabObservation(clickResult, observed);
+  if (networkUrls.length > 0) {
+    merged.network = { requests: [...new Set(networkUrls)], count: new Set(networkUrls).size };
+  }
+  return merged;
 }
 
 export async function handleFill(args: CommandArgs = {}, session: SessionName): Promise<any> {

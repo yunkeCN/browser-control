@@ -15162,12 +15162,14 @@ var init_schema = __esm({
         hasVisibleText: external_exports.boolean().optional(),
         textIncludes: external_exports.string().optional(),
         viewportOnly: external_exports.boolean().optional(),
-        boxes: external_exports.boolean().optional()
+        boxes: external_exports.boolean().optional(),
+        baseline: external_exports.string().optional().describe("Baseline snapshot ID for DOM structure diff. First call stores baseline; second call returns structured added/removed/changed diff.")
       }).strict(),
       click: external_exports.object({
         target: elementTarget,
         tabId,
-        after: external_exports.enum(["auto", "none", "changes", "snapshot"]).optional()
+        after: external_exports.enum(["auto", "none", "snapshot"]).optional(),
+        baseline: external_exports.string().optional().describe("Baseline snapshot ID for DOM structure diff. Compare click result diff against a snapshot baseline.")
       }).strict(),
       click_probe: external_exports.object({
         target: elementTarget,
@@ -15443,6 +15445,161 @@ var init_navigate = __esm({
   }
 });
 
+// src/controller/commands/snapshot-diff.ts
+function computeSnapshotDiff(baselineTree, currentTree) {
+  const baselineNodes = flattenTree(baselineTree, []);
+  const currentNodes = flattenTree(currentTree, []);
+  const baselineMap = /* @__PURE__ */ new Map();
+  for (const node of baselineNodes) {
+    if (node.structureId) baselineMap.set(node.structureId, node);
+  }
+  const currentMap = /* @__PURE__ */ new Map();
+  for (const node of currentNodes) {
+    if (node.structureId) currentMap.set(node.structureId, node);
+  }
+  const added = [];
+  const removed = [];
+  const changed = [];
+  for (const node of currentNodes) {
+    if (!node.structureId) continue;
+    if (!baselineMap.has(node.structureId)) {
+      added.push({
+        role: node.role,
+        name: node.name,
+        tag: node.tag,
+        text: node.text || void 0,
+        ref: node.ref,
+        position: node.path.join(" > "),
+        childrenCount: node.childCount,
+        childLabels: node.childLabels
+      });
+    }
+  }
+  for (const node of baselineNodes) {
+    if (!node.structureId) continue;
+    if (!currentMap.has(node.structureId)) {
+      removed.push({
+        role: node.role,
+        name: node.name,
+        tag: node.tag,
+        text: node.text || void 0,
+        ref: node.ref,
+        position: node.path.join(" > "),
+        childrenCount: node.childCount,
+        childLabels: node.childLabels
+      });
+    }
+  }
+  for (const node of currentNodes) {
+    if (!node.structureId) continue;
+    const baseline = baselineMap.get(node.structureId);
+    if (!baseline) continue;
+    if (baseline.text !== node.text) {
+      changed.push({
+        ref: node.ref || baseline.ref || "",
+        structureId: node.structureId,
+        role: node.role,
+        name: node.name,
+        tag: node.tag,
+        attr: "text",
+        from: baseline.text,
+        to: node.text
+      });
+    }
+  }
+  const hasChanges = added.length > 0 || removed.length > 0 || changed.length > 0;
+  const summary = buildSummary(added, removed, changed);
+  return { added, removed, changed, summary, hasChanges };
+}
+function flattenTree(nodes, parents, depth = 0) {
+  if (depth > 20) return [];
+  const result = [];
+  for (const item of nodes) {
+    if (!item || typeof item === "string") continue;
+    if (!("tag" in item)) continue;
+    const node = item;
+    const text = node.text || "";
+    const ref = node.ref || void 0;
+    const structureId = ref ? extractStructureId(ref) : void 0;
+    const role = node.role || "generic";
+    const name = node.name || "";
+    const tag = node.tag || "";
+    const children = extractChildren(node.children);
+    const childLabels = children.slice(0, 10).map((c) => c.role ? `${c.role} "${c.text || c.name || ""}"` : c.text || "");
+    result.push({
+      ref,
+      structureId,
+      role,
+      name,
+      tag,
+      text,
+      path: [...parents, `${role} "${name || text || role}"`],
+      childCount: children.length,
+      childLabels
+    });
+    result.push(...flattenTree(children, [...parents, `${role} "${name || text || role}"`], depth + 1));
+  }
+  return result;
+}
+function extractChildren(children) {
+  if (!children) return [];
+  return children.filter(
+    (c) => typeof c === "object" && "tag" in c
+  );
+}
+function extractStructureId(ref) {
+  const match = /^@e([a-z0-9]+)_\d+$/i.exec(ref);
+  return match ? match[1] : void 0;
+}
+function buildSummary(added, removed, changed) {
+  const parts = [];
+  if (added.length > 0) {
+    const byRole = countBy(added, (n) => n.role);
+    const desc = [...byRole.entries()].map(([role, count]) => `${count} \u4E2A ${role}`).join("\u3001");
+    parts.push(`\u65B0\u589E ${added.length} \u4E2A\u5143\u7D20\uFF08${desc}\uFF09`);
+  }
+  if (removed.length > 0) {
+    const byRole = countBy(removed, (n) => n.role);
+    const desc = [...byRole.entries()].map(([role, count]) => `${count} \u4E2A ${role}`).join("\u3001");
+    parts.push(`\u79FB\u9664 ${removed.length} \u4E2A\u5143\u7D20\uFF08${desc}\uFF09`);
+  }
+  if (changed.length > 0) {
+    parts.push(`\u53D8\u5316 ${changed.length} \u4E2A\u5143\u7D20`);
+  }
+  return parts.length > 0 ? parts.join("\uFF1B") : "\u65E0\u53D8\u5316";
+}
+function countBy(items, keyFn) {
+  const map2 = /* @__PURE__ */ new Map();
+  for (const item of items) {
+    const key = keyFn(item);
+    map2.set(key, (map2.get(key) || 0) + 1);
+  }
+  return map2;
+}
+var init_snapshot_diff = __esm({
+  "src/controller/commands/snapshot-diff.ts"() {
+    "use strict";
+  }
+});
+
+// src/controller/commands/shared-baseline.ts
+function setBaseline(id, tree) {
+  store.set(id, tree);
+}
+function getBaseline(id) {
+  return store.get(id);
+}
+function hasBaseline(id) {
+  return store.has(id);
+}
+var store;
+var init_shared_baseline = __esm({
+  "src/controller/commands/shared-baseline.ts"() {
+    "use strict";
+    store = /* @__PURE__ */ new Map();
+  }
+});
+
 // src/controller/commands/snapshot.ts
 function extractTree(raw) {
   const snapshot2 = raw.snapshot;
@@ -15471,6 +15628,8 @@ var init_snapshot = __esm({
   "src/controller/commands/snapshot.ts"() {
     "use strict";
     init_runner();
+    init_snapshot_diff();
+    init_shared_baseline();
     def2 = {
       name: "snapshot",
       requiredArgs: [],
@@ -15482,7 +15641,8 @@ var init_snapshot = __esm({
           "hasVisibleText",
           "textIncludes",
           "viewportOnly",
-          "boxes"
+          "boxes",
+          "baseline"
         ];
         const unknownKeys = Object.keys(args).filter((k) => !validKeys.includes(k));
         if (unknownKeys.length > 0) {
@@ -15496,20 +15656,33 @@ var init_snapshot = __esm({
         if (args.tabId !== void 0 && typeof args.tabId !== "number") {
           throw new Error("tabId \u5FC5\u987B\u662F\u6570\u5B57");
         }
+        if (args.baseline !== void 0 && typeof args.baseline !== "string") {
+          throw new Error("baseline \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
+        }
         return args;
       },
       execute: async (input, daemon) => {
+        const { baseline, ...snapshotArgs } = input;
         const effectiveArgs = {
-          ...input,
-          viewportOnly: input.viewportOnly ?? false,
-          boxes: input.boxes ?? true
+          ...snapshotArgs,
+          viewportOnly: snapshotArgs.viewportOnly ?? false,
+          boxes: snapshotArgs.boxes ?? true
         };
         const envelope = daemon.buildEnvelope(
           "snapshot",
           effectiveArgs
         );
         const response = await daemon.command(envelope);
-        return response.data;
+        const daemonBody = response.data || {};
+        const snapshotData = daemonBody.data;
+        if (baseline && snapshotData) {
+          snapshotData._baseline = baseline;
+          const rawTree = snapshotData.tree;
+          if (rawTree) {
+            snapshotData._treeCapture = JSON.parse(JSON.stringify(rawTree));
+          }
+        }
+        return daemonBody;
       },
       toResult: (raw) => {
         const snapshotData = raw.data;
@@ -15520,10 +15693,48 @@ var init_snapshot = __esm({
             nextSteps: ["\u8BF7\u786E\u8BA4\u5F53\u524D\u6807\u7B7E\u9875\u5B58\u5728", "\u91CD\u8BD5 snapshot \u547D\u4EE4"]
           };
         }
-        const tree = extractTree(snapshotData);
-        const elementCount = countElements(snapshotData);
         const title = String(snapshotData.title || "");
         const url2 = String(snapshotData.url || "");
+        const tree = extractTree(snapshotData);
+        const elementCount = countElements(snapshotData);
+        const baseline = snapshotData._baseline;
+        const rawTree = snapshotData._treeCapture;
+        if (baseline) {
+          if (!hasBaseline(baseline)) {
+            if (rawTree) {
+              setBaseline(baseline, rawTree);
+            }
+            return {
+              ok: true,
+              summary: `\u57FA\u7EBF\u5DF2\u5EFA\u7ACB: ${baseline}\uFF08${elementCount} \u4E2A\u4EA4\u4E92\u5143\u7D20\uFF09`,
+              data: {
+                title,
+                url: url2,
+                tree,
+                elementCount,
+                baselineId: baseline
+              }
+            };
+          }
+          const baselineTree = getBaseline(baseline);
+          const currentTree = rawTree || [];
+          const diff = computeSnapshotDiff(baselineTree, currentTree);
+          if (rawTree) {
+            setBaseline(baseline, rawTree);
+          }
+          return {
+            ok: true,
+            summary: `\u57FA\u7EBF\u5BF9\u6BD4 ${baseline}: ${diff.summary}`,
+            data: {
+              title,
+              url: url2,
+              tree,
+              elementCount,
+              baselineId: baseline,
+              diff
+            }
+          };
+        }
         return {
           ok: true,
           summary: `\u9875\u9762${title ? `\u300C${title}\u300D` : ""}\u5FEB\u7167: ${elementCount} \u4E2A\u4EA4\u4E92\u5143\u7D20`,
@@ -15571,9 +15782,11 @@ var init_click = __esm({
   "src/controller/commands/click.ts"() {
     "use strict";
     init_runner();
+    init_snapshot_diff();
+    init_shared_baseline();
     ELEMENT_REF_RE = /^@e[^\s_]+_\d+$/;
     CSS_PREFIX = "css=";
-    AFTER_VALUES = ["auto", "none", "changes", "snapshot"];
+    AFTER_VALUES = ["auto", "none", "snapshot"];
     def3 = {
       name: "click",
       requiredArgs: ["target"],
@@ -15591,12 +15804,16 @@ var init_click = __esm({
           throw new Error("tabId \u5FC5\u987B\u662F\u6570\u5B57");
         }
         if (args.after !== void 0 && !AFTER_VALUES.includes(args.after)) {
-          throw new Error("after \u5FC5\u987B\u662F auto / none / changes / snapshot \u4E4B\u4E00");
+          throw new Error("after \u5FC5\u987B\u662F auto / none / snapshot \u4E4B\u4E00");
+        }
+        if (args.baseline !== void 0 && typeof args.baseline !== "string") {
+          throw new Error("baseline \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
         }
         return {
           target: args.target,
           tabId: args.tabId,
-          after: args.after
+          after: args.after,
+          baseline: args.baseline
         };
       },
       /**
@@ -15604,12 +15821,17 @@ var init_click = __esm({
        * 通过 DaemonClient 向 daemon 发送 click 命令
        */
       execute: async (input, daemon) => {
+        const { baseline, ...clickArgs } = input;
         const envelope = daemon.buildEnvelope(
           "click",
-          input
+          clickArgs
         );
         const response = await daemon.command(envelope);
-        return response.data;
+        const daemonBody = response.data || {};
+        if (baseline) {
+          daemonBody._baseline = baseline;
+        }
+        return daemonBody;
       },
       /**
        * 将 daemon 响应转换为 LLM-friendly 格式
@@ -15645,12 +15867,33 @@ var init_click = __esm({
           }
         }
         const newTabOpened = Boolean(clickData.newTabOpened);
+        const rawNetwork = clickData.network;
+        const network = rawNetwork?.requests?.length ? { requests: rawNetwork.requests, count: rawNetwork.count || rawNetwork.requests.length } : void 0;
+        let diff;
+        const baseline = clickData._baseline;
+        if (baseline && rawPostSnapshot) {
+          const baselineTree = getBaseline(baseline);
+          const currentTree = rawPostSnapshot.tree;
+          if (baselineTree && currentTree) {
+            diff = computeSnapshotDiff(
+              baselineTree,
+              currentTree
+            );
+            setBaseline(baseline, currentTree);
+          }
+        }
         const parts = ["\u5DF2\u70B9\u51FB\u5143\u7D20"];
         if (changeSummary) {
           parts.push(changeSummary);
         }
         if (postSnapshot) {
           parts.push(`\u5FEB\u7167: ${postSnapshot.elementCount} \u4E2A\u5143\u7D20`);
+        }
+        if (network) {
+          parts.push(`\u89E6\u53D1 ${network.count} \u4E2A\u63A5\u53E3\u8BF7\u6C42`);
+        }
+        if (diff) {
+          parts.push(`\u57FA\u7EBF\u5BF9\u6BD4 ${baseline}: ${diff.summary}`);
         }
         return {
           ok: true,
@@ -15659,7 +15902,9 @@ var init_click = __esm({
             clicked: true,
             changeSummary,
             newTabOpened,
-            postSnapshot
+            postSnapshot,
+            diff,
+            network
           }
         };
       }

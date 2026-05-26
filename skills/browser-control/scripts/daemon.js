@@ -3685,16 +3685,15 @@ var DAEMON_CAPABILITIES = [
 var COMMANDS = {
   navigate: { required: ["url"], optional: ["newTab", "timeoutMs"] },
   find_tab: { required: [], optional: ["urlIncludes", "titleIncludes", "active", "tabId", "attach"] },
-  snapshot: { required: [], optional: ["tabId", "roles", "tags", "hasVisibleText", "textIncludes", "viewportOnly", "boxes"], example: { tabId: 123, roles: ["button", "link"], hasVisibleText: true, viewportOnly: true } },
+  snapshot: { required: [], optional: ["tabId", "roles", "tags", "hasVisibleText", "textIncludes", "viewportOnly", "boxes", "baseline"], example: { tabId: 123, roles: ["button", "link"], hasVisibleText: true, viewportOnly: true } },
   click: {
     required: ["target"],
-    optional: ["tabId", "after"],
-    example: { target: "@e1jm0sbb_1", after: "auto" }
+    optional: ["tabId", "after", "baseline"],
+    example: { target: "@e1abc23_1", after: "auto", baseline: "my-page" }
   },
   click_probe: {
     required: ["target"],
     optional: ["tabId", "strategy", "force", "button", "clickCount", "modifiers", "observeNewTab", "expectNewTab", "waitMs", "filter", "includeHeaders", "includeBody", "redactSensitive", "maxRequests"],
-    example: { target: "@e1jm0sbb_1", strategy: "auto", filter: "/api/" },
     strategies: ["auto", "cdp_mouse", "dom_pointer", "element_click"]
   },
   cdp_click_at: { required: ["x", "y"], optional: ["tabId", "button", "clickCount", "modifiers"] },
@@ -4073,12 +4072,12 @@ function validateClickAfter(request, spec) {
   if (request.command !== "click") return;
   const value = request.args.after;
   if (value === void 0 || value === null || value === "") return;
-  if (["auto", "none", "changes", "snapshot"].includes(value)) return;
-  throw new ProtocolError("VALIDATION_ERROR", "after must be one of auto, none, changes, or snapshot for command 'click'", {
+  if (["auto", "none", "snapshot"].includes(value)) return;
+  throw new ProtocolError("VALIDATION_ERROR", "after must be one of auto, none, or snapshot for command 'click'", {
     ...validationDetails(request, spec, "after"),
-    expectedValues: ["auto", "none", "changes", "snapshot"],
+    expectedValues: ["auto", "none", "snapshot"],
     value,
-    hint: 'Use after:"auto" for the default post-click summary, "snapshot" when you need the next page state, "changes" for compact diffs, or "none" for a raw click.'
+    hint: 'Use after:"auto" for the default post-click summary and postSnapshot, "snapshot" for explicit full snapshot, or "none" for a raw click. Use baseline parameter with snapshot baseline for structured DOM diff.'
   });
 }
 function mapTargetArgs(args) {

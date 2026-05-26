@@ -41,12 +41,14 @@ export const commandArgSchemas = {
     hasVisibleText: z.boolean().optional(),
     textIncludes: z.string().optional(),
     viewportOnly: z.boolean().optional(),
-    boxes: z.boolean().optional()
+    boxes: z.boolean().optional(),
+    baseline: z.string().optional().describe('Baseline snapshot ID for DOM structure diff. First call stores baseline; second call returns structured added/removed/changed diff.')
   }).strict(),
   click: z.object({
     target: elementTarget,
     tabId,
-    after: z.enum(['auto', 'none', 'changes', 'snapshot']).optional()
+    after: z.enum(['auto', 'none', 'snapshot']).optional(),
+    baseline: z.string().optional().describe('Baseline snapshot ID for DOM structure diff. Compare click result diff against a snapshot baseline.')
   }).strict(),
   click_probe: z.object({
     target: elementTarget,

@@ -14,6 +14,8 @@
 import type { DaemonClient } from '../../mcp/daemon-client';
 import type { CommandResult } from '../types';
 import { runCommand, type CommandDefinition } from '../runner';
+import { computeSnapshotDiff, type StructureDiff } from './snapshot-diff';
+import { getBaseline, setBaseline } from './shared-baseline';
 
 // ─── 类型定义 ────────────────────────────────────────────────────
 
@@ -23,20 +25,26 @@ export interface ClickInput {
   target: string;
   /** 标签页 ID（可选，默认使用当前活跃标签页） */
   tabId?: number;
-  /** 点击后的观察模式（可选，默认 auto） */
-  after?: 'auto' | 'none' | 'changes' | 'snapshot';
+  /** 点击后的观察模式（可选，默认 auto）。snapshot 模式返回完整 postSnapshot tree */
+  after?: 'auto' | 'none' | 'snapshot';
+  /** 基线 ID（可选）。与 snapshot baseline 共用存储，自动对比点击前后的 DOM 结构差异 */
+  baseline?: string;
 }
 
 /** click 命令的输出数据 */
 export interface ClickData {
   /** 是否成功点击 */
   clicked: boolean;
-  /** 页面变化摘要（after=auto / changes 时提供） */
+  /** 页面变化摘要 */
   changeSummary?: string;
   /** 是否打开了新标签页 */
   newTabOpened?: boolean;
   /** 点击后快照（after=snapshot 时提供） */
   postSnapshot?: { tree: string; elementCount: number };
+  /** DOM 结构差异（baseline 模式时提供） */
+  diff?: StructureDiff;
+  /** 点击后 700ms 内捕获的网络请求 URL 列表（轻量级，仅 URL） */
+  network?: { requests: string[]; count: number };
 }
 
 // ─── 辅助函数 ────────────────────────────────────────────────────
@@ -48,7 +56,7 @@ const ELEMENT_REF_RE = /^@e[^\s_]+_\d+$/;
 const CSS_PREFIX = 'css=';
 
 /** after 参数的允许值 */
-const AFTER_VALUES = ['auto', 'none', 'changes', 'snapshot'] as const;
+const AFTER_VALUES = ['auto', 'none', 'snapshot'] as const;
 
 /**
  * 验证 target 是否有效
@@ -110,12 +118,16 @@ const def: CommandDefinition<ClickInput, ClickData> = {
       args.after !== undefined &&
       !(AFTER_VALUES as readonly string[]).includes(args.after as string)
     ) {
-      throw new Error('after 必须是 auto / none / changes / snapshot 之一');
+      throw new Error('after 必须是 auto / none / snapshot 之一');
+    }
+    if (args.baseline !== undefined && typeof args.baseline !== 'string') {
+      throw new Error('baseline 必须是字符串');
     }
     return {
       target: args.target as string,
       tabId: args.tabId as number | undefined,
-      after: args.after as 'auto' | 'none' | 'changes' | 'snapshot' | undefined,
+      after: args.after as 'auto' | 'none' | 'snapshot' | undefined,
+      baseline: args.baseline as string | undefined,
     };
   },
 
@@ -127,12 +139,19 @@ const def: CommandDefinition<ClickInput, ClickData> = {
     input: ClickInput,
     daemon: DaemonClient,
   ): Promise<Record<string, unknown>> => {
+    // 分离 baseline 参数（不发送到 daemon）
+    const { baseline, ...clickArgs } = input;
     const envelope = daemon.buildEnvelope(
       'click',
-      input as unknown as Record<string, unknown>,
+      clickArgs as unknown as Record<string, unknown>,
     );
     const response = await daemon.command(envelope);
-    return response.data as Record<string, unknown>;
+    // 注入 baseline 到响应数据
+    const daemonBody = response.data as Record<string, unknown> || {};
+    if (baseline) {
+      daemonBody._baseline = baseline;
+    }
+    return daemonBody;
   },
 
   /**
@@ -180,6 +199,28 @@ const def: CommandDefinition<ClickInput, ClickData> = {
     // 检测是否打开了新标签页
     const newTabOpened = Boolean(clickData.newTabOpened);
 
+    // 轻量网络请求列表
+    const rawNetwork = clickData.network as { requests?: string[]; count?: number } | undefined;
+    const network = rawNetwork?.requests?.length
+      ? { requests: rawNetwork.requests, count: rawNetwork.count || rawNetwork.requests.length }
+      : undefined;
+
+    // baseline diff 模式: 对比点击前后的 DOM 结构
+    let diff: StructureDiff | undefined;
+    const baseline = clickData._baseline as string | undefined;
+    if (baseline && rawPostSnapshot) {
+      const baselineTree = getBaseline(baseline);
+      const currentTree = rawPostSnapshot.tree as Array<Record<string, unknown>> | undefined;
+      if (baselineTree && currentTree) {
+        diff = computeSnapshotDiff(
+          baselineTree,
+          currentTree as any,
+        );
+        // 更新基线为点击后的状态
+        setBaseline(baseline, currentTree as any);
+      }
+    }
+
     // 组装 summary
     const parts: string[] = ['已点击元素'];
     if (changeSummary) {
@@ -187,6 +228,12 @@ const def: CommandDefinition<ClickInput, ClickData> = {
     }
     if (postSnapshot) {
       parts.push(`快照: ${postSnapshot.elementCount} 个元素`);
+    }
+    if (network) {
+      parts.push(`触发 ${network.count} 个接口请求`);
+    }
+    if (diff) {
+      parts.push(`基线对比 ${baseline}: ${diff.summary}`);
     }
 
     return {
@@ -197,6 +244,8 @@ const def: CommandDefinition<ClickInput, ClickData> = {
         changeSummary,
         newTabOpened,
         postSnapshot,
+        diff,
+        network,
       },
     };
   },
