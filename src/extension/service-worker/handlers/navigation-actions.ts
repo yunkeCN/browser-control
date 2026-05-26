@@ -1,6 +1,6 @@
 import { createArtifactHint, getTabMetadata } from '../runtime-metadata';
 import { getActiveTabId, setActiveTab } from '../sessions';
-import { ensureNetworkCapture, performCdpEvaluate, performCdpKeyboardPress, performCdpMouseClick, performCdpWheelScroll, runClickProbeCapture } from './network-cdp';
+import { ensureNetworkCapture, performCdpClickAt, performCdpEvaluate, performCdpKeyboardPress, performCdpMouseClick, performCdpWheelScroll, runClickProbeCapture } from './network-cdp';
 import { getAccessibilitySnapshot } from '../page-runtime/snapshot';
 import { captureViewportTextObservation } from '../page-runtime/observation';
 import { getDocumentTextSnapshot, getTextSnapshot } from '../page-runtime/get-text';
@@ -553,6 +553,18 @@ export async function handleScreenshot(args: CommandArgs = {}, session: SessionN
     activatedTabForCapture,
     restoredActiveTabId
   };
+}
+
+export async function handleCdpClickAt(args: CommandArgs = {}, session: SessionName): Promise<any> {
+  const tabId = args?.tabId || getActiveTabId(session);
+  if (!tabId) throw new Error('No active tab in session');
+
+  const { x, y, button, clickCount, modifiers } = args || {};
+  if (typeof x !== 'number' || typeof y !== 'number') {
+    throw new Error('x and y coordinates are required for cdp_click_at');
+  }
+
+  return performCdpClickAt(tabId, x, y, { button, clickCount, modifiers });
 }
 
 export async function handleObserveCapture(args: CommandArgs = {}, session: SessionName): Promise<any> {

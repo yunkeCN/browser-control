@@ -1252,6 +1252,48 @@
     }
     return event;
   }
+  async function performCdpClickAt(tabId, x, y, options = {}) {
+    const lease = await acquireActionDebugger(tabId);
+    if (lease.error) {
+      return { clicked: false, error: lease.error, warnings: lease.warnings || [] };
+    }
+    const warnings = [...lease.warnings || []];
+    const debuggee = lease.debuggee;
+    const button = options?.button === "right" ? "right" : options?.button === "middle" ? "middle" : "left";
+    const clickCount = Math.max(1, Number(options?.clickCount || 1));
+    const modifiers = cdpModifierMask(options?.modifiers);
+    try {
+      await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        x,
+        y,
+        button: "none",
+        modifiers
+      });
+      await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        x,
+        y,
+        button,
+        clickCount,
+        modifiers
+      });
+      await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x,
+        y,
+        button,
+        clickCount,
+        modifiers
+      });
+      return { clicked: true, x, y, strategyUsed: "cdp_mouse" };
+    } catch (err) {
+      return { clicked: false, error: `CDP mouse dispatch failed: ${err?.message || String(err)}`, warnings };
+    } finally {
+      const detachWarning = await releaseActionDebugger(lease);
+      if (detachWarning) warnings.push(detachWarning);
+    }
+  }
   async function performCdpKeyboardPress(tabId, key, options = {}) {
     const lease = await acquireActionDebugger(tabId);
     if (lease.error) {
@@ -1743,7 +1785,41 @@
       return node;
     }
     function shouldAssignRef(node) {
-      return node.box.visible && node.receivesPointerEvents;
+      if (!node.box.visible) return false;
+      if (node.receivesPointerEvents) return true;
+      if (isNativelyInteractive(node)) return true;
+      return false;
+    }
+    function isNativelyInteractive(node) {
+      const interactiveRoles = /* @__PURE__ */ new Set([
+        "button",
+        "link",
+        "menuitem",
+        "option",
+        "tab",
+        "checkbox",
+        "radio",
+        "switch",
+        "slider",
+        "spinbutton",
+        "searchbox",
+        "textbox",
+        "combobox",
+        "listbox",
+        "menu",
+        "scrollbar"
+      ]);
+      if (interactiveRoles.has(node.role)) return true;
+      const interactiveTags = /* @__PURE__ */ new Set([
+        "a",
+        "button",
+        "input",
+        "select",
+        "textarea",
+        "summary"
+      ]);
+      if (interactiveTags.has(node.tag)) return true;
+      return false;
     }
     function applyFilters(root2) {
       if (!roleFilter && !tagFilter && !hasVisibleText && !textIncludes)
@@ -2245,16 +2321,7 @@
         return false;
       if (getStyle(el).pointerEvents === "none")
         return false;
-      const doc = el.ownerDocument || document;
-      const win = doc.defaultView || window;
-      const x = Math.max(0, Math.min((win.innerWidth || window.innerWidth || 0) - 1, box.x + box.width / 2));
-      const y = Math.max(0, Math.min((win.innerHeight || window.innerHeight || 0) - 1, box.y + box.height / 2));
-      try {
-        const hit = doc.elementFromPoint?.(x, y);
-        return !hit || hit === el || el.contains(hit);
-      } catch {
-        return true;
-      }
+      return true;
     }
     function computeBox(el) {
       const rect = safeRect(el);
@@ -4723,6 +4790,15 @@
       restoredActiveTabId
     };
   }
+  async function handleCdpClickAt(args = {}, session) {
+    const tabId = args?.tabId || getActiveTabId(session);
+    if (!tabId) throw new Error("No active tab in session");
+    const { x, y, button, clickCount, modifiers } = args || {};
+    if (typeof x !== "number" || typeof y !== "number") {
+      throw new Error("x and y coordinates are required for cdp_click_at");
+    }
+    return performCdpClickAt(tabId, x, y, { button, clickCount, modifiers });
+  }
   async function handleObserveCapture(args = {}, session) {
     const tabId = args?.tabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
@@ -5009,6 +5085,9 @@
           break;
         case "click_probe":
           result = await handleClickProbe(args, session);
+          break;
+        case "cdp_click_at":
+          result = await handleCdpClickAt(args, session);
           break;
         case "fill":
           result = await handleFill(args, session);

@@ -123,9 +123,16 @@ const def: CommandDefinition<SnapshotInput, SnapshotData> = {
     input: SnapshotInput,
     daemon: DaemonClient,
   ): Promise<Record<string, unknown>> => {
+    // viewportOnly 默认 false: 确保 Drawer/Modal 内元素被捕获
+    // boxes 默认 true: 确保元素位置信息可用于 click_text 等命令
+    const effectiveArgs = {
+      ...input,
+      viewportOnly: input.viewportOnly ?? false,
+      boxes: input.boxes ?? true,
+    } as unknown as Record<string, unknown>;
     const envelope = daemon.buildEnvelope(
       'snapshot',
-      input as unknown as Record<string, unknown>,
+      effectiveArgs,
     );
     const response = await daemon.command(envelope);
     return response.data as Record<string, unknown>;

@@ -98,6 +98,7 @@ var COMMANDS = {
     example: { target: "@e1jm0sbb_1", strategy: "auto", filter: "/api/" },
     strategies: ["auto", "cdp_mouse", "dom_pointer", "element_click"]
   },
+  cdp_click_at: { required: ["x", "y"], optional: ["tabId", "button", "clickCount", "modifiers"] },
   fill: {
     required: ["target", "value"],
     optional: ["tabId", "strategy", "clear", "commit", "expectChange", "observe"],

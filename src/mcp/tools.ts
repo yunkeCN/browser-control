@@ -6,17 +6,13 @@
 
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { DaemonClient, type BrowserControlEnvelope } from './daemon-client.js';
-import { COMMANDS, PROTOCOL_VERSION } from './protocol.js';
+import { DaemonClient } from './daemon-client.js';
 import {
   assertSchemaRegistryMatchesProtocol,
   closeSessionInputSchema,
-  commandArgSchemas,
   diagnosticInputSchema,
   unifiedCommandInputSchema,
-  type CommandName,
 } from './schema.js';
-import { riskNoteFor } from './risk-notes.js';
 import { ensureDaemon } from './daemon-lifecycle.js';
 import { McpSessionManager } from './session-manager.js';
 
@@ -36,10 +32,14 @@ import { observeStart, observeDiff } from '../controller/commands/observe.js';
 import { networkStart, networkList, networkDetail, networkStop } from '../controller/commands/network.js';
 import { listTabs, findTab, closeTab } from '../controller/commands/tabs.js';
 import { closeSession as controllerCloseSession } from '../controller/commands/session.js';
+import { clickProbe } from '../controller/commands/click-probe.js';
+import { saveAsPdf } from '../controller/commands/save-as-pdf.js';
+import { download } from '../controller/commands/download.js';
 import type { CommandResult } from '../controller/types.js';
 
-export function browserCommandNames(): CommandName[] {
-  return Object.keys(COMMANDS) as CommandName[];
+/** 所有已实现 Controller 的命令名 */
+export function implementedCommandNames(): string[] {
+  return Object.keys(CONTROLLER_DISPATCH);
 }
 
 /**
@@ -71,12 +71,10 @@ const CONTROLLER_DISPATCH: Record<
   find_tab: (args, client) => findTab(args, client),
   close_tab: (args, client) => closeTab(args, client),
   close_session: (args, client) => controllerCloseSession(args, client),
+  click_probe: (args, client) => clickProbe(args, client),
+  save_as_pdf: (args, client) => saveAsPdf(args, client),
+  download: (args, client) => download(args, client),
 };
-
-/** 未使用 Controller 的命令（回落方案：直连 daemon） */
-const FALLBACK_COMMANDS = new Set<CommandName>([
-  'click_probe', 'save_as_pdf', 'download',
-]);
 
 export function registerBrowserControlTools(
   server: McpServer,
@@ -244,26 +242,28 @@ async function runControllerCommand(
     return toCommandToolResult(result);
   }
 
-  // 回落：未使用 Controller 的命令，直连 daemon
-  if (!isCommandName(command)) {
-    return toRawToolResult(unknownCommandResult(command, session), true);
-  }
-  return executeCommand(
-    command,
-    args as Record<string, unknown>,
-    { id: input.id, timeoutMs: input.timeoutMs, session },
-    client,
-  );
+  // 未知命令
+  return toCommandToolResult({
+    ok: false,
+    summary: command ? `未知命令: "${command}"` : '命令名不能为空',
+    nextSteps: [`可用命令: ${Object.keys(CONTROLLER_DISPATCH).join(', ')}`],
+  });
 }
 
 /**
  * 将 CommandResult 转换为 MCP CallToolResult
  * content[0].text: summary（LLM 直接可读）
- * structuredContent: 完整结果（含 summary + data）
+ * structuredContent: 完整结果
  */
-function toCommandToolResult<T>(
-  result: CommandResult<T>,
-): CallToolResult {
+/** 将原始值转换为 MCP CallToolResult（用于诊断工具等非 Controller 命令） */
+function toRawToolResult(value: unknown, isError = false): CallToolResult {
+  const sc = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : { result: value };
+  return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }], structuredContent: sc, isError };
+}
+
+function toCommandToolResult<T>(result: CommandResult<T>): CallToolResult {
   return {
     content: [
       {
@@ -278,155 +278,3 @@ function toCommandToolResult<T>(
   };
 }
 
-/**
- * 将原始值转换为 MCP CallToolResult（保留原有行为）
- */
-function toRawToolResult(
-  value: unknown,
-  isError = false,
-): CallToolResult {
-  const sc: Record<string, unknown> =
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : { result: value };
-  return {
-    content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
-    structuredContent: sc,
-    isError,
-  };
-}
-
-// ─── 以下为原有的回落逻辑（直连 daemon），未改动 ────────────────
-
-async function executeCommand(
-  command: CommandName,
-  args: Record<string, unknown>,
-  controls: { id?: unknown; timeoutMs?: unknown; session: string },
-  client: DaemonClient,
-): Promise<CallToolResult> {
-  const envelope: BrowserControlEnvelope = {
-    id:
-      typeof controls.id === 'string' && controls.id
-        ? controls.id
-        : `mcp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    version: PROTOCOL_VERSION,
-    session: controls.session,
-    command,
-    args,
-    timeoutMs:
-      typeof controls.timeoutMs === 'number' &&
-      Number.isFinite(controls.timeoutMs) &&
-      controls.timeoutMs > 0
-        ? controls.timeoutMs
-        : 30000,
-  };
-  return executeEnvelope(command, envelope, client);
-}
-
-async function executeEnvelope(
-  command: CommandName,
-  envelope: BrowserControlEnvelope,
-  client: DaemonClient,
-): Promise<CallToolResult> {
-  const lifecycle = await ensureDaemon(client);
-  if (!lifecycle.ok)
-    return toRawToolResult(
-      { ok: false, command, session: envelope.session, lifecycle },
-      true,
-    );
-  const response = await client.command(envelope);
-  const result = withCommandMetadata(command, envelope.session, response.data);
-  return toRawToolResult(result, isErrorEnvelope(result));
-}
-
-const TARGET_COMMANDS = new Set<CommandName>([
-  'click',
-  'click_probe',
-  'fill',
-  'press',
-  'scroll',
-  'upload',
-]);
-
-function unknownCommandResult(
-  command: string,
-  session: string,
-): Record<string, unknown> {
-  const suggestions = commandSuggestions(command);
-  return {
-    ok: false,
-    command,
-    session,
-    error: {
-      code: 'UNKNOWN_COMMAND',
-      message: command
-        ? `Unknown Browser Control command "${command}".`
-        : 'Browser Control command is required.',
-      availableCommands: browserCommandNames(),
-      suggestions,
-    },
-  };
-}
-
-function commandSuggestions(command: string): string[] {
-  if (!command) return [];
-  const normalized = command
-    .replace(/([a-z])([A-Z])/g, '$1_$2')
-    .replace(/[-\s]+/g, '_')
-    .toLowerCase();
-  const names = browserCommandNames();
-  const exactNormalized = names.find((name) => name === normalized);
-  if (exactNormalized) return [exactNormalized];
-  return names
-    .map((name) => ({ name, distance: levenshtein(normalized, name) }))
-    .filter((candidate) => candidate.distance <= 4)
-    .sort(
-      (a, b) =>
-        a.distance - b.distance || a.name.localeCompare(b.name),
-    )
-    .slice(0, 3)
-    .map((candidate) => candidate.name);
-}
-
-function levenshtein(a: string, b: string): number {
-  const previous = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i += 1) {
-    let diagonal = previous[0];
-    previous[0] = i;
-    for (let j = 1; j <= b.length; j += 1) {
-      const insert = previous[j] + 1;
-      const remove = previous[j - 1] + 1;
-      const replace =
-        diagonal + (a[i - 1] === b[j - 1] ? 0 : 1);
-      diagonal = previous[j];
-      previous[j] = Math.min(insert, remove, replace);
-    }
-  }
-  return previous[b.length];
-}
-
-function isCommandName(command: string): command is CommandName {
-  return Object.prototype.hasOwnProperty.call(commandArgSchemas, command);
-}
-
-function withCommandMetadata(
-  command: CommandName,
-  session: string,
-  value: Record<string, unknown>,
-): Record<string, unknown> {
-  const risk = riskNoteFor(command);
-  return {
-    ...value,
-    command: typeof value.command === 'string' ? value.command : command,
-    session: typeof value.session === 'string' ? value.session : session,
-    ...(risk ? { riskNotes: [risk] } : {}),
-  };
-}
-
-function isErrorEnvelope(value: unknown): boolean {
-  return Boolean(
-    value &&
-      typeof value === 'object' &&
-      (value as Record<string, unknown>).ok === false,
-  );
-}

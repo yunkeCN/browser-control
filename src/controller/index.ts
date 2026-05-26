@@ -64,3 +64,17 @@ export type { ListTabsInput, ListTabsData, FindTabInput, FindTabData, CloseTabIn
 // 会话
 export { closeSession } from './commands/session';
 export type { CloseSessionInput, CloseSessionData } from './commands/session';
+
+// 高级点击
+export { clickProbe } from './commands/click-probe';
+export type { ClickProbeInput, ClickProbeData } from './commands/click-probe';
+
+export { clickText } from './commands/click-text';
+export type { ClickTextInput, ClickTextData } from './commands/click-text';
+
+// PDF 和下载
+export { saveAsPdf } from './commands/save-as-pdf';
+export type { SaveAsPdfInput, SaveAsPdfData } from './commands/save-as-pdf';
+
+export { download } from './commands/download';
+export type { DownloadInput, DownloadData } from './commands/download';

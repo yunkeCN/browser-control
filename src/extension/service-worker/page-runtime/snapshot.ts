@@ -193,7 +193,36 @@ export function getAccessibilitySnapshot(options: any = {}) {
   }
 
   function shouldAssignRef(node: AriaNode): boolean {
-    return node.box.visible && node.receivesPointerEvents;
+    // 基础条件: 元素必须可见
+    if (!node.box.visible) return false;
+
+    // 条件1: CSS pointer-events 允许点击（不依赖 elementFromPoint）
+    // elementFromPoint 对 Portal 渲染的元素（Ant Design Select 选项）不可靠,
+    // 因为 Portal 的 stacking context 会导致 elementFromPoint 返回覆盖层而非目标元素
+    if (node.receivesPointerEvents) return true;
+
+    // 条件2: 原生可交互元素即使 CSS pointer-events 被覆盖层阻挡也应分配 ref
+    // 因为用户实际上可以通过 Tab 键、键盘等方式交互
+    if (isNativelyInteractive(node)) return true;
+
+    return false;
+  }
+
+  /** 判断元素是否原生就是可交互的（不计 CSS pointer-events 覆盖） */
+  function isNativelyInteractive(node: AriaNode): boolean {
+    const interactiveRoles = new Set([
+      'button', 'link', 'menuitem', 'option', 'tab', 'checkbox', 'radio',
+      'switch', 'slider', 'spinbutton', 'searchbox', 'textbox', 'combobox',
+      'listbox', 'menu', 'scrollbar',
+    ]);
+    if (interactiveRoles.has(node.role)) return true;
+
+    const interactiveTags = new Set([
+      'a', 'button', 'input', 'select', 'textarea', 'summary',
+    ]);
+    if (interactiveTags.has(node.tag)) return true;
+
+    return false;
   }
 
   function applyFilters(root: AriaNode): AriaNode {
@@ -735,16 +764,10 @@ export function getAccessibilitySnapshot(options: any = {}) {
       return false;
     if (getStyle(el).pointerEvents === 'none')
       return false;
-    const doc = el.ownerDocument || document;
-    const win = doc.defaultView || window;
-    const x = Math.max(0, Math.min((win.innerWidth || window.innerWidth || 0) - 1, box.x + box.width / 2));
-    const y = Math.max(0, Math.min((win.innerHeight || window.innerHeight || 0) - 1, box.y + box.height / 2));
-    try {
-      const hit = doc.elementFromPoint?.(x, y);
-      return !hit || hit === el || el.contains(hit);
-    } catch {
-      return true;
-    }
+    // 注意: 不使用 elementFromPoint 来判断可点击性。
+    // elementFromPoint 对 Portal 渲染的元素（Ant Design 下拉选项、Drawer 内容等）
+    // 会因为 z-index stacking context 而返回覆盖层而非目标元素，导致误判。
+    return true;
   }
 
   function computeBox(el: Element): Box {

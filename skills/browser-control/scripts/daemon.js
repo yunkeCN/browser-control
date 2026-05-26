@@ -3697,6 +3697,7 @@ var COMMANDS = {
     example: { target: "@e1jm0sbb_1", strategy: "auto", filter: "/api/" },
     strategies: ["auto", "cdp_mouse", "dom_pointer", "element_click"]
   },
+  cdp_click_at: { required: ["x", "y"], optional: ["tabId", "button", "clickCount", "modifiers"] },
   fill: {
     required: ["target", "value"],
     optional: ["tabId", "strategy", "clear", "commit", "expectChange", "observe"],
@@ -4275,11 +4276,13 @@ var package_default = {
     "e2e:fixture": "npm run build:extension && npm run build:protocol && npm run build:daemon && node tests/fixture-e2e.test.js",
     "e2e:live": "node tests/e2e-test.js",
     "serve:test-app": "node scripts/serve-test-app.mjs",
-    build: "npm run build:extension && npm run build:protocol && npm run build:daemon && npm run build:mcp",
+    build: "npm run build:extension && npm run build:protocol && npm run build:daemon && npm run build:mcp && npm run build:ctrl",
     "build:extension": "node scripts/build-extension.mjs",
     "build:protocol": "node scripts/build-protocol.mjs",
     "build:daemon": "node scripts/build-daemon.mjs",
     "build:mcp": "node scripts/build-mcp.mjs",
+    "build:ctrl": "node scripts/build-controller-cli.mjs",
+    "test:controller": "node --test --test-concurrency=1 tests/controller/*.test.js",
     "check:extension-build": "node scripts/check-extension-build-drift.mjs && node tests/extension-build.test.js"
   },
   dependencies: {

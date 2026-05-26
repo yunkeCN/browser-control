@@ -65,6 +65,14 @@ export const commandArgSchemas = {
     redactSensitive: z.boolean().optional(),
     maxRequests: z.number().int().positive().optional()
   }).strict(),
+  cdp_click_at: z.object({
+    x: z.number(),
+    y: z.number(),
+    tabId,
+    button: z.enum(['left', 'middle', 'right']).optional(),
+    clickCount: z.number().int().positive().optional(),
+    modifiers: z.array(z.string()).optional(),
+  }).strict(),
   fill: z.object({
     target: elementTarget,
     value: z.string(),

@@ -1105,6 +1105,42 @@ function buildCdpKeyboardEvent(type: 'rawKeyDown' | 'keyDown' | 'keyUp', definit
   return event;
 }
 
+export async function performCdpClickAt(
+  tabId: number,
+  x: number,
+  y: number,
+  options: { button?: string; clickCount?: number; modifiers?: string[] } = {}
+): Promise<any> {
+  const lease = await acquireActionDebugger(tabId);
+  if (lease.error) {
+    return { clicked: false, error: lease.error, warnings: lease.warnings || [] };
+  }
+
+  const warnings = [...(lease.warnings || [])];
+  const debuggee = lease.debuggee as any;
+  const button = options?.button === 'right' ? 'right' : options?.button === 'middle' ? 'middle' : 'left';
+  const clickCount = Math.max(1, Number(options?.clickCount || 1));
+  const modifiers = cdpModifierMask(options?.modifiers);
+
+  try {
+    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x, y, button: 'none', modifiers
+    });
+    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+      type: 'mousePressed', x, y, button, clickCount, modifiers
+    });
+    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+      type: 'mouseReleased', x, y, button, clickCount, modifiers
+    });
+    return { clicked: true, x, y, strategyUsed: 'cdp_mouse' };
+  } catch (err: any) {
+    return { clicked: false, error: `CDP mouse dispatch failed: ${err?.message || String(err)}`, warnings };
+  } finally {
+    const detachWarning = await releaseActionDebugger(lease);
+    if (detachWarning) warnings.push(detachWarning);
+  }
+}
+
 export async function performCdpKeyboardPress(tabId: number, key: string, options: any = {}): Promise<any> {
   const lease = await acquireActionDebugger(tabId);
   if (lease.error) {
