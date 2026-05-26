@@ -30,14 +30,17 @@ export async function runCommand<TInput, TData>(
   args: Record<string, unknown>,
   daemon: DaemonClient,
 ): Promise<CommandResult<TData>> {
+  // ── 提取信封字段（session/timeoutMs/id），避免干扰验证 ──
+  const { session, timeoutMs, id, ...commandArgs } = args;
+
   // ── 1. 参数验证 ──────────────────────────────────────────────
   let input: TInput;
   try {
-    input = def.validate(args);
+    input = def.validate(commandArgs);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     const missingFields = def.requiredArgs.filter(
-      (field) => args[field] === undefined || args[field] === null,
+      (field) => commandArgs[field] === undefined || commandArgs[field] === null,
     );
     const nextSteps: string[] = [];
     if (missingFields.length > 0) {
@@ -53,7 +56,14 @@ export async function runCommand<TInput, TData>(
   // ── 2. 调用 daemon ───────────────────────────────────────────
   let raw: Record<string, unknown>;
   try {
-    raw = await def.execute(input, daemon);
+    // 重新注入信封字段，使 buildEnvelope 能提取 session/timeoutMs/id
+    const executeArgs = {
+      ...(input as unknown as Record<string, unknown>),
+      ...(session !== undefined ? { session } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(id !== undefined ? { id } : {}),
+    };
+    raw = await def.execute(executeArgs as TInput, daemon);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return {

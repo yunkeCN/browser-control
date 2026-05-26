@@ -83,15 +83,21 @@ const def: CommandDefinition<ScreenshotInput, ScreenshotData> = {
   toResult: (raw: Record<string, unknown>): CommandResult<ScreenshotData> => {
     const rawData = raw.data as Record<string, unknown> | undefined;
 
-    if (!rawData || typeof rawData.filePath !== 'string') {
+    // daemon 将截图保存在 data.artifact.path（通过 extractArtifacts）
+    const filePath =
+      (rawData?.artifact as Record<string, unknown> | undefined)?.path as string |
+        undefined ||
+      (raw.artifacts as Array<Record<string, unknown>> | undefined)?.[0]?.path as
+        | string
+        | undefined;
+
+    if (!filePath) {
       return {
         ok: false,
         summary: '截图失败: daemon 未返回截图数据',
         nextSteps: ['请确认当前标签页存在', '重试 screenshot 命令'],
       };
     }
-
-    const filePath = rawData.filePath as string;
     const format = (rawData.format as string) || 'png';
 
     return {

@@ -35683,13 +35683,14 @@ function createSessionId() {
 
 // src/controller/runner.ts
 async function runCommand(def15, args, daemon) {
+  const { session, timeoutMs, id, ...commandArgs } = args;
   let input;
   try {
-    input = def15.validate(args);
+    input = def15.validate(commandArgs);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const missingFields = def15.requiredArgs.filter(
-      (field) => args[field] === void 0 || args[field] === null
+      (field) => commandArgs[field] === void 0 || commandArgs[field] === null
     );
     const nextSteps = [];
     if (missingFields.length > 0) {
@@ -35703,7 +35704,13 @@ async function runCommand(def15, args, daemon) {
   }
   let raw;
   try {
-    raw = await def15.execute(input, daemon);
+    const executeArgs = {
+      ...input,
+      ...session !== void 0 ? { session } : {},
+      ...timeoutMs !== void 0 ? { timeoutMs } : {},
+      ...id !== void 0 ? { id } : {}
+    };
+    raw = await def15.execute(executeArgs, daemon);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -36384,14 +36391,14 @@ var def9 = {
   },
   toResult: (raw) => {
     const rawData = raw.data;
-    if (!rawData || typeof rawData.filePath !== "string") {
+    const filePath = rawData?.artifact?.path || raw.artifacts?.[0]?.path;
+    if (!filePath) {
       return {
         ok: false,
         summary: "\u622A\u56FE\u5931\u8D25: daemon \u672A\u8FD4\u56DE\u622A\u56FE\u6570\u636E",
         nextSteps: ["\u8BF7\u786E\u8BA4\u5F53\u524D\u6807\u7B7E\u9875\u5B58\u5728", "\u91CD\u8BD5 screenshot \u547D\u4EE4"]
       };
     }
-    const filePath = rawData.filePath;
     const format = rawData.format || "png";
     return {
       ok: true,
