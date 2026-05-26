@@ -78,7 +78,7 @@ export function registerBrowserControlPrompts(server: McpServer): void {
       '',
       'Key optional parameters:',
       '- click "after": "auto" (default, returns summary + postSnapshot + triggered API requests), "none", "snapshot" (explicit full snapshot). click also captures network requests triggered within 700ms (URLs only, no body). For advanced click control (strategy, button, modifiers, network capture), use click_probe.',
-      '- get_text "scope": "document"/"full" (all visible text), "viewport" (viewport only)',
+      '- get_text "scope": "viewport" (default, viewport visible text), "document" (legacy body.innerText), "full" (rendered layout text, filters hidden/zero-size/off-layout)',
       '- fill strategy: "native_setter", "text_input", "paste_like"',
       '- fill "commit": "change" (default — triggers change event, use for auto-save), "blur" (blurs field, use for blur validation), "enter" (press Enter, use for search), "none" (set value only, submit via button separately)',
       '- press strategy: "auto", "cdp_keyboard", "dom_keyboard"',

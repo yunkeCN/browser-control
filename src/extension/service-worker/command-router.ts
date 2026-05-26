@@ -58,7 +58,7 @@ export async function executeCommand(
       case 'click_probe':
         result = await handleClickProbe(args, session);
         break;
-      case 'cdp_click_at':
+      case 'cdp_click_at' as any:
         result = await handleCdpClickAt(args, session);
         break;
       case 'fill':

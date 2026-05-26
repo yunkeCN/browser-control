@@ -35,7 +35,7 @@ The daemon listens on `http://127.0.0.1:10087` by default and the extension conn
 6. Use `@e` references from the latest snapshot as `target` for `click`, `click_probe`, `fill`, `press`, `scroll`, and `upload`; refresh the snapshot after navigation or significant DOM changes. Stale revisions fail closed with `STALE_ELEMENT_REFERENCE`. Use `scroll` for non-keyboard page or region scrolling; use `target:"css=..."` only when a snapshot ref is unavailable.
 7. Let `click` choose its internal strategy. Inspect `warnings`, `hitTest`, `changes`, and `postSnapshot` before retrying. For `fill` and `press`, use default strategies first.
 8. Covered click targets fail with `COVERED_TARGET`; prefer fixing the target locator, closing the overlay, or choosing a visible child target.
-9. Verify important state-changing actions with click `after`, `expectChange`, `observe_start` / `observe_diff`, `snapshot`, `wait_for`, or `node scripts/screenshot.js` when visual evidence matters.
+9. Verify important state-changing actions with click `after`, `expectChange`, `observe_start` / `observe_diff`, `snapshot`, `wait_for`, or `node scripts/screenshot.js` when visual evidence matters. For DOM structure diffs, store a snapshot baseline with `snapshot baseline=<id>`, perform the action, then call `snapshot baseline=<id>` again or use `click baseline=<id>` to get structured added/removed/changed subtrees.
 10. Stop and ask before sensitive, destructive, account-changing, purchase/payment, upload, submit/send/post/publish, credential, MFA, or permission-grant actions.
 11. Close task-specific tabs or sessions with `close_tab` / `close_session` when finished.
 

@@ -129,7 +129,9 @@ Arguments: optional `urlIncludes`, `titleIncludes`, `active`, `tabId`, and `atta
 
 Return a Playwright-inspired ARIA snapshot for interaction and page structure. Snapshot is optimized for choosing actionable targets, not for dumping all page prose; use `get_text` when you mainly need readable page text.
 
-Arguments: optional `tabId`, `roles`, `tags`, `hasVisibleText`, `textIncludes`, `viewportOnly`, and `boxes`.
+Arguments: optional `tabId`, `roles`, `tags`, `hasVisibleText`, `textIncludes`, `viewportOnly`, `boxes`, and `baseline`.
+
+When `baseline` is provided, the first call with a given baseline ID stores the current DOM structure tree. A subsequent call with the same baseline ID returns a structured diff showing added, removed, and changed subtrees instead of the full snapshot. Use this to see what DOM structure changed between two points in time without re-reading the entire tree.
 
 Response semantics:
 
@@ -149,17 +151,20 @@ Examples:
 ```bash
 node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"viewportOnly":true,"hasVisibleText":true}'
 node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"roles":["button","link","textbox","combobox"],"viewportOnly":true}'
+node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"baseline":"page-1"}'   # first call stores baseline
+node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"baseline":"page-1"}'   # second call returns diff
 ```
 
 ### `click`
 
 Click an element by strict snapshot ref or an explicit CSS fallback.
 
-Arguments: `target` required, optional `tabId` and `after`.
+Arguments: `target` required, optional `tabId`, `after`, and `baseline`.
 
 - `target:"@e<structureId>_<revision>"` uses a fresh snapshot ref.
 - `target:"css=<selector>"` is the explicit CSS fallback when no snapshot ref is available.
-- `after` defaults to `"auto"`. Use `"none"` for a raw click, `"changes"` for only a compact diff, or `"snapshot"` to always return a post-click snapshot.
+- `after` defaults to `"auto"` (returns summary + postSnapshot when changes are detected). Use `"none"` for a raw click, or `"snapshot"` to always return a post-click snapshot.
+- `baseline` pairs with a snapshot baseline ID. When provided, the click response includes a structured DOM diff (added/removed/changed subtrees) comparing the post-click DOM against the stored snapshot baseline.
 
 Browser Control chooses the click strategy internally: it prefers real CDP mouse input when safe, then falls back to DOM pointer events. Diagnostics may include `strategyUsed`, `target`, `hitTest`, `focusBefore`, `focusAfter`, `newTab` / `newTabs`, `settle`, `changes`, `postSnapshot`, and `warnings`. Covered targets fail with `COVERED_TARGET`; take a fresh snapshot, close the overlay, or choose a visible child target.
 
@@ -167,6 +172,7 @@ For `after:"auto"` and `after:"snapshot"`, Browser Control waits briefly for the
 
 ```json
 {"command":"click","args":{"target":"@e1jm0sbb_1","after":"auto"}}
+{"command":"click","args":{"target":"@e1jm0sbb_1","baseline":"page-1"}}
 ```
 
 ### `click_probe`
