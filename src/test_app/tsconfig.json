@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "paths": {
+      "@controller/*": ["../controller/*"],
+      "@mcp/*": ["../mcp/*"]
+    }
+  },
+  "include": ["src"]
+}
