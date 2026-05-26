@@ -33,6 +33,8 @@ export function registerBrowserControlPrompts(server: McpServer): void {
     'Do not build Google or YouTube search URLs with query parameters when a task asks for real UI usage; navigate to the homepage and operate the search box.',
     'Prefer snapshot before element actions and prefer @e references from the latest snapshot.',
     '',
+    '@e reference lifecycle: each snapshot produces @e<structureId>_<revision> references. These references become stale (unclickable) when the page navigates or the DOM updates. Always call snapshot again after any page-changing action (click, fill, press, scroll, navigate) to obtain fresh @e references for the next interaction. The _<revision> suffix increments to indicate staleness — prefer the highest revision.',
+    '',
     'Read browser_control_safety for confirmation boundaries before sensitive actions.'
   ].join('\n')));
 
@@ -76,9 +78,13 @@ export function registerBrowserControlPrompts(server: McpServer): void {
       '- click "after": "auto" (default, returns summary), "none", "changes" (compact diff), "snapshot" (full snapshot). For advanced click control (strategy, button, modifiers, network capture), use click_probe.',
       '- get_text "scope": "document"/"full" (all visible text), "viewport" (viewport only)',
       '- fill strategy: "native_setter", "text_input", "paste_like"',
+      '- fill "commit": "change" (default — triggers change event, use for auto-save), "blur" (blurs field, use for blur validation), "enter" (press Enter, use for search), "none" (set value only, submit via button separately)',
       '- press strategy: "auto", "cdp_keyboard", "dom_keyboard"',
       '- scroll strategy: "auto", "dom", "wheel"',
       '- click_probe "filter": URL substring to capture matching network requests. "includeBody" and "includeHeaders": booleans to capture request bodies or response headers.',
+      '- click_probe strategy: "auto" (default, daemon picks), "cdp_mouse" (CDP Input.dispatchMouseEvent — use when page checks event.isTrusted), "dom_pointer" (PointerEvent+MouseEvent — use when el.click() is intercepted), "element_click" (standard el.click() — simplest, works for most buttons/links)',
+      '',
+      'network scope: "tab" (default, capture requests from current tab only), "session" (capture requests from all tabs in the session)',
       '',
       'Commands by category:',
       ...lines,
@@ -94,6 +100,7 @@ export function registerBrowserControlPrompts(server: McpServer): void {
       '{"command":"observe_start","args":{"includeNetworkMarker":true}}',
       '{"command":"observe_diff","args":{"baselineId":"obs_...","includeNetwork":true}}',
       '{"command":"network_start","args":{}}',
+      '{"command":"network_start","args":{"scope":"session"}}',
       '{"command":"network_list","args":{"filter":"/api/"}}',
       '{"command":"network_detail","args":{"requestId":"<id from network_list>"}}',
       '{"command":"get_text","args":{"scope":"document","maxChars":6000}}'
