@@ -113,7 +113,6 @@ export const commandArgSchemas = {
     tabId,
     format: z.enum(['png', 'jpeg']).optional(),
     quality: z.number().min(0).max(100).optional(),
-    fullPage: z.boolean().optional(),
     file_name: z.string().optional(),
     fileName: z.string().optional()
   }).strict(),

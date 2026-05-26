@@ -300,9 +300,7 @@ The default viewport scope reuses the same visible-text extraction semantics as 
 
 Capture a viewport screenshot.
 
-Arguments: optional `tabId`, `format` (`png` or `jpeg`), `quality`, `fullPage`.
-
-`fullPage:true` is accepted for forward compatibility, but the current Chrome extension backend still captures the visible viewport. Responses expose `fullPageSupported:false`, `fullPageRequested`, and a note when full-page capture was requested.
+Arguments: optional `tabId`, `format` (`png` or `jpeg`), `quality`.
 
 When Browser Control knows the target session tab, it may briefly bring that tab
 to the front so the screenshot matches the returned tab metadata, then

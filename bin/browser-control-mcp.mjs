@@ -34630,7 +34630,7 @@ var COMMANDS = {
   },
   wait_for: { required: [], optional: ["selector", "text", "state", "timeoutMs", "tabId", "expression"] },
   evaluate: { required: ["code"], optional: ["tabId"], example: { code: "return { title: document.title }" } },
-  screenshot: { required: [], optional: ["tabId", "format", "quality", "fullPage", "file_name", "fileName"] },
+  screenshot: { required: [], optional: ["tabId", "format", "quality", "file_name", "fileName"] },
   save_as_pdf: { required: [], optional: ["tabId", "paper_format", "landscape", "scale", "print_background", "file_name"] },
   observe_start: { required: [], optional: ["tabId", "mode", "baselineId", "includeNetworkMarker", "maxTextChars", "maxTextRuns"], example: { includeNetworkMarker: true } },
   observe_diff: { required: ["baselineId"], optional: ["tabId", "includeCurrent", "includeNetwork", "maxAdded", "maxRemoved", "maxSummaryChars", "allowStaleNavigationDiff"], example: { baselineId: "obs_...", includeNetwork: true } },
@@ -35186,7 +35186,6 @@ var commandArgSchemas = {
     tabId,
     format: external_exports.enum(["png", "jpeg"]).optional(),
     quality: external_exports.number().min(0).max(100).optional(),
-    fullPage: external_exports.boolean().optional(),
     file_name: external_exports.string().optional(),
     fileName: external_exports.string().optional()
   }).strict(),
@@ -35281,7 +35280,7 @@ var RISK_NOTES = {
   click_probe: "Risk: still performs a real frontend click and may change page state, even while matching API requests are blocked. The MCP server does not perform user confirmation.",
   fill: "Risk: may place sensitive or private data into page fields. The MCP server does not perform user confirmation.",
   press: "Risk: may submit forms, activate focused controls, or navigate. The MCP server does not perform user confirmation.",
-  evaluate: "Risk: executes JavaScript in the page context. The MCP server does not perform user confirmation.",
+  evaluate: "Risk: executes JavaScript in the page context and can read page data (DOM, cookies, storage) or trigger side effects. The MCP server does not perform user confirmation.",
   upload: "Risk: uploads local files to the page. The MCP server does not perform user confirmation.",
   download: "Risk: downloads remote content through Chrome. The MCP server does not perform user confirmation.",
   save_as_pdf: "Risk: creates a page artifact that may contain sensitive visible content. The MCP server does not perform user confirmation.",
@@ -35948,33 +35947,79 @@ function registerBrowserControlPrompts(server) {
     "Use browser_control_command for browser actions and observations.",
     "The MCP server manages an active session automatically; omit session unless you intentionally need a separate session.",
     "Typical loop: navigate -> snapshot -> use @e ids as target for click/fill/press/scroll/upload -> get_text/screenshot for reading -> browser_control_close_session when done.",
+    "",
+    "Observation loop: call observe_start to capture a baseline, perform an action, then call observe_diff with the returned baselineId to see what changed.",
+    "",
+    "Network monitoring: network_start to begin capture (optional URL filter), network_list to list captured requests, network_detail <requestId> to inspect headers/body, network_stop to end capture.",
+    "",
+    "Advanced click: click_probe performs a click and simultaneously captures matching network requests. Supports filter (URL substring), includeBody, includeHeaders, and maxRequests.",
+    "",
+    "Keyboard-driven interactions: press works on the focused element and can trigger shortcuts or form submission.",
+    "",
     "When you need to act on an element by visible text, do not request a huge snapshot. Use snapshot with textIncludes, roles, tags, hasVisibleText, and viewportOnly to narrow the returned @e references, then pass the chosen ref as target.",
     "Do not build Google or YouTube search URLs with query parameters when a task asks for real UI usage; navigate to the homepage and operate the search box.",
-    "Prefer snapshot before element actions and prefer @e references from the latest snapshot."
+    "Prefer snapshot before element actions and prefer @e references from the latest snapshot.",
+    "",
+    "Read browser_control_safety for confirmation boundaries before sensitive actions."
   ].join("\n")));
   server.registerPrompt("browser_control_command_reference", {
     title: "Browser Control command reference",
     description: "Low-level Browser Control protocol commands accepted by browser_control_command."
   }, () => {
-    const lines = Object.entries(COMMANDS).map(([command, meta3]) => {
-      const required2 = meta3.required?.length ? meta3.required.join(", ") : "none";
-      const optional2 = meta3.optional?.length ? meta3.optional.join(", ") : "none";
-      return `- ${command}: required: ${required2}; optional: ${optional2}`;
-    });
+    const categories = {
+      "Navigation": ["navigate"],
+      "Tab management": ["find_tab", "list_tabs", "close_tab"],
+      "Observation": ["snapshot", "wait_for"],
+      "Change observation": ["observe_start", "observe_diff"],
+      "Element actions": ["click", "click_probe", "fill", "press", "scroll", "upload"],
+      "Reading page": ["get_text", "screenshot", "evaluate", "save_as_pdf"],
+      "Network": ["network_start", "network_list", "network_detail", "network_stop"],
+      "Other": ["download", "close_session"]
+    };
+    const lines = [];
+    for (const [category, cmds] of Object.entries(categories)) {
+      lines.push(`${category}:`);
+      for (const command of cmds) {
+        const meta3 = COMMANDS[command];
+        if (!meta3) continue;
+        const required2 = meta3.required?.length ? meta3.required.join(", ") : "none";
+        const optional2 = meta3.optional?.length ? meta3.optional.join(", ") : "none";
+        let line = `  - ${command}: required: ${required2}; optional: ${optional2}`;
+        if (meta3.strategies?.length) {
+          line += `; strategies: ${meta3.strategies.join(", ")}`;
+        }
+        lines.push(line);
+      }
+      lines.push("");
+    }
     return textPrompt("Browser Control command reference", [
       "Call browser_control_command with this shape:",
       '{"command":"snapshot","args":{"viewportOnly":true,"hasVisibleText":true}}',
       "",
-      "All commands:",
-      ...lines,
+      "Key optional parameters:",
+      '- click "after": "auto" (default, returns summary), "none", "changes" (compact diff), "snapshot" (full snapshot). For advanced click control (strategy, button, modifiers, network capture), use click_probe.',
+      '- get_text "scope": "document"/"full" (all visible text), "viewport" (viewport only)',
+      '- fill strategy: "native_setter", "text_input", "paste_like"',
+      '- press strategy: "auto", "cdp_keyboard", "dom_keyboard"',
+      '- scroll strategy: "auto", "dom", "wheel"',
+      '- click_probe "filter": URL substring to capture matching network requests. "includeBody" and "includeHeaders": booleans to capture request bodies or response headers.',
       "",
+      "Commands by category:",
+      ...lines,
       "Common examples:",
       '{"command":"navigate","args":{"url":"https://example.com"}}',
       '{"command":"snapshot","args":{"viewportOnly":true,"hasVisibleText":true}}',
-      '{"command":"snapshot","args":{"textIncludes":"Submit","hasVisibleText":true,"viewportOnly":true,"roles":["button","link","textbox"]}}',
+      '{"command":"snapshot","args":{"textIncludes":"Login","hasVisibleText":true,"viewportOnly":true,"roles":["button","link","textbox"]}}',
       '{"command":"click","args":{"target":"@eabc_1","after":"auto"}}',
+      '{"command":"click_probe","args":{"target":"@eabc_1","filter":"/api/","includeBody":true}}',
       '{"command":"fill","args":{"target":"@eabc_1","value":"draft","clear":true}}',
       '{"command":"press","args":{"key":"Enter","expectChange":true}}',
+      '{"command":"scroll","args":{"deltaY":800}}',
+      '{"command":"observe_start","args":{"includeNetworkMarker":true}}',
+      '{"command":"observe_diff","args":{"baselineId":"obs_...","includeNetwork":true}}',
+      '{"command":"network_start","args":{}}',
+      '{"command":"network_list","args":{"filter":"/api/"}}',
+      '{"command":"network_detail","args":{"requestId":"<id from network_list>"}}',
       '{"command":"get_text","args":{"scope":"document","maxChars":6000}}'
     ].join("\n"));
   });
@@ -36459,17 +36504,37 @@ function runDaemonServer() {
       req.on("error", reject);
     });
   }
-  function sendJson(res, statusCode, data) {
-    res.writeHead(statusCode, {
+  function allowedCorsOrigin(req) {
+    const origin = req?.headers?.origin;
+    if (!origin) return null;
+    try {
+      const url2 = new URL(origin);
+      const isHttp = url2.protocol === "http:" || url2.protocol === "https:";
+      const isLocal = ["127.0.0.1", "localhost", "::1"].includes(url2.hostname);
+      return isHttp && isLocal ? origin : null;
+    } catch {
+      return null;
+    }
+  }
+  function jsonHeaders(req) {
+    const headers = {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "http://127.0.0.1:*",
       "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type"
-    });
+    };
+    const origin = allowedCorsOrigin(req);
+    if (origin) {
+      headers["Access-Control-Allow-Origin"] = origin;
+      headers.Vary = "Origin";
+    }
+    return headers;
+  }
+  function sendJson(req, res, statusCode, data) {
+    res.writeHead(statusCode, jsonHeaders(req));
     res.end(JSON.stringify(data));
   }
-  function sendError(res, statusCode, message, details = null) {
-    sendJson(res, statusCode, {
+  function sendError(req, res, statusCode, message, details = null) {
+    sendJson(req, res, statusCode, {
       ok: false,
       error: message,
       ...details ? { details } : {}
@@ -36934,7 +36999,7 @@ function runDaemonServer() {
     } catch (err) {
       const error51 = protocolErrorFrom(err, "VALIDATION_ERROR");
       const fallbackRequest = request || { id: "invalid", command: "unknown", session: "default" };
-      return sendJson(res, 400, createResultEnvelope(fallbackRequest, {
+      return sendJson(req, res, 400, createResultEnvelope(fallbackRequest, {
         ok: false,
         startedAt,
         error: { code: error51.code, message: error51.message, retryable: error51.retryable, details: error51.details }
@@ -36949,7 +37014,7 @@ function runDaemonServer() {
       if (request.command === "observe_start" || request.command === "observe_diff") {
         const observed = request.command === "observe_start" ? await handleObserveStart(request) : await handleObserveDiff(request);
         const tab2 = observed.data && typeof observed.data === "object" ? observed.data.tab || observed.data.tabId || null : null;
-        return sendJson(res, 200, createResultEnvelope(request, {
+        return sendJson(req, res, 200, createResultEnvelope(request, {
           ok: true,
           startedAt,
           tab: tab2,
@@ -36971,7 +37036,7 @@ function runDaemonServer() {
         const closedTab = data?.closed || tab;
         if (closedTab !== null && closedTab !== void 0) cleanupSessionObservationBaselines(request.session, closedTab);
       }
-      sendJson(res, 200, createResultEnvelope(request, {
+      sendJson(req, res, 200, createResultEnvelope(request, {
         ok: true,
         startedAt,
         tab,
@@ -36983,7 +37048,7 @@ function runDaemonServer() {
       const error51 = protocolErrorFrom(err);
       log("error", `Command failed: ${request.command}`, { code: error51.code, error: error51.message });
       const statusCode = error51.code === "TIMEOUT" ? 504 : error51.code === "NOT_FOUND" ? 404 : 502;
-      sendJson(res, statusCode, createResultEnvelope(request, {
+      sendJson(req, res, statusCode, createResultEnvelope(request, {
         ok: false,
         startedAt,
         error: { code: error51.code, message: error51.message, retryable: error51.retryable, details: error51.details },
@@ -36992,7 +37057,7 @@ function runDaemonServer() {
     }
   }
   async function handleHealth(req, res) {
-    res.writeHead(200, { "Content-Type": "application/json" });
+    res.writeHead(200, jsonHeaders(req));
     res.end(JSON.stringify({
       status: "ok",
       running: true,
@@ -37034,14 +37099,10 @@ function runDaemonServer() {
       artifactDir: CONFIG.artifactDir,
       pid: process.pid
     };
-    sendJson(res, 200, result);
+    sendJson(req, res, 200, result);
   }
   function handleCors(req, res) {
-    res.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type"
-    });
+    res.writeHead(204, jsonHeaders(req));
     res.end();
   }
   const server = http3.createServer((req, res) => {
@@ -37060,7 +37121,7 @@ function runDaemonServer() {
       return handleStatus(req, res);
     }
     if (method === "GET" && parsedUrl.pathname === "/") {
-      return sendJson(res, 200, {
+      return sendJson(req, res, 200, {
         name: "Browser Control Daemon",
         version: package_default.version,
         endpoints: {
@@ -37072,7 +37133,7 @@ function runDaemonServer() {
         docs: "https://github.com/example/browser-control"
       });
     }
-    sendError(res, 404, "Not found");
+    sendError(req, res, 404, "Not found");
   });
   const wss = new import_websocket_server.default({ server });
   wss.on("connection", (ws, req) => {

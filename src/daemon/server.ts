@@ -316,18 +316,40 @@ function parseJsonBody(req) {
   });
 }
 
-function sendJson(res, statusCode, data) {
-  res.writeHead(statusCode, {
+function allowedCorsOrigin(req) {
+  const origin = req?.headers?.origin;
+  if (!origin) return null;
+  try {
+    const url = new URL(origin);
+    const isHttp = url.protocol === 'http:' || url.protocol === 'https:';
+    const isLocal = ['127.0.0.1', 'localhost', '::1'].includes(url.hostname);
+    return isHttp && isLocal ? origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function jsonHeaders(req) {
+  const headers = {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': 'http://127.0.0.1:*',
     'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type'
-  });
+  };
+  const origin = allowedCorsOrigin(req);
+  if (origin) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers.Vary = 'Origin';
+  }
+  return headers;
+}
+
+function sendJson(req, res, statusCode, data) {
+  res.writeHead(statusCode, jsonHeaders(req));
   res.end(JSON.stringify(data));
 }
 
-function sendError(res, statusCode, message, details = null) {
-  sendJson(res, statusCode, {
+function sendError(req, res, statusCode, message, details = null) {
+  sendJson(req, res, statusCode, {
     ok: false,
     error: message,
     ...(details ? { details } : {})
@@ -852,7 +874,7 @@ async function handleCommand(req, res) {
   } catch (err) {
     const error = protocolErrorFrom(err, 'VALIDATION_ERROR');
     const fallbackRequest = request || { id: 'invalid', command: 'unknown', session: 'default' };
-    return sendJson(res, 400, createResultEnvelope(fallbackRequest, {
+    return sendJson(req, res, 400, createResultEnvelope(fallbackRequest, {
       ok: false,
       startedAt,
       error: { code: error.code, message: error.message, retryable: error.retryable, details: error.details }
@@ -871,7 +893,7 @@ async function handleCommand(req, res) {
         ? await handleObserveStart(request)
         : await handleObserveDiff(request);
       const tab = observed.data && typeof observed.data === 'object' ? (observed.data.tab || observed.data.tabId || null) : null;
-      return sendJson(res, 200, createResultEnvelope(request, {
+      return sendJson(req, res, 200, createResultEnvelope(request, {
         ok: true,
         startedAt,
         tab,
@@ -897,7 +919,7 @@ async function handleCommand(req, res) {
       const closedTab = data?.closed || tab;
       if (closedTab !== null && closedTab !== undefined) cleanupSessionObservationBaselines(request.session, closedTab);
     }
-    sendJson(res, 200, createResultEnvelope(request, {
+    sendJson(req, res, 200, createResultEnvelope(request, {
       ok: true,
       startedAt,
       tab,
@@ -909,7 +931,7 @@ async function handleCommand(req, res) {
     const error = protocolErrorFrom(err);
     log('error', `Command failed: ${request.command}`, { code: error.code, error: error.message });
     const statusCode = error.code === 'TIMEOUT' ? 504 : error.code === 'NOT_FOUND' ? 404 : 502;
-    sendJson(res, statusCode, createResultEnvelope(request, {
+    sendJson(req, res, statusCode, createResultEnvelope(request, {
       ok: false,
       startedAt,
       error: { code: error.code, message: error.message, retryable: error.retryable, details: error.details },
@@ -919,7 +941,7 @@ async function handleCommand(req, res) {
 }
 
 async function handleHealth(req, res) {
-  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.writeHead(200, jsonHeaders(req));
   res.end(JSON.stringify({
     status: 'ok',
     running: true,
@@ -962,15 +984,11 @@ async function handleStatus(req, res) {
     artifactDir: CONFIG.artifactDir,
     pid: process.pid
   };
-  sendJson(res, 200, result);
+  sendJson(req, res, 200, result);
 }
 
 function handleCors(req, res) {
-  res.writeHead(204, {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type'
-  });
+  res.writeHead(204, jsonHeaders(req));
   res.end();
 }
 
@@ -1002,7 +1020,7 @@ const server = http.createServer((req, res) => {
 
   // Route: GET / (simple info page)
   if (method === 'GET' && parsedUrl.pathname === '/') {
-    return sendJson(res, 200, {
+    return sendJson(req, res, 200, {
       name: 'Browser Control Daemon',
       version: packageJson.version,
       endpoints: {
@@ -1016,7 +1034,7 @@ const server = http.createServer((req, res) => {
   }
 
   // 404
-  sendError(res, 404, 'Not found');
+  sendError(req, res, 404, 'Not found');
 });
 
 // ─── WebSocket Server (for Chrome Extension) ─────────────────────────

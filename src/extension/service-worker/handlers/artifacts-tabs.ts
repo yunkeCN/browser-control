@@ -42,7 +42,7 @@ export async function handleDownload(args: CommandArgs = {}, session: SessionNam
     const timeout = setTimeout(() => {
       chrome.downloads.onChanged.removeListener(listener);
       chrome.downloads.search({ id: downloadId }, items => resolve(items[0] || { id: downloadId, state: 'unknown' }));
-    }, 30000);
+    }, 120000);
     const listener = (delta: chrome.downloads.DownloadDelta) => {
       const currentState = delta.state?.current;
       if (delta.id === downloadId && currentState) {

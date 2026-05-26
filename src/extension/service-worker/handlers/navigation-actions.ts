@@ -490,7 +490,7 @@ export async function handleGetText(args: CommandArgs = {}, session: SessionName
 }
 
 export async function handleScreenshot(args: CommandArgs = {}, session: SessionName): Promise<any> {
-  const { format = 'png', quality, fullPage = false, file_name, fileName } = args || {};
+  const { format = 'png', quality, file_name, fileName } = args || {};
   const tabId = args?.tabId || getActiveTabId(session);
   const tabMeta = await getTabMetadata(tabId);
   const captureOptions: any = { format };
@@ -551,10 +551,7 @@ export async function handleScreenshot(args: CommandArgs = {}, session: SessionN
     url: tabMeta.url || null,
     title: tabMeta.title || null,
     activatedTabForCapture,
-    restoredActiveTabId,
-    fullPageSupported: false,
-    fullPageRequested: Boolean(fullPage),
-    note: fullPage ? 'Chrome extension backend currently captures the visible viewport; daemon persists returned base64 as an artifact.' : undefined
+    restoredActiveTabId
   };
 }
 

@@ -4671,7 +4671,7 @@
     return results[0]?.result || { text: "", truncated: false, caps: { maxChars, scope }, url: null, title: "" };
   }
   async function handleScreenshot(args = {}, session) {
-    const { format = "png", quality, fullPage = false, file_name, fileName } = args || {};
+    const { format = "png", quality, file_name, fileName } = args || {};
     const tabId = args?.tabId || getActiveTabId(session);
     const tabMeta = await getTabMetadata(tabId);
     const captureOptions = { format };
@@ -4720,10 +4720,7 @@
       url: tabMeta.url || null,
       title: tabMeta.title || null,
       activatedTabForCapture,
-      restoredActiveTabId,
-      fullPageSupported: false,
-      fullPageRequested: Boolean(fullPage),
-      note: fullPage ? "Chrome extension backend currently captures the visible viewport; daemon persists returned base64 as an artifact." : void 0
+      restoredActiveTabId
     };
   }
   async function handleObserveCapture(args = {}, session) {
@@ -4836,7 +4833,7 @@
       const timeout = setTimeout(() => {
         chrome.downloads.onChanged.removeListener(listener);
         chrome.downloads.search({ id: downloadId }, (items) => resolve(items[0] || { id: downloadId, state: "unknown" }));
-      }, 3e4);
+      }, 12e4);
       const listener = (delta) => {
         const currentState = delta.state?.current;
         if (delta.id === downloadId && currentState) {

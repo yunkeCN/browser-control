@@ -116,7 +116,7 @@ var COMMANDS = {
   },
   wait_for: { required: [], optional: ["selector", "text", "state", "timeoutMs", "tabId", "expression"] },
   evaluate: { required: ["code"], optional: ["tabId"], example: { code: "return { title: document.title }" } },
-  screenshot: { required: [], optional: ["tabId", "format", "quality", "fullPage", "file_name", "fileName"] },
+  screenshot: { required: [], optional: ["tabId", "format", "quality", "file_name", "fileName"] },
   save_as_pdf: { required: [], optional: ["tabId", "paper_format", "landscape", "scale", "print_background", "file_name"] },
   observe_start: { required: [], optional: ["tabId", "mode", "baselineId", "includeNetworkMarker", "maxTextChars", "maxTextRuns"], example: { includeNetworkMarker: true } },
   observe_diff: { required: ["baselineId"], optional: ["tabId", "includeCurrent", "includeNetwork", "maxAdded", "maxRemoved", "maxSummaryChars", "allowStaleNavigationDiff"], example: { baselineId: "obs_...", includeNetwork: true } },

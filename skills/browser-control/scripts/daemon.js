@@ -3715,7 +3715,7 @@ var COMMANDS = {
   },
   wait_for: { required: [], optional: ["selector", "text", "state", "timeoutMs", "tabId", "expression"] },
   evaluate: { required: ["code"], optional: ["tabId"], example: { code: "return { title: document.title }" } },
-  screenshot: { required: [], optional: ["tabId", "format", "quality", "fullPage", "file_name", "fileName"] },
+  screenshot: { required: [], optional: ["tabId", "format", "quality", "file_name", "fileName"] },
   save_as_pdf: { required: [], optional: ["tabId", "paper_format", "landscape", "scale", "print_background", "file_name"] },
   observe_start: { required: [], optional: ["tabId", "mode", "baselineId", "includeNetworkMarker", "maxTextChars", "maxTextRuns"], example: { includeNetworkMarker: true } },
   observe_diff: { required: ["baselineId"], optional: ["tabId", "includeCurrent", "includeNetwork", "maxAdded", "maxRemoved", "maxSummaryChars", "allowStaleNavigationDiff"], example: { baselineId: "obs_...", includeNetwork: true } },
@@ -4543,17 +4543,37 @@ function runDaemonServer() {
       req.on("error", reject);
     });
   }
-  function sendJson(res, statusCode, data) {
-    res.writeHead(statusCode, {
+  function allowedCorsOrigin(req) {
+    const origin = req?.headers?.origin;
+    if (!origin) return null;
+    try {
+      const url = new URL(origin);
+      const isHttp = url.protocol === "http:" || url.protocol === "https:";
+      const isLocal = ["127.0.0.1", "localhost", "::1"].includes(url.hostname);
+      return isHttp && isLocal ? origin : null;
+    } catch {
+      return null;
+    }
+  }
+  function jsonHeaders(req) {
+    const headers = {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "http://127.0.0.1:*",
       "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type"
-    });
+    };
+    const origin = allowedCorsOrigin(req);
+    if (origin) {
+      headers["Access-Control-Allow-Origin"] = origin;
+      headers.Vary = "Origin";
+    }
+    return headers;
+  }
+  function sendJson(req, res, statusCode, data) {
+    res.writeHead(statusCode, jsonHeaders(req));
     res.end(JSON.stringify(data));
   }
-  function sendError(res, statusCode, message, details = null) {
-    sendJson(res, statusCode, {
+  function sendError(req, res, statusCode, message, details = null) {
+    sendJson(req, res, statusCode, {
       ok: false,
       error: message,
       ...details ? { details } : {}
@@ -5018,7 +5038,7 @@ function runDaemonServer() {
     } catch (err) {
       const error = protocolErrorFrom(err, "VALIDATION_ERROR");
       const fallbackRequest = request || { id: "invalid", command: "unknown", session: "default" };
-      return sendJson(res, 400, createResultEnvelope(fallbackRequest, {
+      return sendJson(req, res, 400, createResultEnvelope(fallbackRequest, {
         ok: false,
         startedAt,
         error: { code: error.code, message: error.message, retryable: error.retryable, details: error.details }
@@ -5033,7 +5053,7 @@ function runDaemonServer() {
       if (request.command === "observe_start" || request.command === "observe_diff") {
         const observed = request.command === "observe_start" ? await handleObserveStart(request) : await handleObserveDiff(request);
         const tab2 = observed.data && typeof observed.data === "object" ? observed.data.tab || observed.data.tabId || null : null;
-        return sendJson(res, 200, createResultEnvelope(request, {
+        return sendJson(req, res, 200, createResultEnvelope(request, {
           ok: true,
           startedAt,
           tab: tab2,
@@ -5055,7 +5075,7 @@ function runDaemonServer() {
         const closedTab = data?.closed || tab;
         if (closedTab !== null && closedTab !== void 0) cleanupSessionObservationBaselines(request.session, closedTab);
       }
-      sendJson(res, 200, createResultEnvelope(request, {
+      sendJson(req, res, 200, createResultEnvelope(request, {
         ok: true,
         startedAt,
         tab,
@@ -5067,7 +5087,7 @@ function runDaemonServer() {
       const error = protocolErrorFrom(err);
       log("error", `Command failed: ${request.command}`, { code: error.code, error: error.message });
       const statusCode = error.code === "TIMEOUT" ? 504 : error.code === "NOT_FOUND" ? 404 : 502;
-      sendJson(res, statusCode, createResultEnvelope(request, {
+      sendJson(req, res, statusCode, createResultEnvelope(request, {
         ok: false,
         startedAt,
         error: { code: error.code, message: error.message, retryable: error.retryable, details: error.details },
@@ -5076,7 +5096,7 @@ function runDaemonServer() {
     }
   }
   async function handleHealth(req, res) {
-    res.writeHead(200, { "Content-Type": "application/json" });
+    res.writeHead(200, jsonHeaders(req));
     res.end(JSON.stringify({
       status: "ok",
       running: true,
@@ -5118,14 +5138,10 @@ function runDaemonServer() {
       artifactDir: CONFIG.artifactDir,
       pid: process.pid
     };
-    sendJson(res, 200, result);
+    sendJson(req, res, 200, result);
   }
   function handleCors(req, res) {
-    res.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type"
-    });
+    res.writeHead(204, jsonHeaders(req));
     res.end();
   }
   const server = import_node_http.default.createServer((req, res) => {
@@ -5144,7 +5160,7 @@ function runDaemonServer() {
       return handleStatus(req, res);
     }
     if (method === "GET" && parsedUrl.pathname === "/") {
-      return sendJson(res, 200, {
+      return sendJson(req, res, 200, {
         name: "Browser Control Daemon",
         version: package_default.version,
         endpoints: {
@@ -5156,7 +5172,7 @@ function runDaemonServer() {
         docs: "https://github.com/example/browser-control"
       });
     }
-    sendError(res, 404, "Not found");
+    sendError(req, res, 404, "Not found");
   });
   const wss = new import_websocket_server.default({ server });
   wss.on("connection", (ws, req) => {

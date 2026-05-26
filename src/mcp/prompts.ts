@@ -20,34 +20,82 @@ export function registerBrowserControlPrompts(server: McpServer): void {
     'Use browser_control_command for browser actions and observations.',
     'The MCP server manages an active session automatically; omit session unless you intentionally need a separate session.',
     'Typical loop: navigate -> snapshot -> use @e ids as target for click/fill/press/scroll/upload -> get_text/screenshot for reading -> browser_control_close_session when done.',
+    '',
+    'Observation loop: call observe_start to capture a baseline, perform an action, then call observe_diff with the returned baselineId to see what changed.',
+    '',
+    'Network monitoring: network_start to begin capture (optional URL filter), network_list to list captured requests, network_detail <requestId> to inspect headers/body, network_stop to end capture.',
+    '',
+    'Advanced click: click_probe performs a click and simultaneously captures matching network requests. Supports filter (URL substring), includeBody, includeHeaders, and maxRequests.',
+    '',
+    'Keyboard-driven interactions: press works on the focused element and can trigger shortcuts or form submission.',
+    '',
     'When you need to act on an element by visible text, do not request a huge snapshot. Use snapshot with textIncludes, roles, tags, hasVisibleText, and viewportOnly to narrow the returned @e references, then pass the chosen ref as target.',
     'Do not build Google or YouTube search URLs with query parameters when a task asks for real UI usage; navigate to the homepage and operate the search box.',
-    'Prefer snapshot before element actions and prefer @e references from the latest snapshot.'
+    'Prefer snapshot before element actions and prefer @e references from the latest snapshot.',
+    '',
+    'Read browser_control_safety for confirmation boundaries before sensitive actions.'
   ].join('\n')));
 
   server.registerPrompt('browser_control_command_reference', {
     title: 'Browser Control command reference',
     description: 'Low-level Browser Control protocol commands accepted by browser_control_command.'
   }, () => {
-    const lines = Object.entries(COMMANDS).map(([command, meta]) => {
-      const required = meta.required?.length ? meta.required.join(', ') : 'none';
-      const optional = meta.optional?.length ? meta.optional.join(', ') : 'none';
-      return `- ${command}: required: ${required}; optional: ${optional}`;
-    });
+    const categories: Record<string, string[]> = {
+      'Navigation': ['navigate'],
+      'Tab management': ['find_tab', 'list_tabs', 'close_tab'],
+      'Observation': ['snapshot', 'wait_for'],
+      'Change observation': ['observe_start', 'observe_diff'],
+      'Element actions': ['click', 'click_probe', 'fill', 'press', 'scroll', 'upload'],
+      'Reading page': ['get_text', 'screenshot', 'evaluate', 'save_as_pdf'],
+      'Network': ['network_start', 'network_list', 'network_detail', 'network_stop'],
+      'Other': ['download', 'close_session']
+    };
+
+    const lines: string[] = [];
+    for (const [category, cmds] of Object.entries(categories)) {
+      lines.push(`${category}:`);
+      for (const command of cmds) {
+        const meta = COMMANDS[command];
+        if (!meta) continue;
+        const required = meta.required?.length ? meta.required.join(', ') : 'none';
+        const optional = meta.optional?.length ? meta.optional.join(', ') : 'none';
+        let line = `  - ${command}: required: ${required}; optional: ${optional}`;
+        if (meta.strategies?.length) {
+          line += `; strategies: ${meta.strategies.join(', ')}`;
+        }
+        lines.push(line);
+      }
+      lines.push('');
+    }
+
     return textPrompt('Browser Control command reference', [
       'Call browser_control_command with this shape:',
       '{"command":"snapshot","args":{"viewportOnly":true,"hasVisibleText":true}}',
       '',
-      'All commands:',
-      ...lines,
+      'Key optional parameters:',
+      '- click "after": "auto" (default, returns summary), "none", "changes" (compact diff), "snapshot" (full snapshot). For advanced click control (strategy, button, modifiers, network capture), use click_probe.',
+      '- get_text "scope": "document"/"full" (all visible text), "viewport" (viewport only)',
+      '- fill strategy: "native_setter", "text_input", "paste_like"',
+      '- press strategy: "auto", "cdp_keyboard", "dom_keyboard"',
+      '- scroll strategy: "auto", "dom", "wheel"',
+      '- click_probe "filter": URL substring to capture matching network requests. "includeBody" and "includeHeaders": booleans to capture request bodies or response headers.',
       '',
+      'Commands by category:',
+      ...lines,
       'Common examples:',
       '{"command":"navigate","args":{"url":"https://example.com"}}',
       '{"command":"snapshot","args":{"viewportOnly":true,"hasVisibleText":true}}',
-      '{"command":"snapshot","args":{"textIncludes":"Submit","hasVisibleText":true,"viewportOnly":true,"roles":["button","link","textbox"]}}',
+      '{"command":"snapshot","args":{"textIncludes":"Login","hasVisibleText":true,"viewportOnly":true,"roles":["button","link","textbox"]}}',
       '{"command":"click","args":{"target":"@eabc_1","after":"auto"}}',
+      '{"command":"click_probe","args":{"target":"@eabc_1","filter":"/api/","includeBody":true}}',
       '{"command":"fill","args":{"target":"@eabc_1","value":"draft","clear":true}}',
       '{"command":"press","args":{"key":"Enter","expectChange":true}}',
+      '{"command":"scroll","args":{"deltaY":800}}',
+      '{"command":"observe_start","args":{"includeNetworkMarker":true}}',
+      '{"command":"observe_diff","args":{"baselineId":"obs_...","includeNetwork":true}}',
+      '{"command":"network_start","args":{}}',
+      '{"command":"network_list","args":{"filter":"/api/"}}',
+      '{"command":"network_detail","args":{"requestId":"<id from network_list>"}}',
       '{"command":"get_text","args":{"scope":"document","maxChars":6000}}'
     ].join('\n'));
   });
