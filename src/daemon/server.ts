@@ -356,9 +356,11 @@ function sendError(req, res, statusCode, message, details = null) {
   });
 }
 
+let _obsCounter = 0;
 function makeObservationBaselineId(label = '') {
   const safe = String(label || '').replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-').slice(0, 40);
-  return `${safe ? `${safe}-` : ''}obs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  if (safe) return safe;
+  return `obs${++_obsCounter}`;
 }
 
 function observationStorageKey(session, tabId, baselineId) {
@@ -472,42 +474,54 @@ function findObservationBaseline(session, baselineId, tabId = undefined) {
   return null;
 }
 
-function textCounts(textRuns = []) {
-  const counts = new Map();
-  const ordered = [];
-  for (const run of textRuns) {
+function indexTextRuns(runs) {
+  const map = new Map();
+  for (const run of runs) {
     const text = String(run.normalizedText || run.text || '').replace(/\s+/g, ' ').trim();
     if (!text) continue;
-    if (!counts.has(text)) ordered.push(text);
-    counts.set(text, (counts.get(text) || 0) + 1);
+    if (!map.has(text)) map.set(text, []);
+    map.get(text).push({ ref: run.element || null, role: run.role || null });
   }
-  return { counts, ordered };
+  return map;
 }
 
 function diffObservationText(beforeRuns, afterRuns, args = {}) {
   const maxAdded = Number.isFinite(args.maxAdded) ? args.maxAdded : OBSERVATION_DEFAULTS.maxAdded;
   const maxRemoved = Number.isFinite(args.maxRemoved) ? args.maxRemoved : OBSERVATION_DEFAULTS.maxRemoved;
-  const before = textCounts(beforeRuns);
-  const after = textCounts(afterRuns);
-  const addedText = [];
-  const removedText = [];
+  const before = indexTextRuns(beforeRuns);
+  const after = indexTextRuns(afterRuns);
+  const added = [];
+  const removed = [];
   let truncated = false;
 
-  for (const text of after.ordered) {
-    const delta = (after.counts.get(text) || 0) - (before.counts.get(text) || 0);
+  for (const [text, afterItems] of after) {
+    const beforeCount = (before.get(text) || []).length;
+    const delta = afterItems.length - beforeCount;
     for (let i = 0; i < delta; i++) {
-      if (addedText.length >= maxAdded) { truncated = true; break; }
-      addedText.push(text);
+      if (added.length >= maxAdded) { truncated = true; break; }
+      const item = afterItems[beforeCount + i] || afterItems[0];
+      added.push({ text, ref: item.ref, role: item.role });
     }
   }
-  for (const text of before.ordered) {
-    const delta = (before.counts.get(text) || 0) - (after.counts.get(text) || 0);
+  for (const [text, beforeItems] of before) {
+    const afterCount = (after.get(text) || []).length;
+    const delta = beforeItems.length - afterCount;
     for (let i = 0; i < delta; i++) {
-      if (removedText.length >= maxRemoved) { truncated = true; break; }
-      removedText.push(text);
+      if (removed.length >= maxRemoved) { truncated = true; break; }
+      const item = beforeItems[afterCount + i] || beforeItems[0];
+      removed.push({ text, ref: item.ref, role: item.role });
     }
   }
-  return { addedText, removedText, truncated };
+  return { added, removed, truncated };
+}
+
+function formatDiffItems(items) {
+  return items.slice(0, 8).map(item => {
+    const label = item.role && item.ref
+      ? `${item.role} ${item.ref}`
+      : item.role || item.ref || '';
+    return label ? `"${item.text}" (${label})` : `"${item.text}"`;
+  }).join('; ');
 }
 
 function buildObservationSummary(textDiff, stale, urlChanged, maxChars = OBSERVATION_DEFAULTS.maxSummaryChars) {
@@ -517,8 +531,8 @@ function buildObservationSummary(textDiff, stale, urlChanged, maxChars = OBSERVA
   if (textDiff.activeElementChanged) parts.push('Focused element changed.');
   if (textDiff.visibleTextRunCountDelta) parts.push(`Visible text run count changed by ${textDiff.visibleTextRunCountDelta}.`);
   if (textDiff.visibleTextCharsDelta) parts.push(`Visible text character count changed by ${textDiff.visibleTextCharsDelta}.`);
-  if (textDiff.addedText.length) parts.push(`Visible text added: ${textDiff.addedText.slice(0, 8).join('; ')}.`);
-  if (textDiff.removedText.length) parts.push(`Visible text removed: ${textDiff.removedText.slice(0, 8).join('; ')}.`);
+  if (textDiff.added?.length) parts.push(`Visible text added: ${formatDiffItems(textDiff.added)}.`);
+  if (textDiff.removed?.length) parts.push(`Visible text removed: ${formatDiffItems(textDiff.removed)}.`);
   if (!parts.length) parts.push('No added or removed visible text detected.');
   let summary = parts.join(' ');
   if (summary.length > maxChars) summary = `${summary.slice(0, Math.max(0, maxChars - 1))}…`;
@@ -575,7 +589,7 @@ async function handleObserveDiff(request, currentOverride = null) {
   const urlChanged = currentNavigationKey !== baseline.navigationKey;
   const titleChanged = String(current.title || '') !== String(baseline.title || '');
   const stale = Boolean(urlChanged);
-  let textDiff = { addedText: [], removedText: [], truncated: false };
+  let textDiff = { added: [], removed: [], truncated: false };
   if (!stale || request.args.allowStaleNavigationDiff === true) {
     textDiff = diffObservationText(baseline.observation.textRuns, current.textRuns, request.args);
   }
@@ -655,8 +669,8 @@ async function delay(ms) {
 }
 
 function summarizeActionObservation(diffData, expectChange) {
-  const addedCount = diffData?.textDiff?.addedText?.length || 0;
-  const removedCount = diffData?.textDiff?.removedText?.length || 0;
+  const addedCount = diffData?.textDiff?.added?.length || 0;
+  const removedCount = diffData?.textDiff?.removed?.length || 0;
   const networkCount = diffData?.network?.requestCount || 0;
   const lightweightDelta = Boolean(
     diffData?.urlChanged ||
@@ -672,7 +686,7 @@ function summarizeActionObservation(diffData, expectChange) {
   return {
     baselineId: diffData?.baselineId || null,
     summary: diffData?.summary || '',
-    textDiff: diffData?.textDiff || { addedText: [], removedText: [], truncated: false },
+    textDiff: diffData?.textDiff || { added: [], removed: [], truncated: false },
     network: diffData?.network || null,
     stale: Boolean(diffData?.stale),
     urlChanged: Boolean(diffData?.urlChanged),
@@ -766,8 +780,8 @@ function hasMeaningfulClickEffect(changes, result, diffDataOverride = null) {
     textDiff.activeElementChanged ||
     textDiff.visibleTextRunCountDelta ||
     textDiff.visibleTextCharsDelta ||
-    (Array.isArray(textDiff.addedText) && textDiff.addedText.length) ||
-    (Array.isArray(textDiff.removedText) && textDiff.removedText.length)
+    (Array.isArray(textDiff.added) && textDiff.added.length) ||
+    (Array.isArray(textDiff.removed) && textDiff.removed.length)
   );
 }
 
@@ -779,12 +793,11 @@ function postSnapshotTabId(result, fallbackTabId) {
 
 async function runActionWithObservation(request, mapped) {
   const observeArgs = actionObserveArgs(request);
-  const baselineId = observeArgs.baselineId || `action_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const start = await handleObserveStart({
     ...request,
     args: {
       tabId: request.args.tabId,
-      baselineId,
+      baselineId: observeArgs.baselineId || undefined,
       includeNetworkMarker: observeArgs.includeNetwork !== false
     }
   });
@@ -817,12 +830,10 @@ async function runClickWithAfter(request, mapped) {
     return { data, artifacts: [] };
   }
 
-  const baselineId = `click_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const start = await handleObserveStart({
     ...request,
     args: {
       tabId: request.args.tabId,
-      baselineId,
       includeNetworkMarker: true
     }
   });

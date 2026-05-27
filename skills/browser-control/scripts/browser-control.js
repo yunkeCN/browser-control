@@ -15174,11 +15174,7 @@ var init_schema = __esm({
       click_probe: external_exports.object({
         target: elementTarget,
         tabId,
-        strategy: external_exports.enum(["auto", "cdp_mouse", "dom_pointer", "element_click"]).optional(),
         force: external_exports.boolean().optional(),
-        button: external_exports.enum(["left", "middle", "right"]).optional(),
-        clickCount: external_exports.number().int().positive().optional(),
-        modifiers: external_exports.array(external_exports.string()).optional(),
         observeNewTab: external_exports.boolean().optional(),
         expectNewTab: external_exports.boolean().optional(),
         waitMs: external_exports.number().nonnegative().optional(),
@@ -15856,7 +15852,7 @@ var init_click = __esm({
           };
         }
         const changes = clickData.changes;
-        const changeSummary = changes?.summary;
+        const observationBaselineId = typeof changes?.baselineId === "string" ? changes.baselineId : void 0;
         const rawPostSnapshot = clickData.postSnapshot;
         let postSnapshot;
         if (rawPostSnapshot) {
@@ -15883,9 +15879,6 @@ var init_click = __esm({
           }
         }
         const parts = ["\u5DF2\u70B9\u51FB\u5143\u7D20"];
-        if (changeSummary) {
-          parts.push(changeSummary);
-        }
         if (postSnapshot) {
           parts.push(`\u5FEB\u7167: ${postSnapshot.elementCount} \u4E2A\u5143\u7D20`);
         }
@@ -15895,12 +15888,15 @@ var init_click = __esm({
         if (diff) {
           parts.push(`\u57FA\u7EBF\u5BF9\u6BD4 ${baseline}: ${diff.summary}`);
         }
+        if (observationBaselineId) {
+          parts.push(`\u89C2\u5BDF\u57FA\u7EBF: ${observationBaselineId}`);
+        }
         return {
           ok: true,
           summary: parts.join(" | "),
           data: {
             clicked: true,
-            changeSummary,
+            observationBaselineId,
             newTabOpened,
             postSnapshot,
             diff,
@@ -16825,12 +16821,13 @@ var init_observe = __esm({
           };
         }
         const baselineId = String(rawData.baselineId || "");
-        const hasChanges = Boolean(rawData.hasChanges);
-        const addedText = Array.isArray(rawData.addedText) ? rawData.addedText.map(String) : void 0;
-        const removedText = Array.isArray(rawData.removedText) ? rawData.removedText.map(String) : void 0;
+        const textDiff = rawData.textDiff;
+        const added = Array.isArray(textDiff?.added) ? textDiff.added : void 0;
+        const removed = Array.isArray(textDiff?.removed) ? textDiff.removed : void 0;
         const urlChanged = rawData.urlChanged !== void 0 ? Boolean(rawData.urlChanged) : void 0;
-        const addedCount = addedText ? addedText.length : 0;
-        const removedCount = removedText ? removedText.length : 0;
+        const addedCount = added ? added.length : 0;
+        const removedCount = removed ? removed.length : 0;
+        const hasChanges = addedCount > 0 || removedCount > 0 || Boolean(rawData.urlChanged) || Boolean(rawData.titleChanged);
         const diffSummary = rawData.summary ? String(rawData.summary) : hasChanges ? `\u89C2\u5BDF diff: \u68C0\u6D4B\u5230 ${addedCount + removedCount} \u5904\u53D8\u5316\uFF08\u65B0\u589E ${addedCount} \u5904\uFF0C\u79FB\u9664 ${removedCount} \u5904\uFF09` : "\u89C2\u5BDF diff: \u672A\u68C0\u6D4B\u5230\u53D8\u5316";
         return {
           ok: true,
@@ -16839,8 +16836,8 @@ var init_observe = __esm({
             baselineId,
             summary: diffSummary,
             hasChanges,
-            addedText,
-            removedText,
+            added,
+            removed,
             urlChanged
           }
         };
@@ -17325,15 +17322,13 @@ function isValidTarget3(target) {
 async function clickProbe(args, client) {
   return runCommand(def13, args, client);
 }
-var ELEMENT_REF_RE3, CSS_PREFIX3, STRATEGY_VALUES, BUTTON_VALUES, def13;
+var ELEMENT_REF_RE3, CSS_PREFIX3, def13;
 var init_click_probe = __esm({
   "src/controller/commands/click-probe.ts"() {
     "use strict";
     init_runner();
     ELEMENT_REF_RE3 = /^@e[^\s_]+_\d+$/;
     CSS_PREFIX3 = "css=";
-    STRATEGY_VALUES = ["auto", "cdp_mouse", "dom_pointer", "element_click"];
-    BUTTON_VALUES = ["left", "middle", "right"];
     def13 = {
       name: "click_probe",
       requiredArgs: ["target"],
@@ -17350,19 +17345,8 @@ var init_click_probe = __esm({
         if (args.tabId !== void 0 && typeof args.tabId !== "number") {
           throw new Error("tabId \u5FC5\u987B\u662F\u6570\u5B57");
         }
-        if (args.strategy !== void 0 && !STRATEGY_VALUES.includes(args.strategy)) {
-          throw new Error(
-            "strategy \u5FC5\u987B\u662F auto / cdp_mouse / dom_pointer / element_click \u4E4B\u4E00"
-          );
-        }
-        if (args.button !== void 0 && !BUTTON_VALUES.includes(args.button)) {
-          throw new Error("button \u5FC5\u987B\u662F left / middle / right \u4E4B\u4E00");
-        }
-        if (args.clickCount !== void 0 && typeof args.clickCount !== "number") {
-          throw new Error("clickCount \u5FC5\u987B\u662F\u6570\u5B57");
-        }
-        if (args.modifiers !== void 0 && !Array.isArray(args.modifiers)) {
-          throw new Error("modifiers \u5FC5\u987B\u662F\u6570\u7EC4");
+        if (args.force !== void 0 && typeof args.force !== "boolean") {
+          throw new Error("force \u5FC5\u987B\u662F\u5E03\u5C14\u503C");
         }
         if (args.filter !== void 0 && typeof args.filter !== "string") {
           throw new Error("filter \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
@@ -17382,10 +17366,7 @@ var init_click_probe = __esm({
         return {
           target: args.target,
           tabId: args.tabId,
-          strategy: args.strategy,
-          button: args.button,
-          clickCount: args.clickCount,
-          modifiers: args.modifiers,
+          force: args.force,
           filter: args.filter,
           includeHeaders: args.includeHeaders,
           includeBody: args.includeBody,

@@ -34608,8 +34608,7 @@ var COMMANDS = {
   },
   click_probe: {
     required: ["target"],
-    optional: ["tabId", "strategy", "force", "button", "clickCount", "modifiers", "observeNewTab", "expectNewTab", "waitMs", "filter", "includeHeaders", "includeBody", "redactSensitive", "maxRequests"],
-    strategies: ["auto", "cdp_mouse", "dom_pointer", "element_click"]
+    optional: ["tabId", "force", "observeNewTab", "expectNewTab", "waitMs", "filter", "includeHeaders", "includeBody", "redactSensitive", "maxRequests"]
   },
   cdp_click_at: { required: ["x", "y"], optional: ["tabId", "button", "clickCount", "modifiers"] },
   fill: {
@@ -35126,11 +35125,7 @@ var commandArgSchemas = {
   click_probe: external_exports.object({
     target: elementTarget,
     tabId,
-    strategy: external_exports.enum(["auto", "cdp_mouse", "dom_pointer", "element_click"]).optional(),
     force: external_exports.boolean().optional(),
-    button: external_exports.enum(["left", "middle", "right"]).optional(),
-    clickCount: external_exports.number().int().positive().optional(),
-    modifiers: external_exports.array(external_exports.string()).optional(),
     observeNewTab: external_exports.boolean().optional(),
     expectNewTab: external_exports.boolean().optional(),
     waitMs: external_exports.number().nonnegative().optional(),
@@ -36187,7 +36182,7 @@ var def3 = {
       };
     }
     const changes = clickData.changes;
-    const changeSummary = changes?.summary;
+    const observationBaselineId = typeof changes?.baselineId === "string" ? changes.baselineId : void 0;
     const rawPostSnapshot = clickData.postSnapshot;
     let postSnapshot;
     if (rawPostSnapshot) {
@@ -36214,9 +36209,6 @@ var def3 = {
       }
     }
     const parts = ["\u5DF2\u70B9\u51FB\u5143\u7D20"];
-    if (changeSummary) {
-      parts.push(changeSummary);
-    }
     if (postSnapshot) {
       parts.push(`\u5FEB\u7167: ${postSnapshot.elementCount} \u4E2A\u5143\u7D20`);
     }
@@ -36226,12 +36218,15 @@ var def3 = {
     if (diff) {
       parts.push(`\u57FA\u7EBF\u5BF9\u6BD4 ${baseline}: ${diff.summary}`);
     }
+    if (observationBaselineId) {
+      parts.push(`\u89C2\u5BDF\u57FA\u7EBF: ${observationBaselineId}`);
+    }
     return {
       ok: true,
       summary: parts.join(" | "),
       data: {
         clicked: true,
-        changeSummary,
+        observationBaselineId,
         newTabOpened,
         postSnapshot,
         diff,
@@ -36874,12 +36869,13 @@ var diffDef = {
       };
     }
     const baselineId = String(rawData.baselineId || "");
-    const hasChanges = Boolean(rawData.hasChanges);
-    const addedText = Array.isArray(rawData.addedText) ? rawData.addedText.map(String) : void 0;
-    const removedText = Array.isArray(rawData.removedText) ? rawData.removedText.map(String) : void 0;
+    const textDiff = rawData.textDiff;
+    const added = Array.isArray(textDiff?.added) ? textDiff.added : void 0;
+    const removed = Array.isArray(textDiff?.removed) ? textDiff.removed : void 0;
     const urlChanged = rawData.urlChanged !== void 0 ? Boolean(rawData.urlChanged) : void 0;
-    const addedCount = addedText ? addedText.length : 0;
-    const removedCount = removedText ? removedText.length : 0;
+    const addedCount = added ? added.length : 0;
+    const removedCount = removed ? removed.length : 0;
+    const hasChanges = addedCount > 0 || removedCount > 0 || Boolean(rawData.urlChanged) || Boolean(rawData.titleChanged);
     const diffSummary = rawData.summary ? String(rawData.summary) : hasChanges ? `\u89C2\u5BDF diff: \u68C0\u6D4B\u5230 ${addedCount + removedCount} \u5904\u53D8\u5316\uFF08\u65B0\u589E ${addedCount} \u5904\uFF0C\u79FB\u9664 ${removedCount} \u5904\uFF09` : "\u89C2\u5BDF diff: \u672A\u68C0\u6D4B\u5230\u53D8\u5316";
     return {
       ok: true,
@@ -36888,8 +36884,8 @@ var diffDef = {
         baselineId,
         summary: diffSummary,
         hasChanges,
-        addedText,
-        removedText,
+        added,
+        removed,
         urlChanged
       }
     };
@@ -37352,8 +37348,6 @@ async function closeSession(args, client) {
 // src/controller/commands/click-probe.ts
 var ELEMENT_REF_RE3 = /^@e[^\s_]+_\d+$/;
 var CSS_PREFIX3 = "css=";
-var STRATEGY_VALUES = ["auto", "cdp_mouse", "dom_pointer", "element_click"];
-var BUTTON_VALUES = ["left", "middle", "right"];
 function isValidTarget3(target) {
   if (typeof target !== "string" || target.length === 0) return false;
   return ELEMENT_REF_RE3.test(target) || target.startsWith(CSS_PREFIX3);
@@ -37374,19 +37368,8 @@ var def12 = {
     if (args.tabId !== void 0 && typeof args.tabId !== "number") {
       throw new Error("tabId \u5FC5\u987B\u662F\u6570\u5B57");
     }
-    if (args.strategy !== void 0 && !STRATEGY_VALUES.includes(args.strategy)) {
-      throw new Error(
-        "strategy \u5FC5\u987B\u662F auto / cdp_mouse / dom_pointer / element_click \u4E4B\u4E00"
-      );
-    }
-    if (args.button !== void 0 && !BUTTON_VALUES.includes(args.button)) {
-      throw new Error("button \u5FC5\u987B\u662F left / middle / right \u4E4B\u4E00");
-    }
-    if (args.clickCount !== void 0 && typeof args.clickCount !== "number") {
-      throw new Error("clickCount \u5FC5\u987B\u662F\u6570\u5B57");
-    }
-    if (args.modifiers !== void 0 && !Array.isArray(args.modifiers)) {
-      throw new Error("modifiers \u5FC5\u987B\u662F\u6570\u7EC4");
+    if (args.force !== void 0 && typeof args.force !== "boolean") {
+      throw new Error("force \u5FC5\u987B\u662F\u5E03\u5C14\u503C");
     }
     if (args.filter !== void 0 && typeof args.filter !== "string") {
       throw new Error("filter \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
@@ -37406,10 +37389,7 @@ var def12 = {
     return {
       target: args.target,
       tabId: args.tabId,
-      strategy: args.strategy,
-      button: args.button,
-      clickCount: args.clickCount,
-      modifiers: args.modifiers,
+      force: args.force,
       filter: args.filter,
       includeHeaders: args.includeHeaders,
       includeBody: args.includeBody,
@@ -37886,14 +37866,13 @@ function registerBrowserControlPrompts(server) {
       '{"command":"snapshot","args":{"viewportOnly":true,"hasVisibleText":true}}',
       "",
       "Key optional parameters:",
-      '- click "after": "auto" (default, returns summary + postSnapshot + triggered API requests), "none", "snapshot" (explicit full snapshot). click also captures network requests triggered within 700ms (URLs only, no body). For advanced click control (strategy, button, modifiers, network capture), use click_probe.',
+      '- click "after": "auto" (default, returns summary + postSnapshot + triggered API requests), "none", "snapshot" (explicit full snapshot). click also captures network requests triggered within 700ms (URLs only, no body). For advanced network capture (headers/body, URL filtering), use click_probe.',
       '- get_text "scope": "viewport" (default, viewport visible text), "document" (legacy body.innerText), "full" (rendered layout text, filters hidden/zero-size/off-layout)',
       '- fill strategy: "native_setter", "text_input", "paste_like"',
       '- fill "commit": "change" (default \u2014 triggers change event, use for auto-save), "blur" (blurs field, use for blur validation), "enter" (press Enter, use for search), "none" (set value only, submit via button separately)',
       '- press strategy: "auto", "cdp_keyboard", "dom_keyboard"',
       '- scroll strategy: "auto", "dom", "wheel"',
       '- click_probe "filter": URL substring to capture matching network requests. "includeBody" and "includeHeaders": booleans to capture request bodies or response headers.',
-      '- click_probe strategy: "auto" (default, daemon picks), "cdp_mouse" (CDP Input.dispatchMouseEvent \u2014 use when page checks event.isTrusted), "dom_pointer" (PointerEvent+MouseEvent \u2014 use when el.click() is intercepted), "element_click" (standard el.click() \u2014 simplest, works for most buttons/links)',
       "",
       'network scope: "tab" (default, capture requests from current tab only), "session" (capture requests from all tabs in the session)',
       "",
@@ -38543,46 +38522,55 @@ function runDaemonServer() {
     }
     return null;
   }
-  function textCounts(textRuns = []) {
-    const counts = /* @__PURE__ */ new Map();
-    const ordered = [];
-    for (const run of textRuns) {
+  function indexTextRuns(runs) {
+    const map2 = /* @__PURE__ */ new Map();
+    for (const run of runs) {
       const text = String(run.normalizedText || run.text || "").replace(/\s+/g, " ").trim();
       if (!text) continue;
-      if (!counts.has(text)) ordered.push(text);
-      counts.set(text, (counts.get(text) || 0) + 1);
+      if (!map2.has(text)) map2.set(text, []);
+      map2.get(text).push({ ref: run.element || null, role: run.role || null });
     }
-    return { counts, ordered };
+    return map2;
   }
   function diffObservationText(beforeRuns, afterRuns, args = {}) {
     const maxAdded = Number.isFinite(args.maxAdded) ? args.maxAdded : OBSERVATION_DEFAULTS.maxAdded;
     const maxRemoved = Number.isFinite(args.maxRemoved) ? args.maxRemoved : OBSERVATION_DEFAULTS.maxRemoved;
-    const before = textCounts(beforeRuns);
-    const after = textCounts(afterRuns);
-    const addedText = [];
-    const removedText = [];
+    const before = indexTextRuns(beforeRuns);
+    const after = indexTextRuns(afterRuns);
+    const added = [];
+    const removed = [];
     let truncated = false;
-    for (const text of after.ordered) {
-      const delta = (after.counts.get(text) || 0) - (before.counts.get(text) || 0);
+    for (const [text, afterItems] of after) {
+      const beforeCount = (before.get(text) || []).length;
+      const delta = afterItems.length - beforeCount;
       for (let i = 0; i < delta; i++) {
-        if (addedText.length >= maxAdded) {
+        if (added.length >= maxAdded) {
           truncated = true;
           break;
         }
-        addedText.push(text);
+        const item = afterItems[beforeCount + i] || afterItems[0];
+        added.push({ text, ref: item.ref, role: item.role });
       }
     }
-    for (const text of before.ordered) {
-      const delta = (before.counts.get(text) || 0) - (after.counts.get(text) || 0);
+    for (const [text, beforeItems] of before) {
+      const afterCount = (after.get(text) || []).length;
+      const delta = beforeItems.length - afterCount;
       for (let i = 0; i < delta; i++) {
-        if (removedText.length >= maxRemoved) {
+        if (removed.length >= maxRemoved) {
           truncated = true;
           break;
         }
-        removedText.push(text);
+        const item = beforeItems[afterCount + i] || beforeItems[0];
+        removed.push({ text, ref: item.ref, role: item.role });
       }
     }
-    return { addedText, removedText, truncated };
+    return { added, removed, truncated };
+  }
+  function formatDiffItems(items) {
+    return items.slice(0, 8).map((item) => {
+      const label = item.role && item.ref ? `${item.role} ${item.ref}` : item.role || item.ref || "";
+      return label ? `"${item.text}" (${label})` : `"${item.text}"`;
+    }).join("; ");
   }
   function buildObservationSummary(textDiff, stale, urlChanged, maxChars = OBSERVATION_DEFAULTS.maxSummaryChars) {
     const parts = [];
@@ -38591,8 +38579,8 @@ function runDaemonServer() {
     if (textDiff.activeElementChanged) parts.push("Focused element changed.");
     if (textDiff.visibleTextRunCountDelta) parts.push(`Visible text run count changed by ${textDiff.visibleTextRunCountDelta}.`);
     if (textDiff.visibleTextCharsDelta) parts.push(`Visible text character count changed by ${textDiff.visibleTextCharsDelta}.`);
-    if (textDiff.addedText.length) parts.push(`Visible text added: ${textDiff.addedText.slice(0, 8).join("; ")}.`);
-    if (textDiff.removedText.length) parts.push(`Visible text removed: ${textDiff.removedText.slice(0, 8).join("; ")}.`);
+    if (textDiff.added?.length) parts.push(`Visible text added: ${formatDiffItems(textDiff.added)}.`);
+    if (textDiff.removed?.length) parts.push(`Visible text removed: ${formatDiffItems(textDiff.removed)}.`);
     if (!parts.length) parts.push("No added or removed visible text detected.");
     let summary = parts.join(" ");
     if (summary.length > maxChars) summary = `${summary.slice(0, Math.max(0, maxChars - 1))}\u2026`;
@@ -38645,7 +38633,7 @@ function runDaemonServer() {
     const urlChanged = currentNavigationKey !== baseline.navigationKey;
     const titleChanged = String(current.title || "") !== String(baseline.title || "");
     const stale = Boolean(urlChanged);
-    let textDiff = { addedText: [], removedText: [], truncated: false };
+    let textDiff = { added: [], removed: [], truncated: false };
     if (!stale || request.args.allowStaleNavigationDiff === true) {
       textDiff = diffObservationText(baseline.observation.textRuns, current.textRuns, request.args);
     }
@@ -38714,8 +38702,8 @@ function runDaemonServer() {
     await new Promise((resolve3) => setTimeout(resolve3, ms));
   }
   function summarizeActionObservation(diffData, expectChange) {
-    const addedCount = diffData?.textDiff?.addedText?.length || 0;
-    const removedCount = diffData?.textDiff?.removedText?.length || 0;
+    const addedCount = diffData?.textDiff?.added?.length || 0;
+    const removedCount = diffData?.textDiff?.removed?.length || 0;
     const networkCount = diffData?.network?.requestCount || 0;
     const lightweightDelta = Boolean(
       diffData?.urlChanged || diffData?.titleChanged || diffData?.textDiff?.activeElementChanged || diffData?.textDiff?.visibleTextRunCountDelta || diffData?.textDiff?.visibleTextCharsDelta
@@ -38727,7 +38715,7 @@ function runDaemonServer() {
     return {
       baselineId: diffData?.baselineId || null,
       summary: diffData?.summary || "",
-      textDiff: diffData?.textDiff || { addedText: [], removedText: [], truncated: false },
+      textDiff: diffData?.textDiff || { added: [], removed: [], truncated: false },
       network: diffData?.network || null,
       stale: Boolean(diffData?.stale),
       urlChanged: Boolean(diffData?.urlChanged),
@@ -38798,7 +38786,7 @@ function runDaemonServer() {
     if (!diffData) return false;
     const textDiff = diffData?.textDiff || {};
     return Boolean(
-      result?.newTab || Array.isArray(result?.newTabs) && result.newTabs.length || diffData?.urlChanged || diffData?.titleChanged || textDiff.activeElementChanged || textDiff.visibleTextRunCountDelta || textDiff.visibleTextCharsDelta || Array.isArray(textDiff.addedText) && textDiff.addedText.length || Array.isArray(textDiff.removedText) && textDiff.removedText.length
+      result?.newTab || Array.isArray(result?.newTabs) && result.newTabs.length || diffData?.urlChanged || diffData?.titleChanged || textDiff.activeElementChanged || textDiff.visibleTextRunCountDelta || textDiff.visibleTextCharsDelta || Array.isArray(textDiff.added) && textDiff.added.length || Array.isArray(textDiff.removed) && textDiff.removed.length
     );
   }
   function postSnapshotTabId(result, fallbackTabId) {

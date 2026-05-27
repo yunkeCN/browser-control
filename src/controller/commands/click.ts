@@ -35,8 +35,8 @@ export interface ClickInput {
 export interface ClickData {
   /** 是否成功点击 */
   clicked: boolean;
-  /** 页面变化摘要 */
-  changeSummary?: string;
+  /** 观察基线 ID（可用 observe_diff 对比点击前后的页面变化） */
+  observationBaselineId?: string;
   /** 是否打开了新标签页 */
   newTabOpened?: boolean;
   /** 点击后快照（after=snapshot 时提供） */
@@ -97,7 +97,7 @@ function countPostSnapshotElements(raw: Record<string, unknown>): number {
 
 // ─── 命令定义 ────────────────────────────────────────────────────
 
-const def: CommandDefinition<ClickInput, ClickData> = {
+export const clickDef: CommandDefinition<ClickInput, ClickData> = {
   name: 'click',
   requiredArgs: ['target'],
 
@@ -179,9 +179,9 @@ const def: CommandDefinition<ClickInput, ClickData> = {
       };
     }
 
-    // 提取变化摘要
+    // 提取观察基线 ID（after 管线自动生成的，可在后续 observe_diff 中使用）
     const changes = clickData.changes as Record<string, unknown> | undefined;
-    const changeSummary = changes?.summary as string | undefined;
+    const observationBaselineId = typeof changes?.baselineId === 'string' ? changes.baselineId : undefined;
 
     // 提取 postSnapshot
     const rawPostSnapshot = clickData.postSnapshot as
@@ -223,9 +223,6 @@ const def: CommandDefinition<ClickInput, ClickData> = {
 
     // 组装 summary
     const parts: string[] = ['已点击元素'];
-    if (changeSummary) {
-      parts.push(changeSummary);
-    }
     if (postSnapshot) {
       parts.push(`快照: ${postSnapshot.elementCount} 个元素`);
     }
@@ -235,13 +232,16 @@ const def: CommandDefinition<ClickInput, ClickData> = {
     if (diff) {
       parts.push(`基线对比 ${baseline}: ${diff.summary}`);
     }
+    if (observationBaselineId) {
+      parts.push(`观察基线: ${observationBaselineId}`);
+    }
 
     return {
       ok: true,
       summary: parts.join(' | '),
       data: {
         clicked: true,
-        changeSummary,
+        observationBaselineId,
         newTabOpened,
         postSnapshot,
         diff,
@@ -258,5 +258,5 @@ export async function click(
   args: Record<string, unknown>,
   client: DaemonClient,
 ): Promise<CommandResult<ClickData>> {
-  return runCommand(def, args, client);
+  return runCommand(clickDef, args, client);
 }

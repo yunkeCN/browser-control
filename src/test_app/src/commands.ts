@@ -1,4 +1,6 @@
 import type { CommandResult } from '@controller/types';
+import { clickDef } from '@controller/commands/click';
+import { observeDiffDef } from '@controller/commands/observe';
 import { riskNoteFor } from '@mcp/risk-notes';
 
 // ─── Command metadata ──────────────────────────────────────────────
@@ -48,34 +50,7 @@ function snapshotResult(raw: Record<string, unknown>): CommandResult {
   });
 }
 
-function clickResult(raw: Record<string, unknown>): CommandResult {
-  const d = raw.data as RawData;
-  if (!d) return fail('点击失败: daemon 未返回点击结果', ['请确认目标元素在当前页面中存在', '重试 click 命令']);
-  if (!d.clicked) return fail('点击未生效: 元素可能不可点击或已被移除', ['请使用 snapshot 刷新页面元素状态后重试']);
-
-  const changes = d.changes as RawData;
-  const changeSummary = changes?.summary as string | undefined;
-  const rawPs = d.postSnapshot as RawData;
-  let psCount = 0;
-  if (rawPs) {
-    const r = rawPs.refs;
-    psCount = Array.isArray(r) ? r.length : 0;
-  }
-  const net = d.network as { requests?: string[]; count?: number } | undefined;
-
-  const parts: string[] = ['已点击元素'];
-  if (changeSummary) parts.push(changeSummary);
-  if (psCount > 0) parts.push(`快照: ${psCount} 个元素`);
-  if (net?.requests?.length) parts.push(`触发 ${net.count || net.requests.length} 个接口请求`);
-
-  return ok(parts.join(' | '), {
-    clicked: true,
-    changeSummary,
-    newTabOpened: Boolean(d.newTabOpened),
-    postSnapshot: psCount > 0 ? { elementCount: psCount } : undefined,
-    network: net?.requests?.length ? { requests: net.requests, count: net.count || net.requests.length } : undefined,
-  });
-}
+const clickResult = clickDef.toResult;
 
 function fillResult(raw: Record<string, unknown>): CommandResult {
   const d = raw.data as RawData;
@@ -134,13 +109,7 @@ function observeStartResult(raw: Record<string, unknown>): CommandResult {
   return ok(`观察基线已建立: ${id}`);
 }
 
-function observeDiffResult(raw: Record<string, unknown>): CommandResult {
-  const d = raw.data as RawData;
-  if (!d) return fail('观察 diff 失败: daemon 未返回结果');
-  const added = Array.isArray(d.added) ? d.added.length : 0;
-  const removed = Array.isArray(d.removed) ? d.removed.length : 0;
-  return ok(`观察 diff: 检测到 ${added + removed} 处变化（新增 ${added} 处，移除 ${removed} 处）`);
-}
+const observeDiffResult = observeDiffDef.toResult;
 
 function networkStartResult(raw: Record<string, unknown>): CommandResult {
   const d = raw.data as RawData;

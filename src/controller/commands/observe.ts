@@ -63,9 +63,9 @@ export interface ObserveDiffData {
   /** 是否有变化 */
   hasChanges: boolean;
   /** 新增文本列表 */
-  addedText?: string[];
+  added?: Array<{ text: string; ref?: string | null; role?: string | null }>;
   /** 移除文本列表 */
-  removedText?: string[];
+  removed?: Array<{ text: string; ref?: string | null; role?: string | null }>;
   /** URL 是否发生变化 */
   urlChanged?: boolean;
 }
@@ -139,7 +139,7 @@ const startDef: CommandDefinition<ObserveStartInput, ObserveStartData> = {
 
 // ─── observe_diff 命令定义 ───────────────────────────────────────
 
-const diffDef: CommandDefinition<ObserveDiffInput, ObserveDiffData> = {
+export const observeDiffDef: CommandDefinition<ObserveDiffInput, ObserveDiffData> = {
   name: 'observe_diff',
   requiredArgs: ['baselineId'],
 
@@ -193,17 +193,14 @@ const diffDef: CommandDefinition<ObserveDiffInput, ObserveDiffData> = {
     }
 
     const baselineId = String(rawData.baselineId || '');
-    const hasChanges = Boolean(rawData.hasChanges);
-    const addedText = Array.isArray(rawData.addedText)
-      ? rawData.addedText.map(String)
-      : undefined;
-    const removedText = Array.isArray(rawData.removedText)
-      ? rawData.removedText.map(String)
-      : undefined;
+    const textDiff = rawData.textDiff as Record<string, unknown> | undefined;
+    const added = Array.isArray(textDiff?.added) ? textDiff.added : undefined;
+    const removed = Array.isArray(textDiff?.removed) ? textDiff.removed : undefined;
     const urlChanged = rawData.urlChanged !== undefined ? Boolean(rawData.urlChanged) : undefined;
 
-    const addedCount = addedText ? addedText.length : 0;
-    const removedCount = removedText ? removedText.length : 0;
+    const addedCount = added ? added.length : 0;
+    const removedCount = removed ? removed.length : 0;
+    const hasChanges = addedCount > 0 || removedCount > 0 || Boolean(rawData.urlChanged) || Boolean(rawData.titleChanged);
 
     const diffSummary = rawData.summary
       ? String(rawData.summary)
@@ -218,8 +215,8 @@ const diffDef: CommandDefinition<ObserveDiffInput, ObserveDiffData> = {
         baselineId,
         summary: diffSummary,
         hasChanges,
-        addedText,
-        removedText,
+        added,
+        removed,
         urlChanged,
       },
     };
@@ -247,5 +244,5 @@ export async function observeDiff(
   args: Record<string, unknown>,
   client: DaemonClient,
 ): Promise<CommandResult<ObserveDiffData>> {
-  return runCommand(diffDef, args, client);
+  return runCommand(observeDiffDef, args, client);
 }

@@ -292,7 +292,7 @@
       hitTest,
       frameDepth: framePath.frameDepth,
       framePath: localFramePathSummary(framePath.frames),
-      warnings: hitWithinTarget ? [] : ["force:true bypassed covered-element hit-test for cdp_mouse."]
+      warnings: []
     };
   }
   var init_cdp_target = __esm({
@@ -616,7 +616,7 @@
         debuggee: { tabId },
         temporary: false,
         owner: "network_capture",
-        warnings: [`Reusing debugger session owned by network capture for session ${networkOwner.session}; Browser Control will not detach it after the action.`]
+        warnings: []
       };
     }
     try {
@@ -2003,10 +2003,21 @@
         return publicNode;
       }
     }
+    function isContainerNode(node) {
+      return node.children.some((c) => typeof c !== "string");
+    }
+    function displayName(node) {
+      if (!node.name) return null;
+      if (isContainerNode(node) && node.name.length > 30) {
+        return `${node.name.slice(0, 10)}[...]${node.name.slice(-10)}`;
+      }
+      return node.name;
+    }
     function renderNodeKey(node, renderCursorPointer) {
       let key = node.role;
-      if (node.name)
-        key += ` ${JSON.stringify(node.name)}`;
+      const name = displayName(node);
+      if (name)
+        key += ` ${JSON.stringify(name)}`;
       if (node.checked === "mixed")
         key += " [checked=mixed]";
       else if (node.checked === true)
@@ -3445,27 +3456,6 @@
         }
       };
     }
-    function localElementClick() {
-      const found = localFindElement(selector);
-      if (found?.error) return found.error;
-      const el = found?.element;
-      if (!el) return { error: `Element not found: ${selector}` };
-      if (typeof el.click !== "function") return { error: `Element cannot be clicked directly: ${selector}` };
-      const ownerDocument = localOwnerDocument(el);
-      const focusBefore = localDescribeElement(ownerDocument.activeElement);
-      el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
-      el.click();
-      return {
-        clicked: true,
-        selector,
-        strategyUsed: "element_click",
-        synthetic: true,
-        target: localDescribeElement(el),
-        focusBefore,
-        focusAfter: localDescribeElement(ownerDocument.activeElement),
-        warnings: ["element_click calls el.click() directly and may bypass pointer/mouse semantics and overlay hit-testing."]
-      };
-    }
     function localDomPointerClick() {
       const found = localFindElement(selector);
       if (found?.error) return found.error;
@@ -3490,7 +3480,6 @@
           warnings: ["Target center is covered. Use a fresh snapshot, close the overlay, or choose a visible child target."]
         };
       }
-      if (!geometry.hitWithinTarget) warnings.push("force:true bypassed covered-element hit-test; dispatched events to the requested element.");
       const dispatchTarget = geometry.frameHitWithinTarget ? geometry.frameHit : el;
       const button = localMouseButton(options?.button);
       const clickCount = Math.max(1, Number(options?.clickCount || 1));
@@ -3552,14 +3541,7 @@
         warnings
       };
     }
-    const strategy = options?.strategy || "dom_pointer";
-    if (strategy === "auto" || strategy === "dom_pointer") {
-      return localDomPointerClick();
-    }
-    if (strategy === "element_click") {
-      return localElementClick();
-    }
-    return { error: `Unsupported click strategy in page context: ${strategy}` };
+    return localDomPointerClick();
   }
   var init_click = __esm({
     "src/extension/service-worker/page-runtime/click.ts"() {
@@ -4544,55 +4526,40 @@
   }
   async function performObservedClick(args = {}, session, tabId) {
     const selector = targetSelector(args);
-    if (!selector) throw new Error("target is required for click");
-    const strategy = args?.strategy || "auto";
     const beforeIds = await beginNewTabWatch();
+    const tab = await chrome.tabs.get(tabId);
+    const pageOrigin = tab.url ? (() => {
+      try {
+        return new URL(tab.url).origin;
+      } catch {
+        return null;
+      }
+    })() : null;
     const networkUrls = [];
     const networkStart = Date.now();
     let networkListener2 = null;
-    if (chrome.webRequest?.onBeforeRequest) {
+    if (chrome.webRequest?.onBeforeRequest && pageOrigin) {
       networkListener2 = (details) => {
-        if (details.tabId === tabId && typeof details.url === "string" && details.url.startsWith("http")) {
-          networkUrls.push(details.url);
+        if (details.tabId !== tabId || typeof details.url !== "string") return;
+        try {
+          if (new URL(details.url).origin === pageOrigin) networkUrls.push(details.url);
+        } catch {
         }
       };
       chrome.webRequest.onBeforeRequest.addListener(networkListener2, { urls: ["<all_urls>"] });
     }
     let clickResult;
-    let skipDom = false;
     try {
-      if (strategy === "auto" || strategy === "cdp_mouse") {
-        const cdpResult = await performCdpMouseClick(tabId, selector, args || {});
-        if (!cdpResult.error) {
-          clickResult = cdpResult;
-          skipDom = true;
-        } else if (cdpResult.code === "STALE_ELEMENT_REFERENCE") {
-          clickResult = cdpResult;
-          skipDom = true;
-        } else if (strategy === "cdp_mouse") {
-          clickResult = cdpResult;
-          skipDom = true;
-        } else {
-          args = {
-            ...args,
-            strategy: "dom_pointer",
-            warnings: [
-              ...args?.warnings || [],
-              `cdp_mouse unavailable in auto mode; fell back to dom_pointer: ${cdpResult.error}`
-            ]
-          };
-        }
-      }
-      if (!skipDom) {
+      const cdpResult = await performCdpMouseClick(tabId, selector, args || {});
+      if (!cdpResult.error || cdpResult.code === "STALE_ELEMENT_REFERENCE") {
+        clickResult = cdpResult;
+      } else {
         const results = await chrome.scripting.executeScript({
           target: { tabId },
           func: performClick,
           args: [selector, {
-            strategy: args?.strategy,
+            strategy: "dom_pointer",
             force: args?.force,
-            button: args?.button,
-            clickCount: args?.clickCount,
-            modifiers: args?.modifiers,
             warnings: args?.warnings
           }],
           world: "MAIN"
