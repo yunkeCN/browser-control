@@ -69,7 +69,7 @@ function log(level, message, data = null) {
 
 const sessions = new Map(); // sessionName -> { createdAt, tabCount, lastActivity }
 const artifactStore = new ArtifactStore(CONFIG.artifactDir);
-const observationBaselines = new Map(); // baselineId -> baseline record
+const snapshotStore = new Map(); // baselineId -> { tree?, textRuns, observation, ... }
 
 const OBSERVATION_DEFAULTS = {
   ttlMs: 60 * 60 * 1000,
@@ -356,11 +356,11 @@ function sendError(req, res, statusCode, message, details = null) {
   });
 }
 
-let _obsCounter = 0;
+let _snapCounter = 0;
 function makeObservationBaselineId(label = '') {
   const safe = String(label || '').replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-').slice(0, 40);
   if (safe) return safe;
-  return `obs${++_obsCounter}`;
+  return `s${++_snapCounter}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
 function observationStorageKey(session, tabId, baselineId) {
@@ -368,31 +368,31 @@ function observationStorageKey(session, tabId, baselineId) {
 }
 
 function cleanupObservationBaselines(now = Date.now()) {
-  for (const [key, baseline] of observationBaselines) {
-    if (baseline.expiresAtMs <= now) observationBaselines.delete(key);
+  for (const [key, baseline] of snapshotStore) {
+    if (baseline.expiresAtMs <= now) snapshotStore.delete(key);
   }
-  if (observationBaselines.size <= OBSERVATION_DEFAULTS.maxGlobal) return;
-  const sorted = [...observationBaselines.entries()].sort((a, b) => (a[1].lastAccessedAtMs || a[1].createdAtMs) - (b[1].lastAccessedAtMs || b[1].createdAtMs));
-  for (const [key] of sorted.slice(0, observationBaselines.size - OBSERVATION_DEFAULTS.maxGlobal)) {
-    observationBaselines.delete(key);
+  if (snapshotStore.size <= OBSERVATION_DEFAULTS.maxGlobal) return;
+  const sorted = [...snapshotStore.entries()].sort((a, b) => (a[1].lastAccessedAtMs || a[1].createdAtMs) - (b[1].lastAccessedAtMs || b[1].createdAtMs));
+  for (const [key] of sorted.slice(0, snapshotStore.size - OBSERVATION_DEFAULTS.maxGlobal)) {
+    snapshotStore.delete(key);
   }
 }
 
 function cleanupSessionObservationBaselines(session, tabId = null) {
-  for (const [key, baseline] of observationBaselines) {
+  for (const [key, baseline] of snapshotStore) {
     if (baseline.session !== session) continue;
     if (tabId !== null && baseline.tabId !== tabId) continue;
-    observationBaselines.delete(key);
+    snapshotStore.delete(key);
   }
 }
 
 function enforceSessionObservationCap(session) {
-  const entries = [...observationBaselines.entries()]
+  const entries = [...snapshotStore.entries()]
     .filter(([, baseline]) => baseline.session === session)
     .sort((a, b) => (a[1].lastAccessedAtMs || a[1].createdAtMs) - (b[1].lastAccessedAtMs || b[1].createdAtMs));
   const extra = entries.length - OBSERVATION_DEFAULTS.maxPerSession;
   if (extra > 0) {
-    for (const [key] of entries.slice(0, extra)) observationBaselines.delete(key);
+    for (const [key] of entries.slice(0, extra)) snapshotStore.delete(key);
   }
 }
 
@@ -441,9 +441,10 @@ async function handleObserveStart(request) {
       markerId: `${baselineId}-network`,
       timestampMs: markerTimestampMs
     },
-    observation
+    observation,
+    tree: null
   };
-  observationBaselines.set(observationStorageKey(request.session, record.tabId, baselineId), record);
+  snapshotStore.set(observationStorageKey(request.session, record.tabId, baselineId), record);
   enforceSessionObservationCap(request.session);
 
   return {
@@ -466,9 +467,9 @@ async function handleObserveStart(request) {
 function findObservationBaseline(session, baselineId, tabId = undefined) {
   cleanupObservationBaselines();
   if (tabId !== undefined && tabId !== null) {
-    return observationBaselines.get(observationStorageKey(session, tabId, baselineId)) || null;
+    return snapshotStore.get(observationStorageKey(session, tabId, baselineId)) || null;
   }
-  for (const baseline of observationBaselines.values()) {
+  for (const baseline of snapshotStore.values()) {
     if (baseline.session === session && baseline.baselineId === baselineId) return baseline;
   }
   return null;
@@ -898,6 +899,60 @@ async function runClickWithAfter(request, mapped) {
   return { data, artifacts };
 }
 
+async function runSnapshotWithStore(request, mapped) {
+  const diffTo = request.args.diff_to;
+
+  // 1. 捕获 textRuns + snapshot tree
+  const observation = await captureObservation(request);
+  const snapshotResult = await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
+
+  // 2. 存入 snapshotStore
+  const baselineId = makeObservationBaselineId();
+  const now = Date.now();
+  const record = {
+    baselineId,
+    session: request.session,
+    tabId: observation.tabId || request.args.tabId || null,
+    createdAt: new Date(now).toISOString(),
+    createdAtMs: now,
+    lastAccessedAtMs: now,
+    expiresAt: new Date(now + OBSERVATION_DEFAULTS.ttlMs).toISOString(),
+    expiresAtMs: now + OBSERVATION_DEFAULTS.ttlMs,
+    url: observation.url || null,
+    title: observation.title || '',
+    navigationKey: observationNavigationKey(observation),
+    networkMarker: null,
+    observation,
+    tree: snapshotResult?.tree || snapshotResult?.snapshot?.tree || null
+  };
+  snapshotStore.set(observationStorageKey(request.session, record.tabId, baselineId), record);
+  enforceSessionObservationCap(request.session);
+
+  // 3. 如果请求了 diff_to，查找历史基线树
+  let baselineTree = null;
+  if (diffTo) {
+    const baseline = findObservationBaseline(request.session, diffTo, request.args.tabId);
+    if (baseline) {
+      baseline.lastAccessedAtMs = Date.now();
+      baselineTree = baseline.tree || baseline.observation?.tree || null;
+    }
+  }
+
+  const data = snapshotResult && typeof snapshotResult === 'object' && !Array.isArray(snapshotResult)
+    ? { ...snapshotResult }
+    : { snapshot: snapshotResult };
+  data.baselineId = baselineId;
+  if (baselineTree) data.baselineTree = baselineTree;
+  if (diffTo && !baselineTree) {
+    data.warnings = [
+      ...(Array.isArray(data.warnings) ? data.warnings : []),
+      `diff_to baseline "${diffTo}" not found or expired`
+    ];
+  }
+
+  return { data, artifacts: [] };
+}
+
 async function handleCommand(req, res) {
   const startedAt = new Date().toISOString();
   let request;
@@ -932,6 +987,18 @@ async function handleCommand(req, res) {
         tab,
         data: observed.data,
         artifacts: observed.artifacts,
+        diagnostics: { extensionConnected, pendingRequests: pendingRequests.size, runtime: runtimeMetadata(), warnings: capabilityWarnings() }
+      }));
+    }
+    if (request.command === 'snapshot') {
+      const { data, artifacts } = await runSnapshotWithStore(request, mapped);
+      const tab = data && typeof data === 'object' ? (data.tab || data.tabId || null) : null;
+      return sendJson(req, res, 200, createResultEnvelope(request, {
+        ok: true,
+        startedAt,
+        tab,
+        data,
+        artifacts,
         diagnostics: { extensionConnected, pendingRequests: pendingRequests.size, runtime: runtimeMetadata(), warnings: capabilityWarnings() }
       }));
     }

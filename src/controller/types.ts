@@ -38,6 +38,11 @@ export interface CommandResult<T = unknown> {
   data?: T;
 
   /**
+   * 快照基线 ID（snapshot/click 自动生成，可用于 diff_to 对比）
+   */
+  baselineId?: string;
+
+  /**
    * LLM 下一步动作建议（按优先级排序）
    * 仅在需要提示下一步时提供，成功时一般为 undefined
    *

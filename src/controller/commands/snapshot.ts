@@ -19,7 +19,6 @@ import type { CommandResult } from '../types';
 import type { SnapshotNode } from '../../../contracts';
 import { runCommand, type CommandDefinition } from '../runner';
 import { computeSnapshotDiff, type StructureDiff } from './snapshot-diff';
-import { setBaseline, getBaseline, hasBaseline } from './shared-baseline';
 
 // ─── 类型定义 ────────────────────────────────────────────────────
 
@@ -40,10 +39,10 @@ export interface SnapshotInput {
   /** 是否包含元素位置信息 [box=x,y,w,h] */
   boxes?: boolean;
   /**
-   * 基线 ID（可选）
-   * 首次调用时存储当前快照；再次调用同一 baseline 时返回结构差异
+   * 对比目标快照 ID（可选）
+   * 传入历史 baselineId，返回与当前快照的结构差异
    */
-  baseline?: string;
+  diff_to?: string;
 }
 
 /** snapshot 命令的输出数据 */
@@ -68,9 +67,7 @@ export interface SnapshotData {
   tree: string;
   /** 页面中可交互元素的总数（对应 @e 引用的数量） */
   elementCount: number;
-  /** 基线 ID（仅 baseline 模式返回） */
-  baselineId?: string;
-  /** 结构差异（仅 baseline 对比模式返回） */
+  /** 结构差异（仅 diff_to 模式返回） */
   diff?: StructureDiff;
 }
 
@@ -110,14 +107,14 @@ function countElements(raw: Record<string, unknown>): number {
 
 // ─── 基线存储（使用共享存储，供 click 等命令共用） ──────────────
 
-const def: CommandDefinition<SnapshotInput, SnapshotData> = {
+export const snapshotDef: CommandDefinition<SnapshotInput, SnapshotData> = {
   name: 'snapshot',
   requiredArgs: [],
 
   validate: (args: Record<string, unknown>): SnapshotInput => {
     const validKeys = [
       'tabId', 'roles', 'tags', 'hasVisibleText',
-      'textIncludes', 'viewportOnly', 'boxes', 'baseline',
+      'textIncludes', 'viewportOnly', 'boxes', 'diff_to',
     ];
     const unknownKeys = Object.keys(args).filter((k) => !validKeys.includes(k));
     if (unknownKeys.length > 0) {
@@ -134,8 +131,8 @@ const def: CommandDefinition<SnapshotInput, SnapshotData> = {
     if (args.tabId !== undefined && typeof args.tabId !== 'number') {
       throw new Error('tabId 必须是数字');
     }
-    if (args.baseline !== undefined && typeof args.baseline !== 'string') {
-      throw new Error('baseline 必须是字符串');
+    if (args.diff_to !== undefined && typeof args.diff_to !== 'string') {
+      throw new Error('diff_to 必须是字符串');
     }
     return args as unknown as SnapshotInput;
   },
@@ -144,32 +141,14 @@ const def: CommandDefinition<SnapshotInput, SnapshotData> = {
     input: SnapshotInput,
     daemon: DaemonClient,
   ): Promise<Record<string, unknown>> => {
-    // 分离 baseline 参数（不发送到 daemon）
-    const { baseline, ...snapshotArgs } = input;
-    // viewportOnly 默认 false: 确保 Drawer/Modal 内元素被捕获
-    // boxes 默认 true: 确保元素位置信息可用于 click_text 等命令
     const effectiveArgs = {
-      ...snapshotArgs,
-      viewportOnly: snapshotArgs.viewportOnly ?? false,
-      boxes: snapshotArgs.boxes ?? true,
+      ...input,
+      viewportOnly: input.viewportOnly ?? false,
+      boxes: input.boxes ?? true,
     } as unknown as Record<string, unknown>;
-    const envelope = daemon.buildEnvelope(
-      'snapshot',
-      effectiveArgs,
-    );
+    const envelope = daemon.buildEnvelope('snapshot', effectiveArgs);
     const response = await daemon.command(envelope);
-    // response.data = { ok: true, data: { snapshot, tree, refs, ... } }
     const daemonBody = response.data as Record<string, unknown> || {};
-    const snapshotData = daemonBody.data as Record<string, unknown> | undefined;
-    if (baseline && snapshotData) {
-      // 注入 baseline 到内部 data，使 toResult 能获取
-      snapshotData._baseline = baseline;
-      // 深拷贝 tree 用于后续 diff 计算
-      const rawTree = snapshotData.tree as SnapshotNode[] | undefined;
-      if (rawTree) {
-        snapshotData._treeCapture = JSON.parse(JSON.stringify(rawTree));
-      }
-    }
     return daemonBody;
   },
 
@@ -188,61 +167,32 @@ const def: CommandDefinition<SnapshotInput, SnapshotData> = {
     const url = String(snapshotData.url || '');
     const tree = extractTree(snapshotData);
     const elementCount = countElements(snapshotData);
+    const baselineId = typeof snapshotData.baselineId === 'string' ? snapshotData.baselineId : undefined;
 
-    // baseline 模式（通过 execute 注入到 raw）
-    const baseline = snapshotData._baseline as string | undefined;
-    const rawTree = snapshotData._treeCapture as Array<SnapshotNode | { text: string }> | undefined;
-    if (baseline) {
-      if (!hasBaseline(baseline)) {
-        // 首次调用: 存储快照作为基线
-        if (rawTree) {
-          setBaseline(baseline, rawTree);
-        }
-        return {
-          ok: true,
-          summary: `基线已建立: ${baseline}（${elementCount} 个交互元素）`,
-          data: {
-            title,
-            url,
-            tree,
-            elementCount,
-            baselineId: baseline,
-          },
-        };
-      }
-
-      // 第二次调用: 计算差异
-      const baselineTree = getBaseline(baseline)!;
-      const currentTree = rawTree || [];
-      const diff = computeSnapshotDiff(baselineTree, currentTree);
-
-      // 更新基线为当前快照（后续调用继续对比最新）
-      if (rawTree) {
-        setBaseline(baseline, rawTree);
-      }
-
-      return {
-        ok: true,
-        summary: `基线对比 ${baseline}: ${diff.summary}`,
-        data: {
-          title,
-          url,
-          tree,
-          elementCount,
-          baselineId: baseline,
-          diff,
-        },
-      };
+    // diff_to 模式：daemon 返回了基线树，控制器计算结构差异
+    const baselineTree = snapshotData.baselineTree as Array<SnapshotNode | { text: string }> | undefined;
+    const currentTree = snapshotData.tree as Array<SnapshotNode | { text: string }> | undefined;
+    let diff: StructureDiff | undefined;
+    if (baselineTree && currentTree) {
+      diff = computeSnapshotDiff(baselineTree, currentTree);
     }
+
+    const parts: string[] = [];
+    if (title) parts.push(`「${title}」`);
+    parts.push(`快照: ${elementCount} 个交互元素`);
+    if (baselineId) parts.push(`基线: ${baselineId}`);
+    if (diff) parts.push(`对比: ${diff.summary}`);
 
     return {
       ok: true,
-      summary: `页面${title ? `「${title}」` : ''}快照: ${elementCount} 个交互元素`,
+      summary: parts.join(' | '),
+      baselineId,
       data: {
         title,
         url,
         tree,
         elementCount,
+        diff,
       },
     };
   },
@@ -255,5 +205,5 @@ export async function snapshot(
   args: Record<string, unknown>,
   client: DaemonClient,
 ): Promise<CommandResult<SnapshotData>> {
-  return runCommand(def, args, client);
+  return runCommand(snapshotDef, args, client);
 }

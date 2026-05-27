@@ -1,5 +1,6 @@
 import type { CommandResult } from '@controller/types';
 import { clickDef } from '@controller/commands/click';
+import { snapshotDef } from '@controller/commands/snapshot';
 import { observeDiffDef } from '@controller/commands/observe';
 import { riskNoteFor } from '@mcp/risk-notes';
 
@@ -35,20 +36,7 @@ function navigateResult(raw: Record<string, unknown>): CommandResult {
   });
 }
 
-function snapshotResult(raw: Record<string, unknown>): CommandResult {
-  const d = raw.data as RawData;
-  if (!d) return fail('快照失败: daemon 未返回快照数据', ['请确认当前标签页存在', '重试 snapshot 命令']);
-  const title = String(d.title || '');
-  const tree = typeof d.snapshot === 'string' ? d.snapshot : '';
-  const refs = d.refs;
-  const count = Array.isArray(refs) ? refs.length : 0;
-  return ok(`页面${title ? `「${title}」` : ''}快照: ${count} 个交互元素`, {
-    title,
-    url: String(d.url || ''),
-    tree,
-    elementCount: count,
-  });
-}
+const snapshotResult = snapshotDef.toResult;
 
 const clickResult = clickDef.toResult;
 

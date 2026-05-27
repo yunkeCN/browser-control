@@ -66,11 +66,11 @@ export const EXTENSION_CAPABILITY_HINTS = [
 export const COMMANDS: Record<string, CommandSpec> = {
   navigate: { required: ['url'], optional: ['newTab', 'timeoutMs'] },
   find_tab: { required: [], optional: ['urlIncludes', 'titleIncludes', 'active', 'tabId', 'attach'] },
-  snapshot: { required: [], optional: ['tabId', 'roles', 'tags', 'hasVisibleText', 'textIncludes', 'viewportOnly', 'boxes', 'baseline'], example: { tabId: 123, roles: ['button', 'link'], hasVisibleText: true, viewportOnly: true } },
+  snapshot: { required: [], optional: ['tabId', 'roles', 'tags', 'hasVisibleText', 'textIncludes', 'viewportOnly', 'boxes', 'diff_to'], example: { tabId: 123, roles: ['button', 'link'], hasVisibleText: true, viewportOnly: true } },
   click: {
     required: ['target'],
-    optional: ['tabId', 'after', 'baseline'],
-    example: { target: '@e1abc23_1', after: 'auto', baseline: 'my-page' }
+    optional: ['tabId', 'after'],
+    example: { target: '@e1abc23_1', after: 'auto' }
   },
   click_probe: {
     required: ['target'],
@@ -472,7 +472,7 @@ function validateClickAfter(request: any, spec: CommandSpec) {
     ...validationDetails(request, spec, 'after'),
     expectedValues: ['auto', 'none', 'snapshot'],
     value,
-    hint: 'Use after:"auto" for the default post-click summary and postSnapshot, "snapshot" for explicit full snapshot, or "none" for a raw click. Use baseline parameter with snapshot baseline for structured DOM diff.'
+    hint: 'Use after:"auto" for the default post-click summary and postSnapshot, "snapshot" for explicit full snapshot, or "none" for a raw click.'
   });
 }
 
