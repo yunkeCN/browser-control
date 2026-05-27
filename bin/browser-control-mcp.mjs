@@ -36022,12 +36022,12 @@ var snapshotDef = {
     return {
       ok: true,
       summary: parts.join(" | "),
+      baselineId,
       data: {
         title,
         url: url2,
         tree,
         elementCount,
-        baselineId,
         diff
       }
     };
@@ -36150,9 +36150,9 @@ var clickDef = {
     return {
       ok: true,
       summary: parts.join(" | "),
+      baselineId: observationBaselineId,
       data: {
         clicked: true,
-        observationBaselineId,
         newTabOpened,
         postSnapshot,
         network
@@ -38347,7 +38347,7 @@ function runDaemonServer() {
   function makeObservationBaselineId(label = "") {
     const safe = String(label || "").replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-").slice(0, 40);
     if (safe) return safe;
-    return `obs${++_snapCounter}`;
+    return `s${++_snapCounter}_${Math.random().toString(36).slice(2, 6)}`;
   }
   function observationStorageKey(session, tabId2, baselineId) {
     return `${session || "default"}:${tabId2 || "unknown"}:${baselineId}`;

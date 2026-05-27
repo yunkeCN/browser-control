@@ -4586,7 +4586,7 @@ function runDaemonServer() {
   function makeObservationBaselineId(label = "") {
     const safe = String(label || "").replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-").slice(0, 40);
     if (safe) return safe;
-    return `obs${++_snapCounter}`;
+    return `s${++_snapCounter}_${Math.random().toString(36).slice(2, 6)}`;
   }
   function observationStorageKey(session, tabId, baselineId) {
     return `${session || "default"}:${tabId || "unknown"}:${baselineId}`;

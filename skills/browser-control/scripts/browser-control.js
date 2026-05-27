@@ -15676,12 +15676,12 @@ var init_snapshot = __esm({
         return {
           ok: true,
           summary: parts.join(" | "),
+          baselineId,
           data: {
             title,
             url: url2,
             tree,
             elementCount,
-            baselineId,
             diff
           }
         };
@@ -15811,9 +15811,9 @@ var init_click = __esm({
         return {
           ok: true,
           summary: parts.join(" | "),
+          baselineId: observationBaselineId,
           data: {
             clicked: true,
-            observationBaselineId,
             newTabOpened,
             postSnapshot,
             network
