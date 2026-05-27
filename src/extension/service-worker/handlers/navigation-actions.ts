@@ -228,19 +228,20 @@ export async function handleClickProbe(args: CommandArgs = {}, session: SessionN
 
 async function performObservedClick(args: CommandArgs = {}, session: SessionName, tabId: number): Promise<any> {
   const selector = targetSelector(args);
-  if (!selector) throw new Error('target is required for click');
-  const strategy = args?.strategy || 'auto';
   const beforeIds = await beginNewTabWatch();
 
-  // ── 轻量级网络捕获: 点击前开始监听，700ms 后收集触发的接口请求 ──
+  // ── 轻量级网络捕获: 点击前开始监听，700ms 后收集同源请求 ──
+  const tab = await chrome.tabs.get(tabId);
+  const pageOrigin = tab.url ? (() => { try { return new URL(tab.url).origin; } catch { return null; } })() : null;
   const networkUrls: string[] = [];
   const networkStart = Date.now();
   let networkListener: any = null;
-  if (chrome.webRequest?.onBeforeRequest) {
+  if (chrome.webRequest?.onBeforeRequest && pageOrigin) {
     networkListener = (details: any) => {
-      if (details.tabId === tabId && typeof details.url === 'string' && details.url.startsWith('http')) {
-        networkUrls.push(details.url);
-      }
+      if (details.tabId !== tabId || typeof details.url !== 'string') return;
+      try {
+        if (new URL(details.url).origin === pageOrigin) networkUrls.push(details.url);
+      } catch {}
     };
     chrome.webRequest.onBeforeRequest.addListener(networkListener, { urls: ['<all_urls>'] });
   }
@@ -248,36 +249,22 @@ async function performObservedClick(args: CommandArgs = {}, session: SessionName
   let clickResult: any;
 
   try {
-    if (strategy === 'auto' || strategy === 'cdp_mouse') {
-      const cdpResult = await performCdpMouseClick(tabId, selector, args || {});
-      if (!cdpResult.error) { clickResult = cdpResult; return; }
-      if (cdpResult.code === 'STALE_ELEMENT_REFERENCE') { clickResult = cdpResult; return; }
-      if (strategy === 'cdp_mouse') { clickResult = cdpResult; return; }
-      args = {
-        ...args,
-        strategy: 'dom_pointer',
-        warnings: [
-          ...(args?.warnings || []),
-          `cdp_mouse unavailable in auto mode; fell back to dom_pointer: ${cdpResult.error}`
-        ]
-      };
+    const cdpResult = await performCdpMouseClick(tabId, selector!, args || {});
+    if (!cdpResult.error || cdpResult.code === 'STALE_ELEMENT_REFERENCE') {
+      clickResult = cdpResult;
+    } else {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: performClick,
+        args: [selector!, {
+          strategy: 'dom_pointer',
+          force: args?.force,
+          warnings: args?.warnings
+        }],
+        world: 'MAIN'
+      });
+      clickResult = results[0]?.result as any;
     }
-
-    const results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: performClick,
-      args: [selector, {
-        strategy: args?.strategy,
-        force: args?.force,
-        button: args?.button,
-        clickCount: args?.clickCount,
-        modifiers: args?.modifiers,
-        warnings: args?.warnings
-      }],
-      world: 'MAIN'
-    });
-
-    clickResult = results[0]?.result as any;
   } finally {
     // 等够 700ms 确保捕获到点击触发的请求，再清理
     const elapsed = Date.now() - networkStart;

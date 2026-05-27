@@ -160,6 +160,6 @@ export function resolveClickTargetForCdp(selector: string, options: any = {}): a
     hitTest,
     frameDepth: framePath.frameDepth,
     framePath: localFramePathSummary(framePath.frames),
-    warnings: hitWithinTarget ? [] : ['force:true bypassed covered-element hit-test for cdp_mouse.']
+    warnings: []
   };
 }

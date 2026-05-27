@@ -53,11 +53,7 @@ export const commandArgSchemas = {
   click_probe: z.object({
     target: elementTarget,
     tabId,
-    strategy: z.enum(['auto', 'cdp_mouse', 'dom_pointer', 'element_click']).optional(),
     force: z.boolean().optional(),
-    button: z.enum(['left', 'middle', 'right']).optional(),
-    clickCount: z.number().int().positive().optional(),
-    modifiers: z.array(z.string()).optional(),
     observeNewTab: z.boolean().optional(),
     expectNewTab: z.boolean().optional(),
     waitMs: z.number().nonnegative().optional(),

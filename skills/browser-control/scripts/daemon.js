@@ -4274,7 +4274,7 @@ var package_default = {
     lint: "node scripts/lint.mjs",
     "e2e:fixture": "npm run build:extension && npm run build:protocol && npm run build:daemon && node tests/fixture-e2e.test.js",
     "e2e:live": "node tests/e2e-test.js",
-    "serve:test-app": "node scripts/serve-test-app.mjs",
+    "serve:test-app": "vite --config src/test_app/vite.config.ts",
     build: "npm run build:extension && npm run build:protocol && npm run build:daemon && npm run build:mcp && npm run build:ctrl",
     "build:extension": "node scripts/build-extension.mjs",
     "build:protocol": "node scripts/build-protocol.mjs",
@@ -4293,7 +4293,8 @@ var package_default = {
     "@types/chrome": "^0.1.42",
     "@types/node": "^25.9.1",
     esbuild: "^0.28.0",
-    typescript: "^5.6.3"
+    typescript: "^5.6.3",
+    vite: "^8.0.14"
   },
   engines: {
     node: ">=18.0.0"
@@ -4933,6 +4934,11 @@ function runDaemonServer() {
   function shouldReturnClickPostSnapshot(mode, diffData, result) {
     if (mode === "snapshot") return true;
     if (mode !== "auto") return false;
+    return hasMeaningfulClickEffect(diffData, result);
+  }
+  function hasMeaningfulClickEffect(changes, result, diffDataOverride = null) {
+    const diffData = diffDataOverride || changes;
+    if (!diffData) return false;
     const textDiff = diffData?.textDiff || {};
     return Boolean(
       result?.newTab || Array.isArray(result?.newTabs) && result.newTabs.length || diffData?.urlChanged || diffData?.titleChanged || textDiff.activeElementChanged || textDiff.visibleTextRunCountDelta || textDiff.visibleTextCharsDelta || Array.isArray(textDiff.addedText) && textDiff.addedText.length || Array.isArray(textDiff.removedText) && textDiff.removedText.length
@@ -5018,6 +5024,10 @@ function runDaemonServer() {
     data.after = mode;
     data.settle = settled.settle;
     data.changes = changes;
+    if (!data.clicked && hasMeaningfulClickEffect(changes, result, diff?.data)) {
+      data.clicked = true;
+      data.clickOverride = "after-pipeline detected page change despite click mechanism reporting failure";
+    }
     if (postSnapshot) data.postSnapshot = postSnapshot;
     if (postSnapshotError) {
       data.postSnapshot = null;
@@ -5162,6 +5172,15 @@ function runDaemonServer() {
     if (method === "GET" && parsedUrl.pathname === "/status") {
       return handleStatus(req, res);
     }
+    if (method === "POST" && parsedUrl.pathname === "/restart") {
+      sendJson(req, res, 200, { ok: true, message: "Daemon restarting..." });
+      log("info", "Restart requested via HTTP");
+      setTimeout(() => {
+        server.close(() => process.exit(0));
+        setTimeout(() => process.exit(0), 1e3);
+      }, 200);
+      return;
+    }
     if (method === "GET" && parsedUrl.pathname === "/") {
       return sendJson(req, res, 200, {
         name: "Browser Control Daemon",
@@ -5170,6 +5189,7 @@ function runDaemonServer() {
           "POST /command": "Execute a browser command",
           "GET /health": "Health check",
           "GET /status": "Detailed status",
+          "POST /restart": "Restart the daemon",
           "GET /": "This page"
         },
         docs: "https://github.com/example/browser-control"

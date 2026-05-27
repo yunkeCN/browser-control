@@ -981,6 +981,7 @@
     const modifiers = cdpModifierMask(options?.modifiers);
     const clickX = geometry.hitTest.topClientX ?? geometry.hitTest.clientX;
     const clickY = geometry.hitTest.topClientY ?? geometry.hitTest.clientY;
+    const dispatchWarnings = [];
     try {
       await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
         type: "mouseMoved",
@@ -989,16 +990,21 @@
         button: "none",
         modifiers
       });
+    } catch (err) {
+      return {
+        clicked: false,
+        selector,
+        strategyUsed: "cdp_mouse",
+        error: `CDP mouseMoved dispatch failed: ${err?.message || String(err)}`,
+        recoverable: true,
+        target: geometry.target,
+        hitTest: geometry.hitTest,
+        warnings
+      };
+    }
+    try {
       await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
         type: "mousePressed",
-        x: clickX,
-        y: clickY,
-        button,
-        clickCount,
-        modifiers
-      });
-      await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
-        type: "mouseReleased",
         x: clickX,
         y: clickY,
         button,
@@ -1010,15 +1016,30 @@
         clicked: false,
         selector,
         strategyUsed: "cdp_mouse",
-        error: `CDP mouse dispatch failed: ${err?.message || String(err)}`,
+        error: `CDP mousePressed dispatch failed: ${err?.message || String(err)}`,
         recoverable: true,
         target: geometry.target,
         hitTest: geometry.hitTest,
         warnings
       };
-    } finally {
+    }
+    try {
+      await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x: clickX,
+        y: clickY,
+        button,
+        clickCount,
+        modifiers
+      });
+    } catch (err) {
+      dispatchWarnings.push(`CDP mouseReleased failed (mousePressed succeeded): ${err?.message || String(err)}`);
+    }
+    if (dispatchWarnings.length) warnings.push(...dispatchWarnings);
+    try {
       const detachWarning = await releaseActionDebugger(lease);
       if (detachWarning) warnings.push(detachWarning);
+    } catch {
     }
     return {
       clicked: true,
@@ -1270,6 +1291,10 @@
         button: "none",
         modifiers
       });
+    } catch (err) {
+      return { clicked: false, x, y, error: `CDP mouseMoved dispatch failed: ${err?.message || String(err)}`, warnings };
+    }
+    try {
       await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
         type: "mousePressed",
         x,
@@ -1278,6 +1303,10 @@
         clickCount,
         modifiers
       });
+    } catch (err) {
+      return { clicked: false, x, y, error: `CDP mousePressed dispatch failed: ${err?.message || String(err)}`, warnings };
+    }
+    try {
       await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
         type: "mouseReleased",
         x,
@@ -1286,13 +1315,15 @@
         clickCount,
         modifiers
       });
-      return { clicked: true, x, y, strategyUsed: "cdp_mouse" };
     } catch (err) {
-      return { clicked: false, error: `CDP mouse dispatch failed: ${err?.message || String(err)}`, warnings };
-    } finally {
+      warnings.push(`CDP mouseReleased failed (mousePressed succeeded): ${err?.message || String(err)}`);
+    }
+    try {
       const detachWarning = await releaseActionDebugger(lease);
       if (detachWarning) warnings.push(detachWarning);
+    } catch {
     }
+    return { clicked: true, x, y, strategyUsed: "cdp_mouse", warnings };
   }
   async function performCdpKeyboardPress(tabId, key, options = {}) {
     const lease = await acquireActionDebugger(tabId);
@@ -4528,44 +4559,46 @@
       chrome.webRequest.onBeforeRequest.addListener(networkListener2, { urls: ["<all_urls>"] });
     }
     let clickResult;
+    let skipDom = false;
     try {
       if (strategy === "auto" || strategy === "cdp_mouse") {
         const cdpResult = await performCdpMouseClick(tabId, selector, args || {});
         if (!cdpResult.error) {
           clickResult = cdpResult;
-          return;
-        }
-        if (cdpResult.code === "STALE_ELEMENT_REFERENCE") {
+          skipDom = true;
+        } else if (cdpResult.code === "STALE_ELEMENT_REFERENCE") {
           clickResult = cdpResult;
-          return;
-        }
-        if (strategy === "cdp_mouse") {
+          skipDom = true;
+        } else if (strategy === "cdp_mouse") {
           clickResult = cdpResult;
-          return;
+          skipDom = true;
+        } else {
+          args = {
+            ...args,
+            strategy: "dom_pointer",
+            warnings: [
+              ...args?.warnings || [],
+              `cdp_mouse unavailable in auto mode; fell back to dom_pointer: ${cdpResult.error}`
+            ]
+          };
         }
-        args = {
-          ...args,
-          strategy: "dom_pointer",
-          warnings: [
-            ...args?.warnings || [],
-            `cdp_mouse unavailable in auto mode; fell back to dom_pointer: ${cdpResult.error}`
-          ]
-        };
       }
-      const results = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: performClick,
-        args: [selector, {
-          strategy: args?.strategy,
-          force: args?.force,
-          button: args?.button,
-          clickCount: args?.clickCount,
-          modifiers: args?.modifiers,
-          warnings: args?.warnings
-        }],
-        world: "MAIN"
-      });
-      clickResult = results[0]?.result;
+      if (!skipDom) {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: performClick,
+          args: [selector, {
+            strategy: args?.strategy,
+            force: args?.force,
+            button: args?.button,
+            clickCount: args?.clickCount,
+            modifiers: args?.modifiers,
+            warnings: args?.warnings
+          }],
+          world: "MAIN"
+        });
+        clickResult = results[0]?.result;
+      }
     } finally {
       const elapsed = Date.now() - networkStart;
       const remaining = Math.max(0, 700 - elapsed);

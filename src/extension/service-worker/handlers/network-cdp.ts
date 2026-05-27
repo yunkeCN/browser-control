@@ -417,7 +417,7 @@ export async function acquireActionDebugger(tabId: number): Promise<ActionDebugg
       debuggee: { tabId },
       temporary: false,
       owner: 'network_capture',
-      warnings: [`Reusing debugger session owned by network capture for session ${networkOwner.session}; Browser Control will not detach it after the action.`]
+      warnings: []
     };
   }
 
@@ -817,6 +817,7 @@ export async function performCdpMouseClick(tabId: number, selector: string, opti
   const clickX = geometry.hitTest.topClientX ?? geometry.hitTest.clientX;
   const clickY = geometry.hitTest.topClientY ?? geometry.hitTest.clientY;
 
+  const dispatchWarnings: string[] = [];
   try {
     await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
       type: 'mouseMoved',
@@ -825,16 +826,21 @@ export async function performCdpMouseClick(tabId: number, selector: string, opti
       button: 'none',
       modifiers
     });
+  } catch (err: any) {
+    return {
+      clicked: false,
+      selector,
+      strategyUsed: 'cdp_mouse',
+      error: `CDP mouseMoved dispatch failed: ${err?.message || String(err)}`,
+      recoverable: true,
+      target: geometry.target,
+      hitTest: geometry.hitTest,
+      warnings
+    };
+  }
+  try {
     await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
       type: 'mousePressed',
-      x: clickX,
-      y: clickY,
-      button,
-      clickCount,
-      modifiers
-    });
-    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
-      type: 'mouseReleased',
       x: clickX,
       y: clickY,
       button,
@@ -846,15 +852,32 @@ export async function performCdpMouseClick(tabId: number, selector: string, opti
       clicked: false,
       selector,
       strategyUsed: 'cdp_mouse',
-      error: `CDP mouse dispatch failed: ${err?.message || String(err)}`,
+      error: `CDP mousePressed dispatch failed: ${err?.message || String(err)}`,
       recoverable: true,
       target: geometry.target,
       hitTest: geometry.hitTest,
       warnings
     };
-  } finally {
+  }
+  try {
+    await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: clickX,
+      y: clickY,
+      button,
+      clickCount,
+      modifiers
+    });
+  } catch (err: any) {
+    dispatchWarnings.push(`CDP mouseReleased failed (mousePressed succeeded): ${err?.message || String(err)}`);
+  }
+  if (dispatchWarnings.length) warnings.push(...dispatchWarnings);
+
+  try {
     const detachWarning = await releaseActionDebugger(lease);
     if (detachWarning) warnings.push(detachWarning);
+  } catch {
+    // debugger may already be detached; ignore cleanup errors
   }
 
   return {
@@ -1126,19 +1149,30 @@ export async function performCdpClickAt(
     await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
       type: 'mouseMoved', x, y, button: 'none', modifiers
     });
+  } catch (err: any) {
+    return { clicked: false, x, y, error: `CDP mouseMoved dispatch failed: ${err?.message || String(err)}`, warnings };
+  }
+  try {
     await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
       type: 'mousePressed', x, y, button, clickCount, modifiers
     });
+  } catch (err: any) {
+    return { clicked: false, x, y, error: `CDP mousePressed dispatch failed: ${err?.message || String(err)}`, warnings };
+  }
+  try {
     await chrome.debugger.sendCommand(debuggee, 'Input.dispatchMouseEvent', {
       type: 'mouseReleased', x, y, button, clickCount, modifiers
     });
-    return { clicked: true, x, y, strategyUsed: 'cdp_mouse' };
   } catch (err: any) {
-    return { clicked: false, error: `CDP mouse dispatch failed: ${err?.message || String(err)}`, warnings };
-  } finally {
+    warnings.push(`CDP mouseReleased failed (mousePressed succeeded): ${err?.message || String(err)}`);
+  }
+  try {
     const detachWarning = await releaseActionDebugger(lease);
     if (detachWarning) warnings.push(detachWarning);
+  } catch {
+    // debugger may already be detached; ignore cleanup errors
   }
+  return { clicked: true, x, y, strategyUsed: 'cdp_mouse', warnings };
 }
 
 export async function performCdpKeyboardPress(tabId: number, key: string, options: any = {}): Promise<any> {

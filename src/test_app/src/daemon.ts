@@ -58,4 +58,11 @@ export class BrowserDaemon {
     }
     return data;
   }
+
+  async restart(): Promise<void> {
+    const res = await fetch(`${this.endpoint}/restart`, { method: 'POST' });
+    if (!res.ok) {
+      throw new Error(`Restart failed: ${res.status} ${res.statusText}`);
+    }
+  }
 }

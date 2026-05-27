@@ -174,28 +174,6 @@ export function performClick(selector: string, options: any = {}): any {
     };
   }
 
-  function localElementClick() {
-    const found = localFindElement(selector);
-    if (found?.error) return found.error;
-    const el = found?.element;
-    if (!el) return { error: `Element not found: ${selector}` };
-    if (typeof el.click !== 'function') return { error: `Element cannot be clicked directly: ${selector}` };
-    const ownerDocument = localOwnerDocument(el);
-    const focusBefore = localDescribeElement(ownerDocument.activeElement);
-    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-    el.click();
-    return {
-      clicked: true,
-      selector,
-      strategyUsed: 'element_click',
-      synthetic: true,
-      target: localDescribeElement(el),
-      focusBefore,
-      focusAfter: localDescribeElement(ownerDocument.activeElement),
-      warnings: ['element_click calls el.click() directly and may bypass pointer/mouse semantics and overlay hit-testing.']
-    };
-  }
-
   function localDomPointerClick() {
     const found = localFindElement(selector);
     if (found?.error) return found.error;
@@ -220,7 +198,6 @@ export function performClick(selector: string, options: any = {}): any {
         warnings: ['Target center is covered. Use a fresh snapshot, close the overlay, or choose a visible child target.']
       };
     }
-    if (!geometry.hitWithinTarget) warnings.push('force:true bypassed covered-element hit-test; dispatched events to the requested element.');
     const dispatchTarget = geometry.frameHitWithinTarget ? geometry.frameHit : el;
     const button = localMouseButton(options?.button);
     const clickCount = Math.max(1, Number(options?.clickCount || 1));
@@ -283,12 +260,5 @@ export function performClick(selector: string, options: any = {}): any {
     };
   }
 
-  const strategy = options?.strategy || 'dom_pointer';
-  if (strategy === 'auto' || strategy === 'dom_pointer') {
-    return localDomPointerClick();
-  }
-  if (strategy === 'element_click') {
-    return localElementClick();
-  }
-  return { error: `Unsupported click strategy in page context: ${strategy}` };
+  return localDomPointerClick();
 }

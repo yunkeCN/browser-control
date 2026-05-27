@@ -23,14 +23,8 @@ export interface ClickProbeInput {
   target: string;
   /** 标签页 ID（可选，默认使用当前活跃标签页） */
   tabId?: number;
-  /** 点击策略（可选，默认 auto） */
-  strategy?: 'auto' | 'cdp_mouse' | 'dom_pointer' | 'element_click';
-  /** 鼠标按键（可选，默认 left） */
-  button?: 'left' | 'middle' | 'right';
-  /** 点击次数（可选，默认 1） */
-  clickCount?: number;
-  /** 修饰键（可选，如 ['Shift', 'Control']） */
-  modifiers?: string[];
+  /** 是否强制点击（可选，跳过可见性检查） */
+  force?: boolean;
   /** URL 子串过滤条件，用于只捕获匹配的请求 */
   filter?: string;
   /** 是否包含响应头（可选） */
@@ -65,12 +59,6 @@ const ELEMENT_REF_RE = /^@e[^\s_]+_\d+$/;
 /** CSS 选择器前缀 */
 const CSS_PREFIX = 'css=';
 
-/** strategy 参数的允许值 */
-const STRATEGY_VALUES = ['auto', 'cdp_mouse', 'dom_pointer', 'element_click'] as const;
-
-/** button 参数的允许值 */
-const BUTTON_VALUES = ['left', 'middle', 'right'] as const;
-
 /**
  * 验证 target 是否有效
  * - @e<structureId>_<revision> 格式（来自快照的引用）
@@ -100,25 +88,8 @@ const def: CommandDefinition<ClickProbeInput, ClickProbeData> = {
     if (args.tabId !== undefined && typeof args.tabId !== 'number') {
       throw new Error('tabId 必须是数字');
     }
-    if (
-      args.strategy !== undefined &&
-      !(STRATEGY_VALUES as readonly string[]).includes(args.strategy as string)
-    ) {
-      throw new Error(
-        'strategy 必须是 auto / cdp_mouse / dom_pointer / element_click 之一',
-      );
-    }
-    if (
-      args.button !== undefined &&
-      !(BUTTON_VALUES as readonly string[]).includes(args.button as string)
-    ) {
-      throw new Error('button 必须是 left / middle / right 之一');
-    }
-    if (args.clickCount !== undefined && typeof args.clickCount !== 'number') {
-      throw new Error('clickCount 必须是数字');
-    }
-    if (args.modifiers !== undefined && !Array.isArray(args.modifiers)) {
-      throw new Error('modifiers 必须是数组');
+    if (args.force !== undefined && typeof args.force !== 'boolean') {
+      throw new Error('force 必须是布尔值');
     }
     if (args.filter !== undefined && typeof args.filter !== 'string') {
       throw new Error('filter 必须是字符串');
@@ -138,10 +109,7 @@ const def: CommandDefinition<ClickProbeInput, ClickProbeData> = {
     return {
       target: args.target as string,
       tabId: args.tabId as number | undefined,
-      strategy: args.strategy as 'auto' | 'cdp_mouse' | 'dom_pointer' | 'element_click' | undefined,
-      button: args.button as 'left' | 'middle' | 'right' | undefined,
-      clickCount: args.clickCount as number | undefined,
-      modifiers: args.modifiers as string[] | undefined,
+      force: args.force as boolean | undefined,
       filter: args.filter as string | undefined,
       includeHeaders: args.includeHeaders as boolean | undefined,
       includeBody: args.includeBody as boolean | undefined,

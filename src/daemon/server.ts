@@ -742,6 +742,21 @@ async function waitForClickSettle(request, tabId) {
 function shouldReturnClickPostSnapshot(mode, diffData, result) {
   if (mode === 'snapshot') return true;
   if (mode !== 'auto') return false;
+  return hasMeaningfulClickEffect(diffData, result);
+}
+
+/**
+ * Check whether the after-pipeline detected evidence that the click had an effect,
+ * regardless of what the click mechanism's self-reported `clicked` field says.
+ *
+ * This covers scenarios where:
+ *  - CDP mouseReleased throws because the page navigated after mousePressed
+ *  - DOM fallback reports COVERED_TARGET but the original CDP events already triggered navigation
+ *  - The click mechanism reports failure but the page observably changed
+ */
+function hasMeaningfulClickEffect(changes, result, diffDataOverride = null) {
+  const diffData = diffDataOverride || changes;
+  if (!diffData) return false;
   const textDiff = diffData?.textDiff || {};
   return Boolean(
     result?.newTab ||
@@ -850,6 +865,13 @@ async function runClickWithAfter(request, mapped) {
   data.after = mode;
   data.settle = settled.settle;
   data.changes = changes;
+
+  // If the click mechanism reported failure but the after-pipeline detected
+  // meaningful page changes, trust the evidence.
+  if (!data.clicked && hasMeaningfulClickEffect(changes, result, diff?.data)) {
+    data.clicked = true;
+    data.clickOverride = 'after-pipeline detected page change despite click mechanism reporting failure';
+  }
   if (postSnapshot) data.postSnapshot = postSnapshot;
   if (postSnapshotError) {
     data.postSnapshot = null;
@@ -1018,6 +1040,17 @@ const server = http.createServer((req, res) => {
     return handleStatus(req, res);
   }
 
+  // Route: POST /restart
+  if (method === 'POST' && parsedUrl.pathname === '/restart') {
+    sendJson(req, res, 200, { ok: true, message: 'Daemon restarting...' });
+    log('info', 'Restart requested via HTTP');
+    setTimeout(() => {
+      server.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 1000);
+    }, 200);
+    return;
+  }
+
   // Route: GET / (simple info page)
   if (method === 'GET' && parsedUrl.pathname === '/') {
     return sendJson(req, res, 200, {
@@ -1027,6 +1060,7 @@ const server = http.createServer((req, res) => {
         'POST /command': 'Execute a browser command',
         'GET /health': 'Health check',
         'GET /status': 'Detailed status',
+        'POST /restart': 'Restart the daemon',
         'GET /': 'This page'
       },
       docs: 'https://github.com/example/browser-control'

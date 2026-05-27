@@ -287,6 +287,23 @@ function bindEvents(): void {
     refreshStatus(false);
   });
 
+  // Restart daemon
+  $('#restartDaemonButton').addEventListener('click', async () => {
+    if (!confirm('Restart the daemon? The test_app will reconnect automatically.')) return;
+    try {
+      showToast('Restarting daemon...');
+      await daemon.restart();
+    } catch {
+      // daemon may close before sending response; that's expected
+    }
+    showToast('Daemon restart requested. Reconnecting in 2s...');
+    setConnectionPill('loading', 'Restarting');
+    setTimeout(() => {
+      daemon.setEndpoint(getEndpoint());
+      refreshStatus(false);
+    }, 2000);
+  });
+
   // Command select
   $('#commandSelect').addEventListener('change', () => {
     selectCommand(($('#commandSelect') as HTMLSelectElement).value);

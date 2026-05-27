@@ -392,10 +392,23 @@ export function getAccessibilitySnapshot(options: any = {}) {
     }
   }
 
+  function isContainerNode(node: AriaNode): boolean {
+    return node.children.some((c): c is AriaNode => typeof c !== 'string');
+  }
+
+  function displayName(node: AriaNode): string | null {
+    if (!node.name) return null;
+    if (isContainerNode(node) && node.name.length > 30) {
+      return `${node.name.slice(0, 10)}[...]${node.name.slice(-10)}`;
+    }
+    return node.name;
+  }
+
   function renderNodeKey(node: AriaNode, renderCursorPointer: boolean): string {
     let key = node.role;
-    if (node.name)
-      key += ` ${JSON.stringify(node.name)}`;
+    const name = displayName(node);
+    if (name)
+      key += ` ${JSON.stringify(name)}`;
     if (node.checked === 'mixed')
       key += ' [checked=mixed]';
     else if (node.checked === true)
