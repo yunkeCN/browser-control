@@ -51,7 +51,7 @@ function printHelp(): void {
 示例:
   browser-control navigate --args '{"url":"https://example.com"}'
   browser-control click --args '{"target":"@eyws8mg_1"}'
-  browser-control click_text --args '{"text":"新增分支"}'
+  browser-control click_text --args '{"text":"新增分支","x":200,"y":300}'
   browser-control status
 `);
 }

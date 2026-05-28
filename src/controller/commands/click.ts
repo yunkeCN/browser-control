@@ -23,8 +23,6 @@ export interface ClickInput {
   target: string;
   /** 标签页 ID（可选，默认使用当前活跃标签页） */
   tabId?: number;
-  /** 点击后的观察模式（可选，默认 auto）。snapshot 模式返回完整 postSnapshot tree */
-  after?: 'auto' | 'none' | 'snapshot';
 }
 
 /** click 命令的输出数据 */
@@ -33,8 +31,6 @@ export interface ClickData {
   clicked: boolean;
   /** 是否打开了新标签页 */
   newTabOpened?: boolean;
-  /** 点击后快照（after=snapshot 时提供） */
-  postSnapshot?: { tree: string; elementCount: number };
   /** 点击后 700ms 内捕获的网络请求 URL 列表（轻量级，仅 URL） */
   network?: { requests: string[]; count: number };
 }
@@ -47,9 +43,6 @@ const ELEMENT_REF_RE = /^@e[^\s_]+_\d+$/;
 /** CSS 选择器前缀 */
 const CSS_PREFIX = 'css=';
 
-/** after 参数的允许值 */
-const AFTER_VALUES = ['auto', 'none', 'snapshot'] as const;
-
 /**
  * 验证 target 是否有效
  * - @e<structureId>_<revision> 格式（来自快照的引用）
@@ -58,33 +51,6 @@ const AFTER_VALUES = ['auto', 'none', 'snapshot'] as const;
 function isValidTarget(target: unknown): target is string {
   if (typeof target !== 'string' || target.length === 0) return false;
   return ELEMENT_REF_RE.test(target) || target.startsWith(CSS_PREFIX);
-}
-
-/**
- * 从 postSnapshot 原始数据中提取 YAML 树
- */
-function extractPostSnapshotTree(raw: Record<string, unknown>): string {
-  const snapshot = raw.snapshot;
-  if (typeof snapshot === 'string' && snapshot.length > 0) {
-    return snapshot;
-  }
-  return '';
-}
-
-/**
- * 从 postSnapshot 原始数据中统计元素数量
- */
-function countPostSnapshotElements(raw: Record<string, unknown>): number {
-  const refs = raw.refs;
-  if (Array.isArray(refs)) {
-    return refs.length;
-  }
-  const stats = raw.stats;
-  if (stats && typeof stats === 'object') {
-    const s = stats as Record<string, unknown>;
-    if (typeof s.emitted === 'number') return s.emitted;
-  }
-  return 0;
 }
 
 // ─── 命令定义 ────────────────────────────────────────────────────
@@ -106,16 +72,9 @@ export const clickDef: CommandDefinition<ClickInput, ClickData> = {
     if (args.tabId !== undefined && typeof args.tabId !== 'number') {
       throw new Error('tabId 必须是数字');
     }
-    if (
-      args.after !== undefined &&
-      !(AFTER_VALUES as readonly string[]).includes(args.after as string)
-    ) {
-      throw new Error('after 必须是 auto / none / snapshot 之一');
-    }
     return {
       target: args.target as string,
       tabId: args.tabId as number | undefined,
-      after: args.after as 'auto' | 'none' | 'snapshot' | undefined,
     };
   },
 
@@ -137,7 +96,7 @@ export const clickDef: CommandDefinition<ClickInput, ClickData> = {
 
   /**
    * 将 daemon 响应转换为 LLM-friendly 格式
-   * - 提取 daemon 返回的业务数据（clicked, changes, postSnapshot）
+   * - 提取 daemon 返回的业务数据（clicked, changes）
    * - 生成包含点击结果和页面变化的摘要
    */
   toResult: (raw: Record<string, unknown>): CommandResult<ClickData> => {
@@ -160,22 +119,9 @@ export const clickDef: CommandDefinition<ClickInput, ClickData> = {
       };
     }
 
-    // 提取观察基线 ID（after 管线自动生成的，可在后续 observe_diff 中使用）
+    // 提取观察基线 ID（管线自动生成的，可在后续 observe_diff 中使用）
     const changes = clickData.changes as Record<string, unknown> | undefined;
-    const observationBaselineId = typeof changes?.baselineId === 'string' ? changes.baselineId : undefined;
-
-    // 提取 postSnapshot
-    const rawPostSnapshot = clickData.postSnapshot as
-      | Record<string, unknown>
-      | undefined;
-    let postSnapshot: { tree: string; elementCount: number } | undefined;
-    if (rawPostSnapshot) {
-      const tree = extractPostSnapshotTree(rawPostSnapshot);
-      const elementCount = countPostSnapshotElements(rawPostSnapshot);
-      if (tree || elementCount > 0) {
-        postSnapshot = { tree, elementCount };
-      }
-    }
+    const baselineId = typeof changes?.baselineId === 'string' ? changes.baselineId : undefined;
 
     // 检测是否打开了新标签页
     const newTabOpened = Boolean(clickData.newTabOpened);
@@ -188,24 +134,20 @@ export const clickDef: CommandDefinition<ClickInput, ClickData> = {
 
     // 组装 summary
     const parts: string[] = ['已点击元素'];
-    if (postSnapshot) {
-      parts.push(`快照: ${postSnapshot.elementCount} 个元素`);
-    }
     if (network) {
       parts.push(`触发 ${network.count} 个接口请求`);
     }
-    if (observationBaselineId) {
-      parts.push(`观察基线: ${observationBaselineId}`);
+    if (baselineId) {
+      parts.push(`观察基线: ${baselineId}`);
     }
 
     return {
       ok: true,
       summary: parts.join(' | '),
-      baselineId: observationBaselineId,
+      baselineId,
       data: {
         clicked: true,
         newTabOpened,
-        postSnapshot,
         network,
       },
     };

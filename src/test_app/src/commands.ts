@@ -342,8 +342,8 @@ export const COMMAND_META: Record<string, CommandMeta> = {
   },
   click_text: {
     name: 'click_text',
-    required: ['text'],
-    example: { text: 'Submit' },
+    required: ['text', 'x', 'y'],
+    example: { text: 'Submit', x: 200, y: 300 },
     toResult: withRisk(clickTextResult),
   },
 };

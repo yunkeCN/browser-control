@@ -46,8 +46,7 @@ export const commandArgSchemas = {
   }).strict(),
   click: z.object({
     target: elementTarget,
-    tabId,
-    after: z.enum(['auto', 'none', 'snapshot']).optional()
+    tabId
   }).strict(),
   click_probe: z.object({
     target: elementTarget,

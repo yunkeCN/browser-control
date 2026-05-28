@@ -89,8 +89,8 @@ var COMMANDS = {
   snapshot: { required: [], optional: ["tabId", "roles", "tags", "hasVisibleText", "textIncludes", "viewportOnly", "boxes", "diff_to"], example: { tabId: 123, roles: ["button", "link"], hasVisibleText: true, viewportOnly: true } },
   click: {
     required: ["target"],
-    optional: ["tabId", "after"],
-    example: { target: "@e1abc23_1", after: "auto" }
+    optional: ["tabId"],
+    example: { target: "@e1abc23_1" }
   },
   click_probe: {
     required: ["target"],
@@ -205,7 +205,6 @@ function validateRequest(request) {
     "network_start",
     "network_list"
   ]);
-  validateClickAfter(request, spec);
   validateOptionalBooleanArgs(request, ["force", "observeNewTab", "expectNewTab", "includeHeaders", "includeBody", "redactSensitive"]);
   validateOptionalNumberArgs(request, ["tabId", "clickCount", "waitMs", "maxRequests"]);
   return request;
@@ -236,7 +235,7 @@ function validateKnownArgs(request, spec) {
     hints.unshift(`${request.command} now accepts args.target for element targeting. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.`);
   }
   if (request.command === "click" && ["strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].includes(field)) {
-    hints.unshift('click now accepts only args.target, optional args.after, and optional args.tabId. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.');
+    hints.unshift('click now accepts only args.target and optional args.tabId. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.');
   }
   if (request.command === "get_text" && field === "selectors") {
     hints.unshift("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes.");
@@ -360,7 +359,7 @@ function validationDetails(request, spec, field) {
     hints.push(`${request.command} now accepts args.target for element targeting. Use {"target":"@e..."} or {"target":"css=..."} instead.`);
   }
   if (request.command === "click" && ["strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].some((arg) => Object.prototype.hasOwnProperty.call(request.args || {}, arg))) {
-    hints.push('click now accepts args.target, optional args.after, and optional args.tabId. Use {"target":"@e..."} or {"target":"css=..."} instead.');
+    hints.push('click now accepts args.target and optional args.tabId. Use {"target":"@e..."} or {"target":"css=..."} instead.');
   }
   if (hints.length) {
     details.hints = hints;
@@ -466,18 +465,6 @@ function validateTargetArg(request, spec) {
     expectedFormat: "@e<structureId>_<revision> or css=<selector>",
     value,
     hint: 'Prefer a fresh snapshot ref such as {"target":"@e1jm0sbb_1"}. Use css= only when a snapshot ref is unavailable.'
-  });
-}
-function validateClickAfter(request, spec) {
-  if (request.command !== "click") return;
-  const value = request.args.after;
-  if (value === void 0 || value === null || value === "") return;
-  if (["auto", "none", "snapshot"].includes(value)) return;
-  throw new ProtocolError("VALIDATION_ERROR", "after must be one of auto, none, or snapshot for command 'click'", {
-    ...validationDetails(request, spec, "after"),
-    expectedValues: ["auto", "none", "snapshot"],
-    value,
-    hint: 'Use after:"auto" for the default post-click summary and postSnapshot, "snapshot" for explicit full snapshot, or "none" for a raw click.'
   });
 }
 function mapTargetArgs(args) {

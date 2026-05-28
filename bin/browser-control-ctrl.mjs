@@ -15167,8 +15167,7 @@ var init_schema = __esm({
       }).strict(),
       click: external_exports.object({
         target: elementTarget,
-        tabId,
-        after: external_exports.enum(["auto", "none", "snapshot"]).optional()
+        tabId
       }).strict(),
       click_probe: external_exports.object({
         target: elementTarget,
@@ -15695,36 +15694,16 @@ function isValidTarget(target) {
   if (typeof target !== "string" || target.length === 0) return false;
   return ELEMENT_REF_RE.test(target) || target.startsWith(CSS_PREFIX);
 }
-function extractPostSnapshotTree(raw) {
-  const snapshot2 = raw.snapshot;
-  if (typeof snapshot2 === "string" && snapshot2.length > 0) {
-    return snapshot2;
-  }
-  return "";
-}
-function countPostSnapshotElements(raw) {
-  const refs = raw.refs;
-  if (Array.isArray(refs)) {
-    return refs.length;
-  }
-  const stats = raw.stats;
-  if (stats && typeof stats === "object") {
-    const s = stats;
-    if (typeof s.emitted === "number") return s.emitted;
-  }
-  return 0;
-}
 async function click(args, client) {
   return runCommand(clickDef, args, client);
 }
-var ELEMENT_REF_RE, CSS_PREFIX, AFTER_VALUES, clickDef;
+var ELEMENT_REF_RE, CSS_PREFIX, clickDef;
 var init_click = __esm({
   "src/controller/commands/click.ts"() {
     "use strict";
     init_runner();
     ELEMENT_REF_RE = /^@e[^\s_]+_\d+$/;
     CSS_PREFIX = "css=";
-    AFTER_VALUES = ["auto", "none", "snapshot"];
     clickDef = {
       name: "click",
       requiredArgs: ["target"],
@@ -15741,13 +15720,9 @@ var init_click = __esm({
         if (args.tabId !== void 0 && typeof args.tabId !== "number") {
           throw new Error("tabId \u5FC5\u987B\u662F\u6570\u5B57");
         }
-        if (args.after !== void 0 && !AFTER_VALUES.includes(args.after)) {
-          throw new Error("after \u5FC5\u987B\u662F auto / none / snapshot \u4E4B\u4E00");
-        }
         return {
           target: args.target,
-          tabId: args.tabId,
-          after: args.after
+          tabId: args.tabId
         };
       },
       /**
@@ -15764,7 +15739,7 @@ var init_click = __esm({
       },
       /**
        * 将 daemon 响应转换为 LLM-friendly 格式
-       * - 提取 daemon 返回的业务数据（clicked, changes, postSnapshot）
+       * - 提取 daemon 返回的业务数据（clicked, changes）
        * - 生成包含点击结果和页面变化的摘要
        */
       toResult: (raw) => {
@@ -15785,37 +15760,24 @@ var init_click = __esm({
           };
         }
         const changes = clickData.changes;
-        const observationBaselineId = typeof changes?.baselineId === "string" ? changes.baselineId : void 0;
-        const rawPostSnapshot = clickData.postSnapshot;
-        let postSnapshot;
-        if (rawPostSnapshot) {
-          const tree = extractPostSnapshotTree(rawPostSnapshot);
-          const elementCount = countPostSnapshotElements(rawPostSnapshot);
-          if (tree || elementCount > 0) {
-            postSnapshot = { tree, elementCount };
-          }
-        }
+        const baselineId = typeof changes?.baselineId === "string" ? changes.baselineId : void 0;
         const newTabOpened = Boolean(clickData.newTabOpened);
         const rawNetwork = clickData.network;
         const network = rawNetwork?.requests?.length ? { requests: rawNetwork.requests, count: rawNetwork.count || rawNetwork.requests.length } : void 0;
         const parts = ["\u5DF2\u70B9\u51FB\u5143\u7D20"];
-        if (postSnapshot) {
-          parts.push(`\u5FEB\u7167: ${postSnapshot.elementCount} \u4E2A\u5143\u7D20`);
-        }
         if (network) {
           parts.push(`\u89E6\u53D1 ${network.count} \u4E2A\u63A5\u53E3\u8BF7\u6C42`);
         }
-        if (observationBaselineId) {
-          parts.push(`\u89C2\u5BDF\u57FA\u7EBF: ${observationBaselineId}`);
+        if (baselineId) {
+          parts.push(`\u89C2\u5BDF\u57FA\u7EBF: ${baselineId}`);
         }
         return {
           ok: true,
           summary: parts.join(" | "),
-          baselineId: observationBaselineId,
+          baselineId,
           data: {
             clicked: true,
             newTabOpened,
-            postSnapshot,
             network
           }
         };
@@ -15844,6 +15806,15 @@ function extractText(line) {
   if (end === -1) return null;
   return line.slice(start + 1, end);
 }
+function boxCenter(box) {
+  return {
+    cx: Math.round(box.x + box.width / 2),
+    cy: Math.round(box.y + box.height / 2)
+  };
+}
+function distance(x1, y1, x2, y2) {
+  return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+}
 async function cdpClickAt(x, y, daemon, tabId2) {
   try {
     const envelope = daemon.buildEnvelope("cdp_click_at", { x, y, tabId: tabId2 });
@@ -15865,22 +15836,30 @@ async function cdpClickAt(x, y, daemon, tabId2) {
 async function clickText(args, client) {
   return runCommand(def2, args, client);
 }
-var def2;
+var MAX_REASONABLE_DISTANCE_PX, def2;
 var init_click_text = __esm({
   "src/controller/commands/click-text.ts"() {
     "use strict";
     init_runner();
+    MAX_REASONABLE_DISTANCE_PX = 300;
     def2 = {
       name: "click_text",
-      requiredArgs: ["text"],
+      requiredArgs: ["text", "x", "y"],
       validate: (args) => {
         if (typeof args.text !== "string" || !args.text.trim()) {
           throw new Error("text \u5FC5\u987B\u662F\u6709\u6548\u7684\u975E\u7A7A\u5B57\u7B26\u4E32");
         }
+        if (typeof args.x !== "number" || !Number.isFinite(args.x)) {
+          throw new Error("x \u5FC5\u987B\u662F\u6709\u6548\u6570\u5B57");
+        }
+        if (typeof args.y !== "number" || !Number.isFinite(args.y)) {
+          throw new Error("y \u5FC5\u987B\u662F\u6709\u6548\u6570\u5B57");
+        }
         return {
           text: args.text.trim(),
+          x: args.x,
+          y: args.y,
           roles: Array.isArray(args.roles) ? args.roles : void 0,
-          index: typeof args.index === "number" ? args.index : void 0,
           tabId: typeof args.tabId === "number" ? args.tabId : void 0
         };
       },
@@ -15897,34 +15876,54 @@ var init_click_text = __esm({
           return { _status: "snapshot_failed" };
         }
         const lines = snapText.split("\n");
-        const candidates = [];
+        const visibleCandidates = [];
+        const allMatched = [];
         for (const line of lines) {
           const role = extractRole(line);
           const text = extractText(line);
           if (!role || !text) continue;
           if (!text.toLowerCase().includes(input.text.toLowerCase())) continue;
           if (input.roles && !input.roles.includes(role)) continue;
-          candidates.push({ role, text, ref: extractRef(line), box: extractBox(line) });
+          const candidate = {
+            role,
+            text,
+            ref: extractRef(line),
+            box: extractBox(line)
+          };
+          allMatched.push(candidate);
+          if (candidate.box) {
+            visibleCandidates.push(candidate);
+          }
         }
-        if (candidates.length === 0) {
+        if (allMatched.length === 0) {
           return { _status: "not_found", _text: input.text };
         }
-        const idx = input.index ?? 0;
-        const target = candidates[idx];
-        if (!target) {
+        if (visibleCandidates.length === 0) {
           return {
-            _status: "index_out_of_range",
+            _status: "text_not_visible",
             _text: input.text,
-            _all: candidates.map((c) => `${c.role}:"${c.text}"`),
-            _count: candidates.length,
-            _index: idx
+            _count: allMatched.length,
+            _examples: allMatched.slice(0, 3).map((c) => `${c.role}:"${c.text}"`)
           };
         }
-        if (target.ref) {
+        const scored = visibleCandidates.map((c) => ({
+          ...c,
+          center: boxCenter(c.box),
+          dist: distance(input.x, input.y, boxCenter(c.box).cx, boxCenter(c.box).cy)
+        }));
+        scored.sort((a, b) => {
+          if (Math.abs(a.dist - b.dist) < 1) {
+            if (a.ref && !b.ref) return -1;
+            if (!a.ref && b.ref) return 1;
+          }
+          return a.dist - b.dist;
+        });
+        const best = scored[0];
+        const { cx, cy } = best.center;
+        if (best.ref) {
           const clickResp = await daemon.command(daemon.buildEnvelope("click", {
-            target: target.ref,
-            tabId: input.tabId,
-            after: "none"
+            target: best.ref,
+            tabId: input.tabId
           }));
           const clickEnv = clickResp.data;
           const clickData = clickEnv.data;
@@ -15932,66 +15931,104 @@ var init_click_text = __esm({
           return {
             _status: clicked ? "clicked" : "click_failed",
             _method: "ref",
-            _ref: target.ref,
-            _text: target.text,
-            _role: target.role,
-            _clicked: clicked
-          };
-        }
-        if (target.box) {
-          const cx = Math.round(target.box.x + target.box.width / 2);
-          const cy = Math.round(target.box.y + target.box.height / 2);
-          const result = await cdpClickAt(cx, cy, daemon, input.tabId);
-          return {
-            _status: result.clicked ? "clicked" : "cdp_failed",
-            _method: "cdp",
-            _text: target.text,
-            _role: target.role,
-            _clicked: result.clicked,
+            _ref: best.ref,
+            _text: best.text,
+            _role: best.role,
+            _clicked: clicked,
+            _distance: Math.round(best.dist),
+            _candidateCount: visibleCandidates.length,
             _boxX: cx,
-            _boxY: cy,
-            _error: result.error
+            _boxY: cy
           };
         }
-        return { _status: "found_no_box", _text: target.text, _role: target.role };
+        const result = await cdpClickAt(cx, cy, daemon, input.tabId);
+        return {
+          _status: result.clicked ? "clicked" : "cdp_failed",
+          _method: "cdp",
+          _text: best.text,
+          _role: best.role,
+          _clicked: result.clicked,
+          _distance: Math.round(best.dist),
+          _candidateCount: visibleCandidates.length,
+          _boxX: cx,
+          _boxY: cy,
+          _error: result.error
+        };
       },
       toResult: (raw) => {
         const status = raw._status;
         switch (status) {
           case "clicked": {
             const method = raw._method;
+            const distancePx = raw._distance;
+            const candidateCount = raw._candidateCount;
+            const parts = [];
+            if (method === "ref") {
+              parts.push(`\u5DF2\u70B9\u51FB\u8DDD\u79BB (${raw._boxX}, ${raw._boxY}) \u6700\u8FD1\u7684 "${raw._text}"\uFF08${raw._role}\uFF09`);
+            } else {
+              parts.push(`\u5DF2\u70B9\u51FB\u5750\u6807 (${raw._boxX}, ${raw._boxY}) \u5904\u7684 "${raw._text}"\uFF08${raw._role}\uFF09`);
+            }
+            parts.push(`\u8DDD\u79BB ${distancePx}px\uFF0C\u5171 ${candidateCount} \u4E2A\u5019\u9009`);
+            const riskNotes = [];
+            if (distancePx > MAX_REASONABLE_DISTANCE_PX) {
+              parts.push(`\u26A0 \u6700\u8FD1\u5339\u914D\u8DDD\u79BB ${distancePx}px\uFF0C\u5750\u6807\u53EF\u80FD\u504F\u5DEE\u8FC7\u5927`);
+              riskNotes.push(
+                `\u6700\u8FD1\u5339\u914D\u7684 "${raw._text}" \u8DDD\u7ED9\u5B9A\u5750\u6807 ${distancePx}px\uFF08\u9608\u503C ${MAX_REASONABLE_DISTANCE_PX}px\uFF09\uFF0C\u53EF\u80FD\u70B9\u51FB\u4E86\u975E\u9884\u671F\u5143\u7D20`
+              );
+            }
             if (method === "ref") {
               return {
                 ok: true,
-                summary: `\u5DF2\u70B9\u51FB\u5143\u7D20 "${raw._text}"\uFF08${raw._role}\uFF09`,
+                summary: parts.join(" | "),
+                riskNotes: riskNotes.length ? riskNotes : void 0,
                 data: {
                   clicked: true,
                   matchedText: raw._text,
                   matchedRole: raw._role,
                   method: "ref",
-                  ref: raw._ref
+                  ref: raw._ref,
+                  boxCenterX: raw._boxX,
+                  boxCenterY: raw._boxY,
+                  distance: distancePx,
+                  candidateCount
                 }
               };
             }
             return {
               ok: true,
-              summary: `\u5DF2\u70B9\u51FB\u5750\u6807 (${raw._boxX}, ${raw._boxY}) \u5904\u7684 "${raw._text}"`,
+              summary: parts.join(" | "),
+              riskNotes: riskNotes.length ? riskNotes : void 0,
               data: {
                 clicked: true,
                 matchedText: raw._text,
                 matchedRole: raw._role,
                 method: "cdp",
                 boxCenterX: raw._boxX,
-                boxCenterY: raw._boxY
+                boxCenterY: raw._boxY,
+                distance: distancePx,
+                candidateCount
               }
             };
           }
           case "click_failed":
             return {
               ok: false,
-              summary: `\u5DF2\u627E\u5230\u5143\u7D20 "${raw._text}"\uFF08ref=${raw._ref}\uFF09\uFF0C\u4F46\u70B9\u51FB\u672A\u751F\u6548`,
-              data: { clicked: false, matchedText: raw._text, matchedRole: raw._role, method: "ref", ref: raw._ref },
-              nextSteps: [`\u8BF7\u4F7F\u7528 click {"target":"${raw._ref}"} \u91CD\u65B0\u70B9\u51FB\u6B64\u5143\u7D20`]
+              summary: `\u5DF2\u627E\u5230\u5143\u7D20 "${raw._text}"\uFF08ref=${raw._ref}\uFF09\uFF0C\u4F46\u70B9\u51FB\u672A\u751F\u6548\uFF08\u53EF\u80FD\u88AB\u906E\u6321\u6216\u5DF2\u79FB\u9664\uFF09`,
+              data: {
+                clicked: false,
+                matchedText: raw._text,
+                matchedRole: raw._role,
+                method: "ref",
+                ref: raw._ref,
+                boxCenterX: raw._boxX,
+                boxCenterY: raw._boxY,
+                distance: raw._distance,
+                candidateCount: raw._candidateCount
+              },
+              nextSteps: [
+                `\u8BF7\u4F7F\u7528 click {"target":"${raw._ref}"} \u91CD\u65B0\u70B9\u51FB\u6B64\u5143\u7D20`,
+                "\u4F7F\u7528 snapshot \u786E\u8BA4\u5143\u7D20\u662F\u5426\u4ECD\u5728\u9875\u9762\u4E0A"
+              ]
             };
           case "cdp_failed":
             return {
@@ -16003,23 +16040,30 @@ var init_click_text = __esm({
                 matchedRole: raw._role,
                 method: "cdp",
                 boxCenterX: raw._boxX,
-                boxCenterY: raw._boxY
+                boxCenterY: raw._boxY,
+                distance: raw._distance,
+                candidateCount: raw._candidateCount
               },
               nextSteps: ["\u786E\u8BA4 daemon \u548C extension \u8FDE\u63A5\u6B63\u5E38\u540E\u91CD\u8BD5"]
             };
+          case "text_not_visible": {
+            const examples = raw._examples;
+            return {
+              ok: false,
+              summary: `\u627E\u5230 ${raw._count} \u4E2A\u6587\u672C\u5339\u914D "${raw._text}"\uFF0C\u4F46\u5747\u4E0D\u53EF\u89C1\uFF08\u65E0 box\uFF09\uFF0C\u53EF\u80FD\u9700\u8981\u6EDA\u52A8\u9875\u9762`,
+              data: { clicked: false, matchedText: raw._text || "", matchedRole: "" },
+              nextSteps: [
+                "\u4F7F\u7528 scroll \u6EDA\u52A8\u9875\u9762\u540E\u91CD\u8BD5",
+                examples?.length ? `\u5339\u914D\u5230\u7684\u4E0D\u53EF\u89C1\u5143\u7D20: ${examples.join(", ")}` : ""
+              ].filter(Boolean)
+            };
+          }
           case "not_found":
             return {
               ok: false,
               summary: `\u672A\u627E\u5230\u5305\u542B\u300C${raw._text}\u300D\u7684\u9875\u9762\u5143\u7D20`,
               data: { clicked: false, matchedText: raw._text || "", matchedRole: "" },
               nextSteps: ["\u4F7F\u7528 snapshot \u786E\u8BA4\u9875\u9762\u5185\u5BB9", "\u786E\u8BA4\u6587\u672C\u5728\u5F53\u524D\u9875\u9762\u4E0A\u663E\u793A"]
-            };
-          case "index_out_of_range":
-            return {
-              ok: false,
-              summary: `\u627E\u5230 ${raw._count} \u4E2A\u5339\u914D\uFF0C\u4F46\u7D22\u5F15 ${raw._index} \u8D85\u51FA\u8303\u56F4`,
-              data: { clicked: false, matchedText: "", matchedRole: "", allCandidates: raw._all },
-              nextSteps: [`\u53EF\u7528\u5019\u9009: ${raw._all.join(", ")}`]
             };
           case "snapshot_failed":
             return {
@@ -17648,7 +17692,7 @@ var require_cli = __commonJS({
 \u793A\u4F8B:
   browser-control navigate --args '{"url":"https://example.com"}'
   browser-control click --args '{"target":"@eyws8mg_1"}'
-  browser-control click_text --args '{"text":"\u65B0\u589E\u5206\u652F"}'
+  browser-control click_text --args '{"text":"\u65B0\u589E\u5206\u652F","x":200,"y":300}'
   browser-control status
 `);
     }

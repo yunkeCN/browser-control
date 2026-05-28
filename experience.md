@@ -15,7 +15,7 @@ snapshot → 分析 YAML 树 → 操作 → 再次 snapshot 确认
 
 ## 点击操作
 - 有 @e ref → `click {target}`（最可靠）
-- 无 @e ref 但有 box → `click_text`（CDP 坐标点击，需扩展支持 cdp_click_at）
+- 无 @e ref 但有 box → `click_text {text, x, y}`（坐标消歧义，选距离最近的可见文本匹配；需扩展支持 cdp_click_at）
 - @e ref 在导航/插件刷新后会失效，**每次操作前先 snapshot** 重新分配
 
 ## Portal/Overlay 组件

@@ -34603,8 +34603,8 @@ var COMMANDS = {
   snapshot: { required: [], optional: ["tabId", "roles", "tags", "hasVisibleText", "textIncludes", "viewportOnly", "boxes", "diff_to"], example: { tabId: 123, roles: ["button", "link"], hasVisibleText: true, viewportOnly: true } },
   click: {
     required: ["target"],
-    optional: ["tabId", "after"],
-    example: { target: "@e1abc23_1", after: "auto" }
+    optional: ["tabId"],
+    example: { target: "@e1abc23_1" }
   },
   click_probe: {
     required: ["target"],
@@ -34719,7 +34719,6 @@ function validateRequest(request) {
     "network_start",
     "network_list"
   ]);
-  validateClickAfter(request, spec);
   validateOptionalBooleanArgs(request, ["force", "observeNewTab", "expectNewTab", "includeHeaders", "includeBody", "redactSensitive"]);
   validateOptionalNumberArgs(request, ["tabId", "clickCount", "waitMs", "maxRequests"]);
   return request;
@@ -34750,7 +34749,7 @@ function validateKnownArgs(request, spec) {
     hints.unshift(`${request.command} now accepts args.target for element targeting. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.`);
   }
   if (request.command === "click" && ["strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].includes(field)) {
-    hints.unshift('click now accepts only args.target, optional args.after, and optional args.tabId. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.');
+    hints.unshift('click now accepts only args.target and optional args.tabId. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.');
   }
   if (request.command === "get_text" && field === "selectors") {
     hints.unshift("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes.");
@@ -34874,7 +34873,7 @@ function validationDetails(request, spec, field) {
     hints.push(`${request.command} now accepts args.target for element targeting. Use {"target":"@e..."} or {"target":"css=..."} instead.`);
   }
   if (request.command === "click" && ["strategy", "force", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].some((arg) => Object.prototype.hasOwnProperty.call(request.args || {}, arg))) {
-    hints.push('click now accepts args.target, optional args.after, and optional args.tabId. Use {"target":"@e..."} or {"target":"css=..."} instead.');
+    hints.push('click now accepts args.target and optional args.tabId. Use {"target":"@e..."} or {"target":"css=..."} instead.');
   }
   if (hints.length) {
     details.hints = hints;
@@ -34980,18 +34979,6 @@ function validateTargetArg(request, spec) {
     expectedFormat: "@e<structureId>_<revision> or css=<selector>",
     value,
     hint: 'Prefer a fresh snapshot ref such as {"target":"@e1jm0sbb_1"}. Use css= only when a snapshot ref is unavailable.'
-  });
-}
-function validateClickAfter(request, spec) {
-  if (request.command !== "click") return;
-  const value = request.args.after;
-  if (value === void 0 || value === null || value === "") return;
-  if (["auto", "none", "snapshot"].includes(value)) return;
-  throw new ProtocolError("VALIDATION_ERROR", "after must be one of auto, none, or snapshot for command 'click'", {
-    ...validationDetails(request, spec, "after"),
-    expectedValues: ["auto", "none", "snapshot"],
-    value,
-    hint: 'Use after:"auto" for the default post-click summary and postSnapshot, "snapshot" for explicit full snapshot, or "none" for a raw click.'
   });
 }
 function mapTargetArgs(args) {
@@ -35118,8 +35105,7 @@ var commandArgSchemas = {
   }).strict(),
   click: external_exports.object({
     target: elementTarget,
-    tabId,
-    after: external_exports.enum(["auto", "none", "snapshot"]).optional()
+    tabId
   }).strict(),
   click_probe: external_exports.object({
     target: elementTarget,
@@ -36040,29 +36026,9 @@ async function snapshot(args, client) {
 // src/controller/commands/click.ts
 var ELEMENT_REF_RE = /^@e[^\s_]+_\d+$/;
 var CSS_PREFIX = "css=";
-var AFTER_VALUES = ["auto", "none", "snapshot"];
 function isValidTarget(target) {
   if (typeof target !== "string" || target.length === 0) return false;
   return ELEMENT_REF_RE.test(target) || target.startsWith(CSS_PREFIX);
-}
-function extractPostSnapshotTree(raw) {
-  const snapshot2 = raw.snapshot;
-  if (typeof snapshot2 === "string" && snapshot2.length > 0) {
-    return snapshot2;
-  }
-  return "";
-}
-function countPostSnapshotElements(raw) {
-  const refs = raw.refs;
-  if (Array.isArray(refs)) {
-    return refs.length;
-  }
-  const stats = raw.stats;
-  if (stats && typeof stats === "object") {
-    const s = stats;
-    if (typeof s.emitted === "number") return s.emitted;
-  }
-  return 0;
 }
 var clickDef = {
   name: "click",
@@ -36080,13 +36046,9 @@ var clickDef = {
     if (args.tabId !== void 0 && typeof args.tabId !== "number") {
       throw new Error("tabId \u5FC5\u987B\u662F\u6570\u5B57");
     }
-    if (args.after !== void 0 && !AFTER_VALUES.includes(args.after)) {
-      throw new Error("after \u5FC5\u987B\u662F auto / none / snapshot \u4E4B\u4E00");
-    }
     return {
       target: args.target,
-      tabId: args.tabId,
-      after: args.after
+      tabId: args.tabId
     };
   },
   /**
@@ -36103,7 +36065,7 @@ var clickDef = {
   },
   /**
    * 将 daemon 响应转换为 LLM-friendly 格式
-   * - 提取 daemon 返回的业务数据（clicked, changes, postSnapshot）
+   * - 提取 daemon 返回的业务数据（clicked, changes）
    * - 生成包含点击结果和页面变化的摘要
    */
   toResult: (raw) => {
@@ -36124,37 +36086,24 @@ var clickDef = {
       };
     }
     const changes = clickData.changes;
-    const observationBaselineId = typeof changes?.baselineId === "string" ? changes.baselineId : void 0;
-    const rawPostSnapshot = clickData.postSnapshot;
-    let postSnapshot;
-    if (rawPostSnapshot) {
-      const tree = extractPostSnapshotTree(rawPostSnapshot);
-      const elementCount = countPostSnapshotElements(rawPostSnapshot);
-      if (tree || elementCount > 0) {
-        postSnapshot = { tree, elementCount };
-      }
-    }
+    const baselineId = typeof changes?.baselineId === "string" ? changes.baselineId : void 0;
     const newTabOpened = Boolean(clickData.newTabOpened);
     const rawNetwork = clickData.network;
     const network = rawNetwork?.requests?.length ? { requests: rawNetwork.requests, count: rawNetwork.count || rawNetwork.requests.length } : void 0;
     const parts = ["\u5DF2\u70B9\u51FB\u5143\u7D20"];
-    if (postSnapshot) {
-      parts.push(`\u5FEB\u7167: ${postSnapshot.elementCount} \u4E2A\u5143\u7D20`);
-    }
     if (network) {
       parts.push(`\u89E6\u53D1 ${network.count} \u4E2A\u63A5\u53E3\u8BF7\u6C42`);
     }
-    if (observationBaselineId) {
-      parts.push(`\u89C2\u5BDF\u57FA\u7EBF: ${observationBaselineId}`);
+    if (baselineId) {
+      parts.push(`\u89C2\u5BDF\u57FA\u7EBF: ${baselineId}`);
     }
     return {
       ok: true,
       summary: parts.join(" | "),
-      baselineId: observationBaselineId,
+      baselineId,
       data: {
         clicked: true,
         newTabOpened,
-        postSnapshot,
         network
       }
     };
@@ -37791,7 +37740,7 @@ function registerBrowserControlPrompts(server) {
       '{"command":"snapshot","args":{"viewportOnly":true,"hasVisibleText":true}}',
       "",
       "Key optional parameters:",
-      '- click "after": "auto" (default, returns summary + postSnapshot + triggered API requests), "none", "snapshot" (explicit full snapshot). click also captures network requests triggered within 700ms (URLs only, no body). For advanced network capture (headers/body, URL filtering), use click_probe.',
+      "- click captures network requests triggered within 700ms (URLs only, no body). For advanced network capture (headers/body, URL filtering), use click_probe.",
       '- get_text "scope": "viewport" (default, viewport visible text), "document" (legacy body.innerText), "full" (rendered layout text, filters hidden/zero-size/off-layout)',
       '- fill strategy: "native_setter", "text_input", "paste_like"',
       '- fill "commit": "change" (default \u2014 triggers change event, use for auto-save), "blur" (blurs field, use for blur validation), "enter" (press Enter, use for search), "none" (set value only, submit via button separately)',
@@ -37808,7 +37757,7 @@ function registerBrowserControlPrompts(server) {
       '{"command":"snapshot","args":{"viewportOnly":true,"hasVisibleText":true}}',
       '{"command":"snapshot","args":{"textIncludes":"Login","hasVisibleText":true,"viewportOnly":true,"roles":["button","link","textbox"]}}',
       '{"command":"snapshot","args":{"diff_to":"obs1"}} \u2014 compare current snapshot against baseline obs1, returns structured added/removed/changed diff',
-      '{"command":"click","args":{"target":"@eabc_1","after":"auto"}}',
+      '{"command":"click","args":{"target":"@eabc_1"}}',
       '{"command":"click_probe","args":{"target":"@eabc_1","filter":"/api/","includeBody":true}}',
       '{"command":"fill","args":{"target":"@eabc_1","value":"draft","clear":true}}',
       '{"command":"press","args":{"key":"Enter","expectChange":true}}',
@@ -38106,15 +38055,10 @@ function runDaemonServer() {
     maxSummaryChars: 1200,
     maxNetworkRequests: 100
   };
-  const CLICK_AFTER_DEFAULTS = {
+  const CLICK_SETTLE = {
     initialDelayMs: 80,
     stableWindowMs: 120,
-    timeoutMs: 700,
-    snapshotOptions: {
-      viewportOnly: true,
-      hasVisibleText: true,
-      boxes: true
-    }
+    timeoutMs: 700
   };
   function getOrCreateSession(name) {
     if (!name) name = "default";
@@ -38180,23 +38124,6 @@ function runDaemonServer() {
         requested: ["expectChange", "observe"],
         extensionCapabilities: extensionRuntime.capabilities || [],
         nextSteps: ["Reload the Browser Control extension from the source path, then rerun doctor --json."]
-      });
-    }
-  }
-  function clickAfterMode(request) {
-    return request.command === "click" ? request.args.after || "auto" : "none";
-  }
-  function clickAfterRequested(request) {
-    return request.command === "click" && clickAfterMode(request) !== "none";
-  }
-  function ensureClickAfterSupported(request) {
-    if (!clickAfterRequested(request)) return;
-    const supported = extensionHasCapabilities(["observe_capture"]);
-    if (supported === false) {
-      throw new ProtocolError("UNSUPPORTED", "Connected extension metadata does not advertise primitives required for click after observation.", {
-        requested: ["click.after", "observe_capture"],
-        extensionCapabilities: extensionRuntime.capabilities || [],
-        nextSteps: ['Reload the Browser Control extension from the source path, or call click with after:"none" for a raw click.']
       });
     }
   }
@@ -38664,13 +38591,13 @@ function runDaemonServer() {
   async function waitForClickSettle(request, tabId2) {
     const startedAtMs = Date.now();
     let captures = 0;
-    await delay(CLICK_AFTER_DEFAULTS.initialDelayMs);
+    await delay(CLICK_SETTLE.initialDelayMs);
     let current = await captureObservation(request, { tabId: tabId2 });
     captures += 1;
     let currentSignature = observationSignature(current);
-    while (Date.now() - startedAtMs < CLICK_AFTER_DEFAULTS.timeoutMs) {
-      const remainingMs = CLICK_AFTER_DEFAULTS.timeoutMs - (Date.now() - startedAtMs);
-      await delay(Math.min(CLICK_AFTER_DEFAULTS.stableWindowMs, Math.max(0, remainingMs)));
+    while (Date.now() - startedAtMs < CLICK_SETTLE.timeoutMs) {
+      const remainingMs = CLICK_SETTLE.timeoutMs - (Date.now() - startedAtMs);
+      await delay(Math.min(CLICK_SETTLE.stableWindowMs, Math.max(0, remainingMs)));
       const next = await captureObservation(request, { tabId: tabId2 });
       captures += 1;
       const nextSignature = observationSignature(next);
@@ -38681,9 +38608,9 @@ function runDaemonServer() {
             settled: true,
             elapsedMs: Date.now() - startedAtMs,
             captures,
-            initialDelayMs: CLICK_AFTER_DEFAULTS.initialDelayMs,
-            stableWindowMs: CLICK_AFTER_DEFAULTS.stableWindowMs,
-            timeoutMs: CLICK_AFTER_DEFAULTS.timeoutMs
+            initialDelayMs: CLICK_SETTLE.initialDelayMs,
+            stableWindowMs: CLICK_SETTLE.stableWindowMs,
+            timeoutMs: CLICK_SETTLE.timeoutMs
           }
         };
       }
@@ -38697,16 +38624,11 @@ function runDaemonServer() {
         timedOut: true,
         elapsedMs: Date.now() - startedAtMs,
         captures,
-        initialDelayMs: CLICK_AFTER_DEFAULTS.initialDelayMs,
-        stableWindowMs: CLICK_AFTER_DEFAULTS.stableWindowMs,
-        timeoutMs: CLICK_AFTER_DEFAULTS.timeoutMs
+        initialDelayMs: CLICK_SETTLE.initialDelayMs,
+        stableWindowMs: CLICK_SETTLE.stableWindowMs,
+        timeoutMs: CLICK_SETTLE.timeoutMs
       }
     };
-  }
-  function shouldReturnClickPostSnapshot(mode, diffData, result) {
-    if (mode === "snapshot") return true;
-    if (mode !== "auto") return false;
-    return hasMeaningfulClickEffect(diffData, result);
   }
   function hasMeaningfulClickEffect(changes, result, diffDataOverride = null) {
     const diffData = diffDataOverride || changes;
@@ -38715,11 +38637,6 @@ function runDaemonServer() {
     return Boolean(
       result?.newTab || Array.isArray(result?.newTabs) && result.newTabs.length || diffData?.urlChanged || diffData?.titleChanged || textDiff.activeElementChanged || textDiff.visibleTextRunCountDelta || textDiff.visibleTextCharsDelta || Array.isArray(textDiff.added) && textDiff.added.length || Array.isArray(textDiff.removed) && textDiff.removed.length
     );
-  }
-  function postSnapshotTabId(result, fallbackTabId) {
-    if (result?.newTab?.id) return result.newTab.id;
-    if (Array.isArray(result?.newTabs) && result.newTabs.length === 1 && result.newTabs[0]?.id) return result.newTabs[0].id;
-    return fallbackTabId;
   }
   async function runActionWithObservation(request, mapped) {
     const observeArgs = actionObserveArgs(request);
@@ -38747,12 +38664,7 @@ function runDaemonServer() {
     const data = result && typeof result === "object" && !Array.isArray(result) ? { ...result, actionObservation } : { result, actionObservation };
     return { data, artifacts: diff.artifacts || [] };
   }
-  async function runClickWithAfter(request, mapped) {
-    const mode = clickAfterMode(request);
-    if (mode === "none") {
-      const data2 = await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
-      return { data: data2, artifacts: [] };
-    }
+  async function runClick(request, mapped) {
     const start = await handleObserveStart({
       ...request,
       args: {
@@ -38761,7 +38673,7 @@ function runDaemonServer() {
       }
     });
     const result = await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
-    const settleTargetTabId = postSnapshotTabId(result, start.data.tabId);
+    const settleTargetTabId = result?.newTab?.id || Array.isArray(result?.newTabs) && result.newTabs.length === 1 && result.newTabs[0]?.id || start.data.tabId;
     const settled = await waitForClickSettle(request, settleTargetTabId);
     const diff = await handleObserveDiff({
       ...request,
@@ -38773,43 +38685,14 @@ function runDaemonServer() {
       }
     }, settled.observation);
     const changes = summarizeActionObservation(diff.data, false);
-    const artifacts = [...diff.artifacts || []];
-    let postSnapshot = null;
-    let postSnapshotError = null;
-    if (shouldReturnClickPostSnapshot(mode, diff.data, result)) {
-      try {
-        const rawSnapshot = await sendCommandToExtension(request.session, "snapshot", {
-          ...CLICK_AFTER_DEFAULTS.snapshotOptions,
-          tabId: settleTargetTabId
-        }, request.timeoutMs);
-        const extracted = extractArtifacts("snapshot", rawSnapshot, artifactStore);
-        postSnapshot = extracted.data;
-        artifacts.push(...extracted.artifacts);
-      } catch (err) {
-        postSnapshotError = err?.message || String(err);
-      }
-    }
     const data = result && typeof result === "object" && !Array.isArray(result) ? { ...result } : { clicked: Boolean(result), result };
-    data.after = mode;
     data.settle = settled.settle;
     data.changes = changes;
     if (!data.clicked && hasMeaningfulClickEffect(changes, result, diff?.data)) {
       data.clicked = true;
-      data.clickOverride = "after-pipeline detected page change despite click mechanism reporting failure";
+      data.clickOverride = "pipeline detected page change despite click mechanism reporting failure";
     }
-    if (postSnapshot) data.postSnapshot = postSnapshot;
-    if (postSnapshotError) {
-      data.postSnapshot = null;
-      data.warnings = [
-        ...Array.isArray(data.warnings) ? data.warnings : [],
-        `Post-click snapshot failed: ${postSnapshotError}`
-      ];
-    }
-    if (!postSnapshot && mode === "auto") {
-      data.postSnapshot = null;
-      data.postSnapshotReason = "No major visible, focus, title, URL, or new-tab change was detected.";
-    }
-    return { data, artifacts };
+    return { data, artifacts: [...diff.artifacts || []] };
   }
   async function runSnapshotWithStore(request, mapped) {
     const diffTo = request.args.diff_to;
@@ -38874,7 +38757,6 @@ function runDaemonServer() {
     try {
       log("info", `Command: ${request.command}`, { session: request.session, args: Object.keys(request.args) });
       ensureActionObservationSupported(request);
-      ensureClickAfterSupported(request);
       if (request.command === "observe_start" || request.command === "observe_diff") {
         const observed = request.command === "observe_start" ? await handleObserveStart(request) : await handleObserveDiff(request);
         const tab2 = observed.data && typeof observed.data === "object" ? observed.data.tab || observed.data.tabId || null : null;
@@ -38899,12 +38781,21 @@ function runDaemonServer() {
           diagnostics: { extensionConnected, pendingRequests: pendingRequests.size, runtime: runtimeMetadata(), warnings: capabilityWarnings() }
         }));
       }
-      const clickAfter = clickAfterRequested(request) ? await runClickWithAfter(request, mapped) : null;
-      const observedAction = !clickAfter && actionObservationRequested(request) ? await runActionWithObservation(request, mapped) : null;
-      const result = clickAfter ? clickAfter.data : observedAction ? observedAction.data : await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
-      const { data, artifacts } = extractArtifacts(request.command, result, artifactStore);
-      if (clickAfter?.artifacts?.length) artifacts.push(...clickAfter.artifacts);
-      if (observedAction?.artifacts?.length) artifacts.push(...observedAction.artifacts);
+      let execResult;
+      let execArtifacts = [];
+      if (request.command === "click") {
+        const clicked = await runClick(request, mapped);
+        execResult = clicked.data;
+        execArtifacts = clicked.artifacts || [];
+      } else if (actionObservationRequested(request)) {
+        const observed = await runActionWithObservation(request, mapped);
+        execResult = observed.data;
+        execArtifacts = observed.artifacts || [];
+      } else {
+        execResult = await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
+      }
+      const { data, artifacts } = extractArtifacts(request.command, execResult, artifactStore);
+      if (execArtifacts.length) artifacts.push(...execArtifacts);
       const tab = data && typeof data === "object" ? data.tab || data.tabId || null : null;
       if (request.command === "navigate" && tab !== null) cleanupSessionObservationBaselines(request.session, tab);
       if (request.command === "close_session") cleanupSessionObservationBaselines(request.session);
