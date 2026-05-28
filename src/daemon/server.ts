@@ -21,6 +21,7 @@ import {
   DAEMON_CAPABILITIES
 } from '../protocol.js';
 import { ArtifactStore, extractArtifacts } from './artifact-store.js';
+import { computeSnapshotDiff } from '../shared/snapshot-diff.js';
 import packageJson from '../../package.json';
 
 export function runDaemonServer() {
@@ -450,6 +451,25 @@ function findObservationBaseline(session, baselineId, tabId = undefined) {
   return null;
 }
 
+/**
+ * 在 snapshotStore 中找出同一 session+tab 的最新一条带 tree 的快照记录
+ * 用于存储前去重：如果新快照与最新快照无差，则复用其 baselineId
+ */
+function findLatestTreeForTab(session, tabId) {
+  let latest = null;
+  let latestMs = -1;
+  for (const record of snapshotStore.values()) {
+    if (record.session !== session) continue;
+    if (record.tabId !== tabId) continue;
+    if (!record.tree) continue; // observe_start 等无 tree 的记录跳过
+    if (record.createdAtMs > latestMs) {
+      latestMs = record.createdAtMs;
+      latest = { baselineId: record.baselineId, tree: record.tree };
+    }
+  }
+  return latest;
+}
+
 function indexTextRuns(runs) {
   const map = new Map();
   for (const run of runs) {
@@ -840,27 +860,43 @@ async function runSnapshotWithStore(request, mapped) {
   const observation = await captureObservation(request);
   const snapshotResult = await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
 
-  // 2. 存入 snapshotStore
-  const baselineId = makeObservationBaselineId();
-  const now = Date.now();
-  const record = {
-    baselineId,
-    session: request.session,
-    tabId: observation.tabId || request.args.tabId || null,
-    createdAt: new Date(now).toISOString(),
-    createdAtMs: now,
-    lastAccessedAtMs: now,
-    expiresAt: new Date(now + OBSERVATION_DEFAULTS.ttlMs).toISOString(),
-    expiresAtMs: now + OBSERVATION_DEFAULTS.ttlMs,
-    url: observation.url || null,
-    title: observation.title || '',
-    navigationKey: observationNavigationKey(observation),
-    networkMarker: null,
-    observation,
-    tree: snapshotResult?.tree || snapshotResult?.snapshot?.tree || null
-  };
-  snapshotStore.set(observationStorageKey(request.session, record.tabId, baselineId), record);
-  enforceSessionObservationCap(request.session);
+  // 2. 存入 snapshotStore（存储前去重：与最近快照无差则复用 baselineId）
+  const tabId = observation.tabId || request.args.tabId || null;
+  const newTree = snapshotResult?.tree || snapshotResult?.snapshot?.tree || null;
+
+  let baselineId;
+  if (newTree) {
+    const prev = findLatestTreeForTab(request.session, tabId);
+    if (prev) {
+      const diff = computeSnapshotDiff(prev.tree, newTree);
+      if (!diff.hasChanges) {
+        baselineId = prev.baselineId; // 页面无变化，复用已有 ID，跳过写入
+      }
+    }
+  }
+
+  if (!baselineId) {
+    baselineId = makeObservationBaselineId();
+    const now = Date.now();
+    const record = {
+      baselineId,
+      session: request.session,
+      tabId,
+      createdAt: new Date(now).toISOString(),
+      createdAtMs: now,
+      lastAccessedAtMs: now,
+      expiresAt: new Date(now + OBSERVATION_DEFAULTS.ttlMs).toISOString(),
+      expiresAtMs: now + OBSERVATION_DEFAULTS.ttlMs,
+      url: observation.url || null,
+      title: observation.title || '',
+      navigationKey: observationNavigationKey(observation),
+      networkMarker: null,
+      observation,
+      tree: newTree
+    };
+    snapshotStore.set(observationStorageKey(request.session, tabId, baselineId), record);
+    enforceSessionObservationCap(request.session);
+  }
 
   // 3. 如果请求了 diff_to，查找历史基线树
   let baselineTree = null;
