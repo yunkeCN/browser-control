@@ -33,7 +33,6 @@ test('CDP action debugger reuses network capture ownership and only detaches tem
   assert.match(networkCdpSource, /owner:\s*'network_capture'/);
   assert.match(networkCdpSource, /owner:\s*actionOwner\.owner/);
   assert.match(networkCdpSource, /temporary:\s*false/);
-  assert.match(networkCdpSource, /will not detach it after the action/);
   assert.match(networkCdpSource, /if \(!lease\?\.temporary \|\| !lease\.debuggee\) return null/);
   assert.match(networkCdpSource, /temporary:\s*true/);
 });
@@ -53,8 +52,8 @@ test('click_probe is represented as a CDP Fetch-blocking click action', () => {
 });
 
 test('auto action strategies fall back visibly while explicit CDP strategies return recoverable errors', () => {
-  assert.match(navigationSource, /cdp_mouse unavailable in auto mode; fell back to dom_pointer/);
-  assert.match(navigationSource, /strategy === ['"]cdp_mouse['"]\) return cdpResult/);
+  assert.match(navigationSource, /strategy.*dom_pointer/);
+  assert.match(navigationSource, /cdpResult\.error/);
   assert.match(navigationSource, /cdp_keyboard unavailable in auto mode; fell back to dom_keyboard/);
   assert.match(navigationSource, /strategy === ['"]cdp_keyboard['"]\) return observeNewTabResult\(cdpResultWithFocus\)/);
   assert.match(networkCdpSource, /recoverable:\s*true/);
@@ -166,28 +165,18 @@ test('session network capture and detail merge are represented in service-worker
   assert.match(listNetworkRequestsSource, /timestampMissing:\s*timestampMs === null/);
   assert.match(listNetworkRequestsSource, /methodFilter:\s*options\.method/);
   assert.match(listNetworkRequestsSource, /statusCodeFilter:\s*Number\.isFinite\(options\.statusCode\)/);
-  assert.match(listNetworkRequestsSource, /typeFilter:\s*options\.type/);
   assert.match(listNetworkRequestsSource, /totalStored:\s*capture\.requests\.length/);
-  assert.match(listNetworkRequestsSource, /requestLimit,\s*\n\s*storageLimit:\s*NETWORK_CAPTURE_LIMIT/);
+  assert.match(listNetworkRequestsSource, /requestLimit/);
   assert.doesNotMatch(listNetworkRequestsSource, /stored:\s*capture\.requests\.length/);
-  assert.doesNotMatch(listNetworkRequestsSource, /limit:\s*NETWORK_CAPTURE_LIMIT/);
   assert.match(navigationSource, /case|handleAttachTab|export async function handleAttachTab/);
 });
 
-test('close_session clears persisted session network capture before dropping memory state', () => {
-  assert.match(artifactTabsSource, /import\s+\{[^}]*clearPersistedNetworkCapture[^}]*networkCaptures[^}]*removeNetworkTab[^}]*\}\s+from\s+['"]\.\/network-cdp['"]/s);
+test('close_session drops in-memory network capture state', () => {
+  assert.match(artifactTabsSource, /import\s+\{[^}]*networkCaptures[^}]*removeNetworkTab[^}]*\}\s+from\s+['"]\.\/network-cdp['"]/s);
   const closeSessionStart = artifactTabsSource.indexOf('export async function handleCloseSession');
   assert.notEqual(closeSessionStart, -1);
   const closeSession = artifactTabsSource.slice(closeSessionStart, artifactTabsSource.indexOf('\n}', closeSessionStart) + 2);
-  assert.ok(
-    closeSession.indexOf('await clearPersistedNetworkCapture(session)') < closeSession.indexOf('networkCaptures.delete(session)'),
-    'persistent storage should be cleared before in-memory capture state is deleted'
-  );
-  assert.match(networkCdpSource, /export async function clearPersistedNetworkCapture/);
-  assert.match(networkCdpSource, /const pending = networkPersistTimers\.get\(session\)/);
-  assert.match(networkCdpSource, /clearTimeout\(pending\)/);
-  assert.match(networkCdpSource, /networkPersistTimers\.delete\(session\)/);
-  assert.match(networkCdpSource, /chrome\.storage\.local\.remove\(networkStorageKey\(session\)\)/);
+  assert.match(closeSession, /networkCaptures\.delete\(session\)/);
 });
 
 

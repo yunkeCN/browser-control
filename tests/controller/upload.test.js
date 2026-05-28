@@ -55,10 +55,9 @@ test('upload 成功: 上传单个文件', async (t) => {
   assert.match(result.summary, /1 个/, 'summary 应包含文件数量');
   assert.match(result.summary, /@e1abc_1/, 'summary 应包含目标元素');
 
-  // data 验证
-  assert.ok(result.data, '成功时应有 data');
-  assert.equal(result.data.uploaded, true);
-  assert.equal(result.data.fileCount, 1);
+  // 字段验证
+  assert.equal(result.uploaded, true);
+  assert.equal(result.fileCount, 1);
 
   // 成功无 nextSteps
   assert.equal(result.nextSteps, undefined);
@@ -106,8 +105,8 @@ test('upload 成功: 上传多个文件', async (t) => {
   );
 
   assert.equal(result.ok, true);
-  assert.equal(result.data.uploaded, true);
-  assert.equal(result.data.fileCount, 2);
+  assert.equal(result.uploaded, true);
+  assert.equal(result.fileCount, 2);
   assert.match(result.summary, /2 个/);
 
   // 验证传递给 daemon 的参数
@@ -125,7 +124,6 @@ test('upload 失败: 缺少 target', async (t) => {
 
   assert.equal(result.ok, false, '无 target 时应返回错误');
   assert.match(result.summary, /target|参数/, 'summary 应提示缺少 target');
-  assert.equal(result.data, undefined, '失败时不应有 data');
   assert.ok(Array.isArray(result.nextSteps), '验证失败时应提供 nextSteps');
 });
 
@@ -139,7 +137,6 @@ test('upload 失败: files 不是数组', async (t) => {
 
   assert.equal(result.ok, false);
   assert.match(result.summary, /数组|array|files/i);
-  assert.equal(result.data, undefined);
   assert.ok(Array.isArray(result.nextSteps));
 });
 

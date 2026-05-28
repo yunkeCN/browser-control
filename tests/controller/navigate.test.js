@@ -50,11 +50,10 @@ test('navigate 成功: 返回 LLM-friendly 格式', async (t) => {
   assert.match(result.summary, /导航/, 'summary 应包含「导航」');
   assert.match(result.summary, /example/, 'summary 应包含目标 URL');
 
-  // data 验证
-  assert.ok(result.data, '成功时应有 data');
-  assert.equal(result.data.finalUrl, 'https://example.com');
-  assert.equal(result.data.title, 'Example Domain');
-  assert.equal(result.data.tabId, 42);
+  // 字段验证
+  assert.equal(result.finalUrl, 'https://example.com');
+  assert.equal(result.title, 'Example Domain');
+  assert.equal(result.tabId, 42);
 
   // 成功无 nextSteps
   assert.equal(result.nextSteps, undefined);
@@ -98,9 +97,9 @@ test('navigate 成功: 新标签页模式', async (t) => {
   );
 
   assert.equal(result.ok, true);
-  assert.equal(result.data.finalUrl, 'https://google.com');
-  assert.equal(result.data.title, 'Google');
-  assert.equal(result.data.tabId, 43);
+  assert.equal(result.finalUrl, 'https://google.com');
+  assert.equal(result.title, 'Google');
+  assert.equal(result.tabId, 43);
 
   // 验证传递给 daemon 的参数
   assert.equal(fake.requests[0].args.newTab, true);
@@ -113,7 +112,6 @@ test('navigate 失败: 缺少 url 参数', async (t) => {
 
   assert.equal(result.ok, false, '无 url 时应返回错误');
   assert.match(result.summary, /url|参数/, 'summary 应提示缺少参数');
-  assert.equal(result.data, undefined, '失败时不应有 data');
   assert.ok(
     Array.isArray(result.nextSteps),
     '验证失败时应提供 nextSteps',

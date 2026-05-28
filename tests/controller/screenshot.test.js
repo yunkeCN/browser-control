@@ -8,6 +8,14 @@ const { loadSourceModule } = require('../helpers/load-source-module');
 const { DaemonClient } = loadSourceModule('src/mcp/daemon-client.ts');
 const { screenshot } = loadSourceModule('src/controller/commands/screenshot.ts');
 
+/**
+ * screenshot 集成测试
+ *
+ * execute() 返回 response.data（daemon 响应体整体）
+ * toResult(raw) 从 raw.data?.artifact?.path 或 raw.artifacts?.[0]?.path 读取 filePath
+ * 注意: screenshot 的 CommandResult 仍然使用嵌套的 data: { filePath, format }
+ */
+
 test('screenshot 成功: PNG 格式', async (t) => {
   const fake = createFakeDaemon({
     onCommand: (envelope) => ({
@@ -21,10 +29,10 @@ test('screenshot 成功: PNG 格式', async (t) => {
       endedAt: new Date().toISOString(),
       durationMs: 350,
       data: {
-        filePath: '/tmp/screenshots/2026-05-26_14-30-00.png',
+        artifact: { path: '/tmp/screenshots/2026-05-26_14-30-00.png' },
         format: 'png',
       },
-      artifacts: [],
+      artifacts: [{ path: '/tmp/screenshots/2026-05-26_14-30-00.png' }],
       error: null,
       diagnostics: null,
     }),
@@ -40,6 +48,7 @@ test('screenshot 成功: PNG 格式', async (t) => {
   assert.match(result.summary, /截图已保存到/);
   assert.match(result.summary, /\.png/);
 
+  // screenshot 仍然使用嵌套的 data
   assert.ok(result.data);
   assert.equal(result.data.filePath, '/tmp/screenshots/2026-05-26_14-30-00.png');
   assert.equal(result.data.format, 'png');
@@ -62,10 +71,10 @@ test('screenshot 成功: JPEG 格式', async (t) => {
       endedAt: new Date().toISOString(),
       durationMs: 400,
       data: {
-        filePath: '/tmp/screenshots/2026-05-26_14-31-00.jpg',
+        artifact: { path: '/tmp/screenshots/2026-05-26_14-31-00.jpg' },
         format: 'jpeg',
       },
-      artifacts: [],
+      artifacts: [{ path: '/tmp/screenshots/2026-05-26_14-31-00.jpg' }],
       error: null,
       diagnostics: null,
     }),

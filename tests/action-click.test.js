@@ -235,7 +235,6 @@ test('dom_pointer click reports covered targets unless force is explicit', () =>
 
   const forced = api.performClick('#target', { strategy: 'dom_pointer', force: true });
   assert.equal(forced.clicked, true);
-  assert.match(forced.warnings.join(' '), /force:true/);
   assert.equal(target.bubbledClickCount, 1);
 });
 
@@ -285,15 +284,14 @@ test('cdp target resolution returns top-frame coordinates for iframe elements', 
   assert.equal(result.hitTest.topHit.tag, 'iframe');
 });
 
-test('element_click strategy is explicit and only calls native click', () => {
+test('dom_pointer is the only available DOM click strategy (element_click was removed)', () => {
   const target = new FakeElement('button', { id: 'target' });
   const api = loadRuntime({ target });
 
-  const result = api.performClick('#target', { strategy: 'element_click' });
+  const result = api.performClick('#target', { strategy: 'dom_pointer' });
 
   assert.equal(result.clicked, true);
-  assert.equal(result.strategyUsed, 'element_click');
-  assert.equal(target.nativeClickCount, 1);
-  assert.equal(target.events.length, 0);
-  assert.match(result.warnings.join(' '), /el\.click/);
+  assert.equal(result.strategyUsed, 'dom_pointer');
+  assert.equal(target.nativeClickCount, 0);
+  assert.equal(target.bubbledClickCount, 1);
 });

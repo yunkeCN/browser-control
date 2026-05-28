@@ -8,6 +8,15 @@ const { loadSourceModule } = require('../helpers/load-source-module');
 const { DaemonClient } = loadSourceModule('src/mcp/daemon-client.ts');
 const { waitFor } = loadSourceModule('src/controller/commands/wait-for.ts');
 
+/**
+ * wait-for 集成测试
+ *
+ * execute() 返回 response.data（daemon 响应体整体）
+ * toResult(raw) 从 raw.data 中读取 found / state / selector / text / expression
+ * 成功时 CommandResult 是扁平的: { ok, summary, found, state }
+ * found=false 时: { ok: false, summary: "等待超时: ..." }
+ */
+
 test('wait-for 成功: 等待文本出现', async (t) => {
   const fake = createFakeDaemon({
     onCommand: (envelope) => ({
@@ -23,6 +32,7 @@ test('wait-for 成功: 等待文本出现', async (t) => {
       data: {
         found: true,
         state: 'visible',
+        text: 'Loading',
       },
       artifacts: [],
       error: null,
@@ -43,9 +53,9 @@ test('wait-for 成功: 等待文本出现', async (t) => {
   assert.match(result.summary, /等待成功/);
   assert.match(result.summary, /visible/);
 
-  assert.ok(result.data);
-  assert.equal(result.data.found, true);
-  assert.equal(result.data.state, 'visible');
+  // 扁平字段验证
+  assert.equal(result.found, true);
+  assert.equal(result.state, 'visible');
   assert.equal(result.nextSteps, undefined);
 
   assert.equal(fake.requests.length, 1);
@@ -69,6 +79,7 @@ test('wait-for 成功: 等待选择器', async (t) => {
       data: {
         found: true,
         state: 'attached',
+        selector: '#result-panel',
       },
       artifacts: [],
       error: null,
@@ -88,14 +99,49 @@ test('wait-for 成功: 等待选择器', async (t) => {
   assert.equal(result.ok, true);
   assert.match(result.summary, /等待成功/);
   assert.match(result.summary, /attached/);
-  assert.equal(result.data.found, true);
-  assert.equal(result.data.state, 'attached');
+  assert.equal(result.found, true);
+  assert.equal(result.state, 'attached');
 
   assert.equal(fake.requests[0].args.selector, '#result-panel');
   assert.equal(fake.requests[0].timeoutMs, 10000);
 });
 
-test('wait-for 失败: 超时', async (t) => {
+test('wait-for 失败: found=false 超时', async (t) => {
+  const fake = createFakeDaemon({
+    onCommand: (envelope) => ({
+      id: envelope.id,
+      ok: true,
+      command: 'wait_for',
+      backend: 'extension',
+      session: envelope.session,
+      tab: 42,
+      startedAt: new Date().toISOString(),
+      endedAt: new Date().toISOString(),
+      durationMs: 5000,
+      data: {
+        found: false,
+        state: 'visible',
+      },
+      artifacts: [],
+      error: null,
+      diagnostics: null,
+    }),
+  });
+  await fake.listen();
+  t.after(() => fake.close());
+
+  const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
+
+  const result = await waitFor(
+    { text: 'NonExistentText', timeoutMs: 5000 },
+    client,
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.summary, /等待超时/);
+});
+
+test('wait-for 失败: daemon 返回错误', async (t) => {
   const fake = createFakeDaemon({
     onCommand: () => ({
       ok: false,
@@ -130,7 +176,7 @@ test('wait-for 失败: 超时', async (t) => {
   assert.ok(Array.isArray(result.nextSteps));
 });
 
-test('wait-for 失败: daemon 返回错误', async (t) => {
+test('wait-for 失败: daemon 返回 BACKEND_ERROR', async (t) => {
   const fake = createFakeDaemon({
     onCommand: () => ({
       ok: false,

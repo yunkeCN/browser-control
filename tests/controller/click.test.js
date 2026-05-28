@@ -8,18 +8,9 @@ const { loadSourceModule } = require('../helpers/load-source-module');
 const { DaemonClient } = loadSourceModule('src/mcp/daemon-client.ts');
 const { click } = loadSourceModule('src/controller/commands/click.ts');
 
-/** 点击后快照的 YAML 树示例（与 Playwright MCP 格式一致） */
-const POST_SNAPSHOT_YAML = [
-  '- main [ref=@e59_1]:',
-  '  - heading "Search Results" [level=2] [ref=@e63_1]',
-  '  - link "Result 1" [ref=@e70_1] [cursor=pointer]',
-  '  - link "Result 2" [ref=@e71_1] [cursor=pointer]',
-  '  - button "Next Page" [ref=@e75_1] [cursor=pointer]',
-].join('\n');
+// ─── 基础点击（target 模式）────────────────────────────────────
 
-// ─── 测试用例 ────────────────────────────────────────────────────
-
-test('click 成功: after=auto 模式（返回变化摘要）', async (t) => {
+test('click 成功: 基础 target 模式', async (t) => {
   const fake = createFakeDaemon({
     onCommand: (envelope) => ({
       id: envelope.id,
@@ -33,17 +24,7 @@ test('click 成功: after=auto 模式（返回变化摘要）', async (t) => {
       durationMs: 250,
       data: {
         clicked: true,
-        after: 'auto',
-        settle: { settled: true, elapsedMs: 200 },
-        changes: {
-          baselineId: 'click_xxx',
-          summary: 'Visible text added: "Search results".',
-          textDiff: {
-            addedText: ['Search results'],
-            removedText: [],
-            truncated: false,
-          },
-        },
+        newTabOpened: false,
       },
       artifacts: [],
       error: null,
@@ -55,29 +36,19 @@ test('click 成功: after=auto 模式（返回变化摘要）', async (t) => {
 
   const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
 
-  const result = await click({ target: '@e91_1', after: 'auto' }, client);
+  const result = await click({ target: '@e91_1' }, client);
 
   assert.equal(result.ok, true);
-  assert.match(result.summary, /点击/);
-  assert.match(result.summary, /Search results/);
+  assert.match(result.summary, /已点击元素/);
+  assert.equal(result.clicked, true);
+  assert.equal(result.newTabOpened, false);
 
-  assert.ok(result.data);
-  assert.equal(result.data.clicked, true);
-  assert.equal(
-    result.data.changeSummary,
-    'Visible text added: "Search results".',
-  );
-  assert.equal(result.data.newTabOpened, false);
-  assert.equal(result.data.postSnapshot, undefined);
-
-  // 验证 daemon 实际收到了正确的请求
   assert.equal(fake.requests.length, 1);
   assert.equal(fake.requests[0].command, 'click');
   assert.equal(fake.requests[0].args.target, '@e91_1');
-  assert.equal(fake.requests[0].args.after, 'auto');
 });
 
-test('click 成功: after=none 模式', async (t) => {
+test('click 成功: CSS 选择器 target', async (t) => {
   const fake = createFakeDaemon({
     onCommand: (envelope) => ({
       id: envelope.id,
@@ -91,8 +62,6 @@ test('click 成功: after=none 模式', async (t) => {
       durationMs: 100,
       data: {
         clicked: true,
-        after: 'none',
-        settle: { settled: true, elapsedMs: 50 },
       },
       artifacts: [],
       error: null,
@@ -104,24 +73,14 @@ test('click 成功: after=none 模式', async (t) => {
 
   const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
 
-  const result = await click(
-    { target: 'css=.search-button', after: 'none' },
-    client,
-  );
+  const result = await click({ target: 'css=.search-button' }, client);
 
   assert.equal(result.ok, true);
-  assert.ok(result.summary.includes('点击'));
-  assert.ok(result.data);
-  assert.equal(result.data.clicked, true);
-  assert.equal(result.data.changeSummary, undefined);
-  assert.equal(result.data.postSnapshot, undefined);
-
-  // 验证 CSS 选择器格式的 target 传递正确
+  assert.equal(result.clicked, true);
   assert.equal(fake.requests[0].args.target, 'css=.search-button');
-  assert.equal(fake.requests[0].args.after, 'none');
 });
 
-test('click 成功: after=snapshot 模式（含 postSnapshot YAML 树）', async (t) => {
+test('click 成功: 带 changes 和 baselineId', async (t) => {
   const fake = createFakeDaemon({
     onCommand: (envelope) => ({
       id: envelope.id,
@@ -135,29 +94,8 @@ test('click 成功: after=snapshot 模式（含 postSnapshot YAML 树）', async
       durationMs: 300,
       data: {
         clicked: true,
-        after: 'snapshot',
-        settle: { settled: true, elapsedMs: 280 },
         changes: {
-          baselineId: 'click_abc',
-          summary: 'Page navigated to search results.',
-          textDiff: {
-            addedText: ['Search Results', 'Result 1', 'Result 2'],
-            removedText: ['Search button'],
-            truncated: false,
-          },
-        },
-        postSnapshot: {
-          snapshot: POST_SNAPSHOT_YAML,
-          refs: [
-            '@e59_1',
-            '@e63_1',
-            '@e70_1',
-            '@e71_1',
-            '@e75_1',
-          ],
-          url: 'https://example.com/search',
-          title: 'Search Results',
-          stats: { totalNodes: 50, emitted: 5, refs: 5 },
+          baselineId: 'click_xxx',
         },
       },
       artifacts: [],
@@ -169,39 +107,165 @@ test('click 成功: after=snapshot 模式（含 postSnapshot YAML 树）', async
   t.after(() => fake.close());
 
   const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
-
-  const result = await click({ target: '@e75_1', after: 'snapshot' }, client);
+  const result = await click({ target: '@e75_1' }, client);
 
   assert.equal(result.ok, true);
-  assert.ok(result.summary.includes('点击'));
-  assert.ok(result.summary.includes('快照'));
-  assert.ok(result.summary.includes('5'));
-
-  assert.ok(result.data);
-  assert.equal(result.data.clicked, true);
-
-  // postSnapshot 验证
-  assert.ok(result.data.postSnapshot);
-  assert.equal(result.data.postSnapshot.elementCount, 5);
-  assert.ok(result.data.postSnapshot.tree.includes('@e59_1'));
-  assert.ok(result.data.postSnapshot.tree.includes('heading'));
-  assert.ok(result.data.postSnapshot.tree.includes('Result 1'));
-
-  // 验证 daemon 参数
-  assert.equal(fake.requests[0].args.target, '@e75_1');
-  assert.equal(fake.requests[0].args.after, 'snapshot');
+  assert.equal(result.clicked, true);
+  assert.equal(result.baselineId, 'click_xxx');
+  assert.match(result.summary, /观察基线/);
 });
 
-test('click 失败: 缺少 target 参数', async (t) => {
+// ─── probe 模式 ─────────────────────────────────────────────────
+
+test('click 成功: probe 模式捕获网络请求', async (t) => {
+  const fake = createFakeDaemon({
+    onCommand: (envelope) => {
+      // probe 模式: click 发第一个请求，然后 probe 内部可能发多个
+      // 但统一 click 入口的 executeClickProbe 最终返回 data
+      return {
+        id: envelope.id,
+        ok: true,
+        command: envelope.command,
+        backend: 'extension',
+        session: envelope.session,
+        tab: 108,
+        startedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+        durationMs: 400,
+        data: {
+          clicked: true,
+          networkRequests: [
+            { url: '/api/submit', method: 'POST', statusCode: 200 },
+          ],
+          requestCount: 1,
+        },
+        artifacts: [],
+        error: null,
+        diagnostics: null,
+      };
+    },
+  });
+  await fake.listen();
+  t.after(() => fake.close());
+
+  const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
+
+  const result = await click({
+    target: '@e91_1',
+    probe: { filter: '/api/', includeBody: true },
+  }, client);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.clicked, true);
+  assert.match(result.summary, /捕获到 1 个网络请求/);
+  assert.equal(result.requestCount, 1);
+  assert.ok(Array.isArray(result.networkRequests));
+  assert.equal(result.networkRequests[0].url, '/api/submit');
+  assert.equal(result.networkRequests[0].method, 'POST');
+});
+
+test('click 成功: probe 模式无网络请求', async (t) => {
+  const fake = createFakeDaemon({
+    onCommand: (envelope) => ({
+      id: envelope.id,
+      ok: true,
+      command: envelope.command,
+      backend: 'extension',
+      session: envelope.session,
+      tab: 108,
+      startedAt: new Date().toISOString(),
+      endedAt: new Date().toISOString(),
+      durationMs: 200,
+      data: {
+        clicked: true,
+        networkRequests: [],
+        requestCount: 0,
+      },
+      artifacts: [],
+      error: null,
+      diagnostics: null,
+    }),
+  });
+  await fake.listen();
+  t.after(() => fake.close());
+
+  const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
+
+  const result = await click({
+    target: '@e91_1',
+    probe: { filter: '/api/' },
+  }, client);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.clicked, true);
+  assert.match(result.summary, /未捕获到网络请求/);
+  assert.equal(result.requestCount, 0);
+});
+
+// ─── text 模式 ──────────────────────────────────────────────────
+
+test('click 成功: text 模式', async (t) => {
+  // text 模式的 execute 调用 executeClickText，它内部会先 snapshot 再 click
+  // 这里需要 fake daemon 处理多个请求
+  const fake = createFakeDaemon({
+    onCommand: (envelope) => {
+      if (envelope.command === 'snapshot') {
+        // daemon returns full response; DaemonClient wraps as { data: <response> }
+        // executeClickText reads: snapResp.data = <response>, then .data = response.data
+        return {
+          id: envelope.id,
+          ok: true,
+          command: 'snapshot',
+          backend: 'extension',
+          session: envelope.session,
+          tab: 108,
+          data: {
+            snapshot: '- button "Submit" [ref=@eabc_1] [box=195,295,80,30]',
+            refs: {
+              '@eabc_1': {
+                role: 'button',
+                name: 'Submit',
+                text: 'Submit',
+                box: { x: 195, y: 295, width: 80, height: 30 },
+              },
+            },
+            stats: { totalNodes: 1, emitted: 1, refs: 1 },
+          },
+        };
+      }
+      // click command
+      return {
+        id: envelope.id,
+        ok: true,
+        command: 'click',
+        backend: 'extension',
+        session: envelope.session,
+        tab: 108,
+        data: { clicked: true },
+      };
+    },
+  });
+  await fake.listen();
+  t.after(() => fake.close());
+
+  const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
+
+  const result = await click({ text: 'Submit', x: 200, y: 300 }, client);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.clicked, true);
+});
+
+// ─── 失败用例 ───────────────────────────────────────────────────
+
+test('click 失败: 缺少 target 和 text', async (t) => {
   const client = new DaemonClient({ port: 1, host: '127.0.0.1' });
 
   const result = await click({}, client);
 
   assert.equal(result.ok, false);
-  assert.match(result.summary, /target|参数/);
-  assert.equal(result.data, undefined);
+  assert.match(result.summary, /target|text|参数/);
   assert.ok(Array.isArray(result.nextSteps));
-  assert.ok(result.nextSteps.length > 0);
 });
 
 test('click 失败: 无效 target 格式', async (t) => {
@@ -211,7 +275,24 @@ test('click 失败: 无效 target 格式', async (t) => {
 
   assert.equal(result.ok, false);
   assert.match(result.summary, /target|参数|格式|@e|css/);
-  assert.equal(result.data, undefined);
+});
+
+test('click 失败: text 模式缺少 x', async (t) => {
+  const client = new DaemonClient({ port: 1, host: '127.0.0.1' });
+
+  const result = await click({ text: 'Submit', y: 300 }, client);
+
+  assert.equal(result.ok, false);
+  assert.match(result.summary, /x/);
+});
+
+test('click 失败: target 和 text 互斥', async (t) => {
+  const client = new DaemonClient({ port: 1, host: '127.0.0.1' });
+
+  const result = await click({ target: '@e1_1', text: 'Submit', x: 100, y: 200 }, client);
+
+  assert.equal(result.ok, false);
+  assert.match(result.summary, /互斥/);
 });
 
 test('click 失败: daemon 返回错误（元素未找到）', async (t) => {

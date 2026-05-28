@@ -44,8 +44,7 @@ test('fill 成功: 基本填写', async (t) => {
   assert.match(result.summary, /@e1abc_1/);
   assert.match(result.summary, /hello world/);
 
-  assert.ok(result.data);
-  assert.equal(result.data.filled, true);
+  assert.equal(result.filled, true);
 
   // 验证 daemon 请求
   assert.equal(fake.requests.length, 1);
@@ -88,8 +87,8 @@ test('fill 成功: 清除后填写', async (t) => {
   );
 
   assert.equal(result.ok, true);
-  assert.equal(result.data.filled, true);
-  assert.equal(result.data.changeSummary, '已清除原有内容并填入新文本');
+  assert.equal(result.filled, true);
+  assert.equal(result.changeSummary, '已清除原有内容并填入新文本');
   assert.match(result.summary, /new text/);
 
   // 验证清除参数传递
@@ -103,7 +102,6 @@ test('fill 失败: 缺少 target', async (t) => {
 
   assert.equal(result.ok, false);
   assert.match(result.summary, /target/);
-  assert.equal(result.data, undefined);
   assert.ok(Array.isArray(result.nextSteps));
 });
 
@@ -114,7 +112,6 @@ test('fill 失败: 缺少 value', async (t) => {
 
   assert.equal(result.ok, false);
   assert.match(result.summary, /value/);
-  assert.equal(result.data, undefined);
 });
 
 test('fill 失败: daemon 返回错误', async (t) => {

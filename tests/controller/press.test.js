@@ -42,8 +42,7 @@ test('press 成功: 基本按键', async (t) => {
   assert.match(result.summary, /按键/);
   assert.match(result.summary, /Enter/);
 
-  assert.ok(result.data);
-  assert.equal(result.data.pressed, true);
+  assert.equal(result.pressed, true);
 
   // 验证 daemon 请求
   assert.equal(fake.requests.length, 1);
@@ -83,7 +82,7 @@ test('press 成功: 带修饰键', async (t) => {
   );
 
   assert.equal(result.ok, true);
-  assert.equal(result.data.pressed, true);
+  assert.equal(result.pressed, true);
   assert.match(result.summary, /a/);
 
   // 验证修饰键参数传递
@@ -99,7 +98,6 @@ test('press 失败: 缺少 key', async (t) => {
 
   assert.equal(result.ok, false);
   assert.match(result.summary, /key/);
-  assert.equal(result.data, undefined);
   assert.ok(Array.isArray(result.nextSteps));
 });
 

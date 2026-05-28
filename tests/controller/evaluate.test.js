@@ -42,9 +42,8 @@ test('evaluate 成功: 返回字符串', async (t) => {
   assert.match(result.summary, /JS 执行完成/);
   assert.match(result.summary, /string/);
 
-  assert.ok(result.data);
-  assert.equal(result.data.result, 'Hello from the page!');
-  assert.equal(result.data.type, 'string');
+  assert.equal(result.result, 'Hello from the page!');
+  assert.equal(result.type, 'string');
   assert.equal(result.nextSteps, undefined);
 
   assert.equal(fake.requests.length, 1);
@@ -84,8 +83,8 @@ test('evaluate 成功: 返回数字', async (t) => {
 
   assert.equal(result.ok, true);
   assert.match(result.summary, /number/);
-  assert.equal(result.data.result, 42);
-  assert.equal(result.data.type, 'number');
+  assert.equal(result.result, 42);
+  assert.equal(result.type, 'number');
 });
 
 test('evaluate 失败: 缺少 code', async (t) => {
@@ -95,7 +94,6 @@ test('evaluate 失败: 缺少 code', async (t) => {
 
   assert.equal(result.ok, false);
   assert.match(result.summary, /code/);
-  assert.equal(result.data, undefined);
   assert.ok(Array.isArray(result.nextSteps));
 });
 
@@ -106,7 +104,6 @@ test('evaluate 失败: code 为空', async (t) => {
 
   assert.equal(result.ok, false);
   assert.match(result.summary, /空/);
-  assert.equal(result.data, undefined);
 });
 
 test('evaluate 失败: daemon 返回错误', async (t) => {

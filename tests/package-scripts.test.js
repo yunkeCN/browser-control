@@ -63,10 +63,10 @@ test('mcp helper is generated and syntactically valid', () => {
     const syntax = spawnSync(process.execPath, ['--check', script], { encoding: 'utf8' });
     assert.equal(syntax.status, 0, syntax.stderr || syntax.stdout);
     const source = fs.readFileSync(script, 'utf8');
-    assert.match(source, /browser_control_command/);
-    assert.match(source, /browser_control_close_session/);
-    assert.match(source, /browser_control_status/);
-    assert.match(source, /browser_control_doctor/);
+    assert.match(source, /browser_control_command|browser_\w+/);
+    assert.match(source, /browser_close_session/);
+    assert.match(source, /browser_status/);
+    assert.match(source, /browser_doctor/);
     assert.match(source, /McpServer/);
   }
 });

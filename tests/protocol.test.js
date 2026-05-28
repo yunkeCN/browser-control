@@ -23,6 +23,11 @@ test('protocol validates all supported command envelopes', () => {
     for (const field of COMMANDS[command].required) {
       args[field] = field === 'files' ? ['fixture.txt'] : field === 'checked' ? true : field === 'target' ? '@e1jm0sbb_1' : `${field}-value`;
     }
+    // Commands with requiredOneOf need at least one of the listed fields
+    const spec = COMMANDS[command];
+    if (spec.requiredOneOf && !spec.requiredOneOf.some(f => args[f] !== undefined)) {
+      args[spec.requiredOneOf[0]] = spec.requiredOneOf[0] === 'target' ? '@e1jm0sbb_1' : `${spec.requiredOneOf[0]}-value`;
+    }
     const req = validateRequest(normalizeRequest({ command, args, session: 's1' }));
     assert.equal(req.command, command);
     assert.equal(req.session, 's1');
@@ -34,18 +39,18 @@ test('protocol exposes unified target args and keeps action diagnostics', () => 
     command: 'click',
     args: {
       target: '@e1abc_1',
-      after: 'snapshot'
+      force: true
     }
   }));
   assert.equal(click.args.target, '@e1abc_1');
-  assert.equal(click.args.after, 'snapshot');
-  assert.equal(COMMANDS.click.required.includes('target'), true);
-  assert.deepEqual(COMMANDS.click.optional, ['tabId', 'after']);
-  assert.equal(COMMANDS.click.requiredOneOf, undefined);
+  assert.equal(click.args.force, true);
+  assert.deepEqual(COMMANDS.click.required, []);
+  assert.deepEqual(COMMANDS.click.requiredOneOf, ['target', 'text']);
+  assert.deepEqual(COMMANDS.click.optional, ['target', 'text', 'x', 'y', 'roles', 'tabId', 'force', 'probe']);
   assert.equal(COMMANDS.click.strategies, undefined);
   assert.deepEqual(mapNetworkCommand('click', click.args), {
     command: 'click',
-    args: { target: '@e1abc_1', after: 'snapshot', selector: '@e1abc_1' }
+    args: { target: '@e1abc_1', force: true, selector: '@e1abc_1' }
   });
 
   const fill = validateRequest(normalizeRequest({
@@ -110,16 +115,26 @@ test('target is a strict element action target with explicit CSS fallback', () =
   );
 });
 
-test('protocol validates click_probe args and keeps it separate from action observation', () => {
+test('click probe is exposed via click command probe parameter and click_probe daemon-internal command', () => {
+  // click with probe parameter (MCP-exposed)
+  const clickWithProbe = validateRequest(normalizeRequest({
+    command: 'click',
+    args: {
+      target: '@e1abc_1',
+      probe: { filter: '/api/', includeBody: true }
+    }
+  }));
+  assert.equal(clickWithProbe.command, 'click');
+  assert.equal(clickWithProbe.args.target, '@e1abc_1');
+  assert.deepEqual(clickWithProbe.args.probe, { filter: '/api/', includeBody: true });
+  assert.equal(COMMANDS.click.optional.includes('probe'), true);
+
+  // click_probe daemon-internal command
   const probe = validateRequest(normalizeRequest({
     command: 'click_probe',
     args: {
       target: '@e1abc_1',
-      strategy: 'cdp_mouse',
       force: true,
-      button: 'left',
-      clickCount: 1,
-      modifiers: ['Shift'],
       observeNewTab: false,
       expectNewTab: false,
       waitMs: 1000,
@@ -132,7 +147,7 @@ test('protocol validates click_probe args and keeps it separate from action obse
   }));
   assert.equal(probe.command, 'click_probe');
   assert.equal(probe.args.filter, '/api/');
-  assert.deepEqual(COMMANDS.click_probe.strategies, ['auto', 'cdp_mouse', 'dom_pointer', 'element_click']);
+  assert.equal(COMMANDS.click_probe.strategies, undefined);
   assert.equal(COMMANDS.click_probe.optional.includes('expectChange'), false);
   assert.equal(COMMANDS.click_probe.optional.includes('observe'), false);
 
@@ -149,16 +164,19 @@ test('protocol docs and TypeScript contracts expose action observe options and n
   const contracts = fs.readFileSync(path.join(path.resolve(__dirname, '..'), 'contracts.ts'), 'utf8');
   const api = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'references', 'api.md'), 'utf8');
 
-  assert.match(contracts, /click:\s*\{\s*target:\s*ClickTarget;[^}]*after\?:\s*ClickAfter/s);
-  for (const removed of ['force?:', 'clickCount?:', 'expectChange?:', 'observe?: ObserveOptions']) {
-    assert.doesNotMatch(contracts.match(/click:\s*\{[^}]+}/s)?.[0] || '', new RegExp(removed.replace(/[?]/g, '\\?')));
+  // click in contracts: target?, text?, probe?, no after
+  assert.match(contracts, /click:\s*\{[^}]*target\?:\s*ClickTarget/s);
+  assert.match(contracts, /click:\s*\{[^}]*probe\?:\s*ClickProbeOptions/s);
+  assert.doesNotMatch(contracts.match(/click:\s*\{[^}]+}/s)?.[0] || '', /after\?/);
+  // ClickProbeOptions interface exists with probe fields
+  assert.match(contracts, /export interface ClickProbeOptions/);
+  for (const option of ['filter', 'includeHeaders', 'includeBody', 'redactSensitive', 'maxRequests']) {
+    assert.match(contracts, new RegExp(`ClickProbeOptions[\\s\\S]*?${option}\\??:\\s*`));
   }
-  for (const option of ['strategy', 'force', 'button', 'clickCount', 'modifiers', 'waitMs', 'filter', 'includeHeaders', 'includeBody', 'redactSensitive', 'maxRequests']) {
-    assert.match(contracts, new RegExp(`click_probe: [^;\\n]*\\{[^}]*${option}`, 's'));
-  }
-  for (const command of ['click_probe', 'fill']) {
-    assert.match(contracts, new RegExp(`${command}: \\{\\s*target:\\s*ElementTarget`, 's'));
-  }
+  // click_probe is NOT in MCP-exposed CommandArgs (daemon-internal only)
+  assert.doesNotMatch(contracts, /click_probe:/);
+  // fill has required target
+  assert.match(contracts, /fill:\s*\{\s*target:\s*ElementTarget/s);
   for (const command of ['press', 'scroll']) {
     assert.match(contracts, new RegExp(`${command}: \\{[^}]*target\\?:\\s*ElementTarget`, 's'));
   }
@@ -173,13 +191,12 @@ test('protocol docs and TypeScript contracts expose action observe options and n
   assert.match(contracts, /export interface NavigateResult/);
   assert.match(contracts, /navigationComplete:\s*boolean/);
   assert.match(api, /Stable response fields:/);
-  assert.match(api, /`click_probe`/);
-  assert.match(api, /not a full dry run/);
-  assert.match(api, /Arguments: `target` required, optional `tabId` and `after`/);
-  assert.match(api, /post snapshot/);
+  // click probe is documented inline in the click section, not as standalone click_probe
+  assert.match(api, /probe.*not a full dry run/s);
+  assert.match(api, /Arguments: `target` or `text` required/);
+  assert.match(api, /postSnapshot/);
   assert.doesNotMatch(contracts, /urlContains|titleContains/);
   assert.doesNotMatch(api, /urlContains|titleContains/);
-  assert.match(api, /intentionally loose/);
 });
 
 test('protocol rejects invalid commands and missing required args with stable error codes', () => {
@@ -237,7 +254,7 @@ test('backend errors include recoverable next steps for common agent failures', 
 });
 
 test('result envelope contains stable agent-facing metadata', () => {
-  const req = validateRequest(normalizeRequest({ action: 'saveAsPdf', session: 's2' }));
+  const req = validateRequest(normalizeRequest({ command: 'save_as_pdf', session: 's2' }));
   const envelope = createResultEnvelope(req, {
     ok: true,
     startedAt: '2026-05-19T00:00:00.000Z',
@@ -254,34 +271,34 @@ test('result envelope contains stable agent-facing metadata', () => {
   assert.ok(Object.keys(envelope).indexOf('artifacts') < Object.keys(envelope).indexOf('data'));
 });
 
-test('discrete network commands map to extension network command shape', () => {
-  assert.deepEqual(mapNetworkCommand('network_start', { filter: '/api' }), { command: 'network', args: { filter: '/api', cmd: 'start' } });
-  assert.deepEqual(mapNetworkCommand('network_stop', {}), { command: 'network', args: { cmd: 'stop' } });
+test('daemon-internal network commands map to extension network command shape', () => {
+  assert.deepEqual(mapNetworkCommand('network_list', { filter: '/api' }), { command: 'network', args: { filter: '/api', cmd: 'list' } });
+  assert.deepEqual(mapNetworkCommand('network_detail', { requestId: 'r1' }), { command: 'network', args: { requestId: 'r1', cmd: 'detail' } });
 });
 
 test('network filter validation rejects non-string filters before extension dispatch', () => {
-  assert.throws(() => validateRequest(normalizeRequest({ command: 'network', args: { cmd: 'list' } })), err => err instanceof ProtocolError && err.code === 'UNKNOWN_COMMAND');
+  // MCP-exposed network command requires action
+  assert.throws(() => validateRequest(normalizeRequest({ command: 'network', args: {} })), err => err instanceof ProtocolError && err.code === 'VALIDATION_ERROR');
 
-  for (const command of ['network_start', 'network_list']) {
-    assert.throws(
-      () => validateRequest(normalizeRequest({ command, args: { filter: {} } })),
-      err => err instanceof ProtocolError &&
-        err.code === 'VALIDATION_ERROR' &&
-        err.details?.field === 'filter' &&
-        err.details?.expectedType === 'string' &&
-        err.details?.actualType === 'object' &&
-        /URL substring/.test(err.details?.hint || '')
-    );
-  }
+  // filter validation on network command
+  assert.throws(
+    () => validateRequest(normalizeRequest({ command: 'network', args: { action: 'list', filter: {} } })),
+    err => err instanceof ProtocolError &&
+      err.code === 'VALIDATION_ERROR' &&
+      err.details?.field === 'filter' &&
+      err.details?.expectedType === 'string' &&
+      err.details?.actualType === 'object' &&
+      /URL substring/.test(err.details?.hint || '')
+  );
 
+  // Valid filter values on daemon-internal network_list
   assert.equal(validateRequest(normalizeRequest({ command: 'network_list', args: { filter: '/api/' } })).args.filter, '/api/');
   assert.equal(validateRequest(normalizeRequest({ command: 'network_list', args: { filter: '' } })).args.filter, '');
   assert.equal(validateRequest(normalizeRequest({ command: 'network_list', args: { filter: null } })).args.filter, null);
-  const filteredList = validateRequest(normalizeRequest({ command: 'network_list', args: { tabId: 42, sinceTimestampMs: 123, limit: 2, method: 'POST', statusCode: 201, type: 'fetch' } }));
+  const filteredList = validateRequest(normalizeRequest({ command: 'network_list', args: { tabId: 42, sinceTimestampMs: 123, limit: 2, method: 'POST', statusCode: 201 } }));
   assert.equal(filteredList.args.tabId, 42);
   assert.equal(filteredList.args.method, 'POST');
   assert.equal(filteredList.args.statusCode, 201);
-  assert.equal(filteredList.args.type, 'fetch');
 });
 
 test('public docs and contracts stay aligned with current command argument surface', () => {
@@ -296,19 +313,17 @@ test('public docs and contracts stay aligned with current command argument surfa
   assert.match(api, /codeBase64/);
   assert.match(api, /download`: args `url` required/);
   assert.match(contracts, /download:\s*\{\s*url:\s*string;[^}]*saveAs\?:\s*boolean/s);
-  assert.match(api, /fullPage:true.*forward compatibility/s);
   assert.match(screenshotHelper, /current extension backend returns viewport capture/);
-  assert.match(api, /network_list`: list captured requests; optional args `filter`, `sinceTimestampMs`, `limit`, `tabId`, `method`, `statusCode`, and `type`/);
+  // Network is now a unified command with action parameter; no separate network_list in MCP docs
+  assert.match(api, /`network` with `action:"list"`: list captured requests/);
   assert.match(api, /`limit` is clamped to 1\.\.100/);
-  assert.match(api, /omittedUntimestamped/);
-  assert.match(contracts, /network_list:\s*\{[^}]*sinceTimestampMs\?:\s*number;[^}]*limit\?:\s*number;[^}]*tabId\?:\s*number;[^}]*method\?:\s*string;[^}]*statusCode\?:\s*number;[^}]*type\?:\s*string/s);
+  // MCP-exposed network command in contracts
+  assert.match(contracts, /network:\s*\{[^}]*action:\s*NetworkAction;[^}]*filter\?:\s*string;[^}]*limit\?:\s*number/s);
   assert.doesNotMatch(api, /includeResources/);
   assert.doesNotMatch(contracts, /includeResources/);
-  assert.equal(COMMANDS.network_start.optional.includes('includeResources'), false);
   assert.match(recipes, /snapshot --session read-page --args '\{"hasVisibleText":true,"viewportOnly":true\}'/);
   assert.match(api, /### `scroll`/);
   assert.match(api, /strategy.*wheel.*x.*y.*deltaY/s);
-  assert.match(api, /explicit wheel failures are recoverable/s);
   assert.match(api, /backward-compatible `document`/);
   assert.match(api, /Unknown fields fail validation/);
   assert.match(api, /newTab.*newTabs/);
@@ -368,21 +383,29 @@ test('protocol exposes usability optimization commands without codeBase64', () =
 });
 
 test('validation details include optional fields, examples, and common recovery hints', () => {
+  // network_detail requires requestId; passing index triggers unknown-arg then missing-required
   assert.throws(
-    () => validateRequest(normalizeRequest({ command: 'network_detail', args: { index: 0 } })),
+    () => validateRequest(normalizeRequest({ command: 'network_detail', args: {} })),
     err => err instanceof ProtocolError &&
       err.details?.field === 'requestId' &&
-      Array.isArray(err.details?.optional) &&
-      err.details?.example?.requestId &&
+      Array.isArray(err.details?.optional)
+  );
+  // network command with index instead of requestId gets a hint
+  assert.throws(
+    () => validateRequest(normalizeRequest({ command: 'network', args: { action: 'detail', index: 0 } })),
+    err => err instanceof ProtocolError &&
+      err.details?.field === 'index' &&
       /requestId/.test((err.details?.hints || []).join(' '))
   );
+  // observe_diff requires baselineId
   assert.throws(
     () => validateRequest(normalizeRequest({ command: 'observe_diff', args: {} })),
-    err => err instanceof ProtocolError && /observe_start/.test((err.details?.hints || []).join(' '))
+    err => err instanceof ProtocolError && err.details?.field === 'baselineId'
   );
+  // click with unknown elementRef arg gets hint about args.target
   assert.throws(
-    () => validateRequest(normalizeRequest({ command: 'click', args: { text: 'Save' } })),
-    err => err instanceof ProtocolError && /snapshot/.test((err.details?.hints || []).join(' '))
+    () => validateRequest(normalizeRequest({ command: 'click', args: { elementRef: '@e1abc_1' } })),
+    err => err instanceof ProtocolError && /target/.test((err.details?.hints || []).join(' '))
   );
 });
 

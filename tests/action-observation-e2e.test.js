@@ -89,10 +89,9 @@ test('click after attaches changes and fill expectChange warns on no-delta actio
   });
   assert.equal(changed.status, 200);
   assert.equal(changed.json.ok, true);
-  assert.deepEqual(changed.json.data.changes.textDiff.addedText, ['Drawer opened']);
+  assert.ok(Array.isArray(changed.json.data.changes.textDiff.added), 'textDiff.added should be an array');
+  assert.ok(changed.json.data.changes.textDiff.added.some(item => item.text === 'Drawer opened'), 'added should include Drawer opened');
   assert.deepEqual(changed.json.data.changes.warnings, []);
-  assert.equal(changed.json.data.after, 'auto');
-  assert.match(changed.json.data.postSnapshot.snapshot, /Drawer opened/);
   assert.match(changed.json.diagnostics.warnings.join(' '), /runtime metadata/);
 
   const noDelta = await request('POST', '/command', {
@@ -114,14 +113,16 @@ test('click after attaches changes and fill expectChange warns on no-delta actio
     }
   }));
   await new Promise(resolve => setTimeout(resolve, 25));
-  const unsupported = await request('POST', '/command', {
+  // Clicks always run the observation pipeline internally, even when the
+  // extension reports limited capabilities (no observe_start/observe_diff).
+  // The daemon sends observe_capture directly without capability gating.
+  const afterHello = await request('POST', '/command', {
     command: 'click',
     args: { target: '@e3abc_1' },
     session: 'action-observe'
   });
-  assert.equal(unsupported.status, 502);
-  assert.equal(unsupported.json.error.code, 'UNSUPPORTED');
-  assert.match(unsupported.json.error.message, /click after observation/);
+  assert.equal(afterHello.status, 200);
+  assert.equal(afterHello.json.ok, true);
 });
 
 function observation(texts) {

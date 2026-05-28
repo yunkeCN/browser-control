@@ -8,6 +8,14 @@ const { loadSourceModule } = require('../helpers/load-source-module');
 const { DaemonClient } = loadSourceModule('src/mcp/daemon-client.ts');
 const { getText } = loadSourceModule('src/controller/commands/get-text.ts');
 
+/**
+ * get-text 集成测试
+ *
+ * execute() 返回 response.data（daemon 响应体整体）
+ * toResult(raw) 从 raw.data 中读取 text / truncated / url / title / textRuns / runs / length
+ * 成功时 CommandResult 是扁平的: { ok, summary, text, length, truncated, url?, title?, textRuns? }
+ */
+
 test('get-text 成功: 获取完整文本', async (t) => {
   const fake = createFakeDaemon({
     onCommand: (envelope) => ({
@@ -38,14 +46,13 @@ test('get-text 成功: 获取完整文本', async (t) => {
   const result = await getText({}, client);
 
   assert.equal(result.ok, true);
-  assert.match(result.summary, /获取到/);
   assert.match(result.summary, /18/);
   assert.match(result.summary, /完整文本/);
 
-  assert.ok(result.data);
-  assert.equal(result.data.text, '这是页面文本内容。包含一些可见文本。');
-  assert.equal(result.data.length, 18);
-  assert.equal(result.data.truncated, false);
+  // 扁平字段验证
+  assert.equal(result.text, '这是页面文本内容。包含一些可见文本。');
+  assert.equal(result.length, 18);
+  assert.equal(result.truncated, false);
   assert.equal(result.nextSteps, undefined);
 
   assert.equal(fake.requests.length, 1);
@@ -66,7 +73,7 @@ test('get-text 成功: 视口范围', async (t) => {
       durationMs: 60,
       data: {
         text: '视口内可见文本',
-        length: 8,
+        length: 7,
         truncated: false,
       },
       artifacts: [],
@@ -82,9 +89,9 @@ test('get-text 成功: 视口范围', async (t) => {
   const result = await getText({ scope: 'viewport' }, client);
 
   assert.equal(result.ok, true);
-  assert.equal(result.data.text, '视口内可见文本');
-  assert.equal(result.data.length, 8);
-  assert.equal(result.data.truncated, false);
+  assert.equal(result.text, '视口内可见文本');
+  assert.equal(result.length, 7);
+  assert.equal(result.truncated, false);
 
   assert.equal(fake.requests[0].args.scope, 'viewport');
 });
@@ -121,8 +128,44 @@ test('get-text 成功: 文本被截断（truncated=true）', async (t) => {
   assert.equal(result.ok, true);
   assert.match(result.summary, /1200\+/);
   assert.match(result.summary, /截断/);
-  assert.equal(result.data.truncated, true);
-  assert.equal(result.data.length, 1200);
+  assert.equal(result.truncated, true);
+  assert.equal(result.length, 1200);
+});
+
+test('get-text 成功: 带 url 和 title', async (t) => {
+  const fake = createFakeDaemon({
+    onCommand: (envelope) => ({
+      id: envelope.id,
+      ok: true,
+      command: 'get_text',
+      backend: 'extension',
+      session: envelope.session,
+      tab: 42,
+      startedAt: new Date().toISOString(),
+      endedAt: new Date().toISOString(),
+      durationMs: 70,
+      data: {
+        text: '页面内容',
+        length: 4,
+        truncated: false,
+        url: 'https://example.com',
+        title: 'Example Page',
+      },
+      artifacts: [],
+      error: null,
+      diagnostics: null,
+    }),
+  });
+  await fake.listen();
+  t.after(() => fake.close());
+
+  const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
+
+  const result = await getText({}, client);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.url, 'https://example.com');
+  assert.equal(result.title, 'Example Page');
 });
 
 test('get-text 失败: daemon 返回错误', async (t) => {

@@ -54,11 +54,10 @@ test('download 成功: 下载文件', async (t) => {
   assert.match(result.summary, /下载/, 'summary 应包含「下载」');
   assert.match(result.summary, /example\.com/, 'summary 应包含 URL');
 
-  // data 验证
-  assert.ok(result.data, '成功时应有 data');
-  assert.equal(result.data.downloaded, true);
-  assert.equal(result.data.url, 'https://example.com/file.pdf');
-  assert.equal(result.data.filename, 'file.pdf');
+  // 字段验证
+  assert.equal(result.downloaded, true);
+  assert.equal(result.url, 'https://example.com/file.pdf');
+  assert.equal(result.filename, 'file.pdf');
 
   // 成功无 nextSteps
   assert.equal(result.nextSteps, undefined);
@@ -76,7 +75,6 @@ test('download 失败: 缺少 url', async (t) => {
 
   assert.equal(result.ok, false, '无 url 时应返回错误');
   assert.match(result.summary, /url|有效|非空/, 'summary 应提示缺少 url');
-  assert.equal(result.data, undefined, '失败时不应有 data');
   assert.ok(Array.isArray(result.nextSteps), '验证失败时应提供 nextSteps');
 });
 

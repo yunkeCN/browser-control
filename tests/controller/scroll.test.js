@@ -14,6 +14,10 @@ const { scroll } = loadSourceModule('src/controller/commands/scroll.ts');
  *
  * 使用真实 HTTP fake daemon 测试 scroll 命令的完整执行流程：
  * validate -> execute daemon -> handle errors -> toResult -> CommandResult
+ *
+ * execute() 返回 response.data（即 daemon 响应体整体）
+ * toResult(raw) 从 raw.data 中读取 scrolled / newPosition
+ * 成功时 CommandResult 是扁平的: { ok, summary, scrolled, newPosition? }
  */
 
 test('scroll 成功: 基本滚动（deltaY）', async (t) => {
@@ -44,15 +48,14 @@ test('scroll 成功: 基本滚动（deltaY）', async (t) => {
 
   const result = await scroll({ deltaY: 800 }, client);
 
-  // 核心断言: ok + summary + data
+  // 核心断言: ok + summary（扁平结构）
   assert.equal(result.ok, true, 'ok 应为 true');
   assert.match(result.summary, /滚动/, 'summary 应包含「滚动」');
-  assert.match(result.summary, /y=800/, 'summary 应包含滚动位置');
+  assert.match(result.summary, /已滚动到 x=0, y=800/, 'summary 应包含滚动位置');
 
-  // data 验证
-  assert.ok(result.data, '成功时应有 data');
-  assert.equal(result.data.scrolled, true);
-  assert.equal(result.data.newPosition, '已滚动到 x=0, y=800');
+  // 扁平字段验证（不再嵌套在 result.data 中）
+  assert.equal(result.scrolled, true);
+  assert.equal(result.newPosition, '已滚动到 x=0, y=800');
 
   // 成功无 nextSteps
   assert.equal(result.nextSteps, undefined);
@@ -92,12 +95,43 @@ test('scroll 成功: 带 deltaX 和 deltaY', async (t) => {
   const result = await scroll({ deltaX: 300, deltaY: 500 }, client);
 
   assert.equal(result.ok, true);
-  assert.equal(result.data.scrolled, true);
-  assert.equal(result.data.newPosition, '已滚动到 x=300, y=500');
+  assert.equal(result.scrolled, true);
+  assert.equal(result.newPosition, '已滚动到 x=300, y=500');
 
   // 验证传递给 daemon 的参数
   assert.equal(fake.requests[0].args.deltaX, 300);
   assert.equal(fake.requests[0].args.deltaY, 500);
+});
+
+test('scroll 失败: scrolled=false 时返回错误', async (t) => {
+  const fake = createFakeDaemon({
+    onCommand: (envelope) => ({
+      id: envelope.id,
+      ok: true,
+      command: 'scroll',
+      backend: 'extension',
+      session: envelope.session,
+      tab: 42,
+      startedAt: new Date().toISOString(),
+      endedAt: new Date().toISOString(),
+      durationMs: 30,
+      data: {
+        scrolled: false,
+      },
+      artifacts: [],
+      error: null,
+      diagnostics: null,
+    }),
+  });
+  await fake.listen();
+  t.after(() => fake.close());
+
+  const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
+
+  const result = await scroll({ deltaY: 200 }, client);
+
+  assert.equal(result.ok, false);
+  assert.match(result.summary, /滚动未生效/);
 });
 
 test('scroll 失败: daemon 返回错误', async (t) => {

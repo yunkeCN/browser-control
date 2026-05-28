@@ -49,9 +49,8 @@ test('close_session 成功: 关闭当前会话', async (t) => {
   assert.match(result.summary, /会话已关闭/);
   assert.match(result.summary, /mcp-abc/);
 
-  assert.ok(result.data);
-  assert.equal(result.data.closed, true);
-  assert.equal(result.data.activeSession, 'mcp-abc');
+  assert.equal(result.closed, true);
+  assert.equal(result.activeSession, 'mcp-abc');
 
   assert.equal(result.nextSteps, undefined);
 
@@ -90,8 +89,7 @@ test('close_session 成功: 指定会话 ID', async (t) => {
   assert.equal(result.ok, true);
   assert.match(result.summary, /mcp-xyz/);
 
-  assert.ok(result.data);
-  assert.equal(result.data.closed, true);
+  assert.equal(result.closed, true);
 
   assert.equal(fake.requests[0].session, 'my-session');
 });

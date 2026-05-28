@@ -27,6 +27,14 @@ const SAMPLE_TREE_YAML = [
   '    - option "click"',
 ].join('\n');
 
+/**
+ * snapshot 集成测试
+ *
+ * execute() 返回 response.data（daemon 响应体整体）
+ * toResult(raw) 从 raw.data 中读取 title / url / snapshot / tree / stats.elementCount / refs / baselineTree / diff
+ * 成功时 CommandResult 是扁平的: { ok, summary, baselineId?, title, url, tree, elementCount, diff? }
+ */
+
 // ─── 测试用例 ────────────────────────────────────────────────────
 
 test('snapshot 成功: 返回 LLM-friendly 格式（含 YAML 树）', async (t) => {
@@ -65,14 +73,14 @@ test('snapshot 成功: 返回 LLM-friendly 格式（含 YAML 树）', async (t) 
   assert.match(result.summary, /12.*元素/);
   assert.match(result.summary, /Browser Control Fixture/);
 
-  assert.ok(result.data);
-  assert.equal(result.data.title, 'Browser Control Fixture');
-  assert.equal(result.data.url, 'https://example.com/debug');
-  assert.equal(result.data.elementCount, 12);
-  assert.ok(result.data.tree.includes('@e3_1'), 'YAML 树应包含 @e 引用');
-  assert.ok(result.data.tree.includes('textbox'), 'YAML 树应包含角色信息');
-  assert.ok(result.data.tree.includes('heading'), 'YAML 树应包含标题');
-  assert.ok(result.data.tree.includes('combo'), 'YAML 树应包含组合框');
+  // 扁平字段验证
+  assert.equal(result.title, 'Browser Control Fixture');
+  assert.equal(result.url, 'https://example.com/debug');
+  assert.equal(result.elementCount, 12);
+  assert.ok(result.tree.includes('@e3_1'), 'YAML 树应包含 @e 引用');
+  assert.ok(result.tree.includes('textbox'), 'YAML 树应包含角色信息');
+  assert.ok(result.tree.includes('heading'), 'YAML 树应包含标题');
+  assert.ok(result.tree.includes('combo'), 'YAML 树应包含组合框');
 
   // 验证传递给 daemon 的参数
   assert.equal(fake.requests[0].command, 'snapshot');
@@ -114,7 +122,7 @@ test('snapshot 成功: 带过滤条件', async (t) => {
   );
 
   assert.equal(result.ok, true);
-  assert.equal(result.data.elementCount, 3);
+  assert.equal(result.elementCount, 3);
   assert.equal(fake.requests[0].args.roles[0], 'button');
   assert.equal(fake.requests[0].args.hasVisibleText, true);
 });
@@ -141,7 +149,7 @@ test('snapshot 成功: 空页面', async (t) => {
   const result = await snapshot({}, client);
 
   assert.equal(result.ok, true);
-  assert.equal(result.data.elementCount, 0);
+  assert.equal(result.elementCount, 0);
   assert.match(result.summary, /0.*元素/);
 });
 
