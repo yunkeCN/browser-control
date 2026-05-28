@@ -20,7 +20,7 @@ The published Skill lives in `skills/browser-control/`. That directory is self-c
 - Read DOM snapshots and visible page text.
 - Click, fill, press keys, select options, and toggle controls.
 - Capture screenshots, PDFs, downloads, and other local artifacts.
-- Inspect network requests from the active browser session.
+- Inspect same-origin API network requests (auto-monitored per tab).
 - Reuse logged-in Chrome sessions while keeping all traffic on localhost.
 
 ## Requirements
@@ -36,8 +36,6 @@ Install it with the skills CLI:
 ```bash
 npx skills add yunkeCN/browser-control --skill browser-control
 ```
-
-This is also how skills.sh discovers and ranks community skills: installs through the `skills` CLI are counted anonymously unless users opt out of telemetry.
 
 For local development, install from this checkout:
 
@@ -91,7 +89,27 @@ Environment overrides:
 - `BROWSER_CONTROL_ARTIFACT_DIR`
 - `BROWSER_CONTROL_EXTENSION_DIR`
 
-## Command API
+## Commands
+
+Browser Control provides 15 commands, available through both CLI and MCP:
+
+| Command | Description |
+|---------|-------------|
+| `navigate` | Navigate to a URL |
+| `tabs` | List, switch, or close tabs |
+| `snapshot` | Capture page accessibility tree with @e refs |
+| `get_text` | Extract page text content |
+| `click` | Click element (by ref, text+position, or with network probe) |
+| `fill` | Fill form fields |
+| `press` | Press keyboard keys |
+| `scroll` | Scroll page or element |
+| `wait_for` | Wait for element/text/condition |
+| `capture` | Screenshot (png/jpeg) or PDF export |
+| `evaluate` | Execute JavaScript in page context |
+| `network` | Query auto-captured same-origin API requests |
+| `upload` | Upload local files |
+| `download` | Download files |
+| `close_session` | Close session and clean up |
 
 Commands are sent to `POST /command` as typed envelopes:
 
@@ -106,24 +124,26 @@ Commands are sent to `POST /command` as typed envelopes:
 }
 ```
 
-Supported browser commands include `navigate`, `find_tab`, `snapshot`, `get_text`, `scroll`, `click`, `click_probe`, `fill`, `press`, `wait_for`, `evaluate`, `screenshot`, `save_as_pdf`, `observe_start`, `observe_diff`, `network_start`, `network_list`, `network_detail`, `network_stop`, `upload`, `download`, `list_tabs`, `close_tab`, and `close_session`.
-
 See `skills/browser-control/references/api.md` for the full CLI and API reference.
+
+## MCP Server
+
+When used as an MCP server, each command is registered as an independent tool with typed schemas and annotations (`browser_navigate`, `browser_snapshot`, `browser_click`, etc.). See `docs/mcp.md` for setup and usage.
 
 ## Safety Model
 
 Browser Control is intentionally localhost-only by default. The daemon listens on `127.0.0.1`, the extension connects to the local daemon WebSocket, and artifacts are written to the user's local machine.
 
-Because Browser Control automates a real browser, the Chrome extension requests permissions to access pages, manage downloads, capture screenshots, and use debugger-backed browser operations. Agents should still ask before risky actions such as submitting forms, changing account settings, uploading local files, handling credentials, making purchases, or performing destructive operations. The Skill instructions define those confirmation boundaries in `skills/browser-control/SKILL.md`.
+Because Browser Control automates a real browser, agents should ask before risky actions such as submitting forms, changing account settings, uploading local files, handling credentials, making purchases, or performing destructive operations. The Skill instructions define those confirmation boundaries in `skills/browser-control/SKILL.md`.
 
-Snapshot and observation commands redact likely sensitive field values such as password, token, cookie, session, and API-key-like fields.
+Snapshot commands redact likely sensitive field values such as password, token, cookie, session, and API-key-like fields.
 
 ## Release Downloads
 
 Tagged GitHub releases publish two archives:
 
-- `browser-control-skill-<tag>.zip`: the complete `browser-control/` Skill directory, including `SKILL.md`, `scripts/`, `references/`, `extension/`, the bundled daemon runtime, and `scripts/browser-control-mcp.mjs`.
-- `browser-control-extension-<tag>.zip`: only the Chrome `extension/` directory, for users who just want to load the browser extension.
+- `browser-control-skill-<tag>.zip`: the complete `browser-control/` Skill directory.
+- `browser-control-extension-<tag>.zip`: only the Chrome `extension/` directory.
 
 Download release packages from <https://github.com/yunkeCN/browser-control/releases>.
 
@@ -131,20 +151,18 @@ Download release packages from <https://github.com/yunkeCN/browser-control/relea
 
 ```text
 browser-control/
-├── src/protocol.ts            # Editable protocol contract and validation source
-├── src/daemon/                # Editable daemon server and process-management source
-├── src/extension/             # Editable Chrome MV3 extension TypeScript source
-├── src/mcp/                   # Editable MCP server source
+├── src/protocol.ts            # Protocol contract and validation
+├── src/daemon/                # Daemon server and process management
+├── src/extension/             # Chrome MV3 extension TypeScript source
+├── src/mcp/                   # MCP server (individual tools per command)
+├── src/controller/            # Controller layer (CLI and MCP shared logic)
 ├── bin/                       # Generated MCP single-file runtime
 ├── skills/browser-control/    # Self-contained published Skill package
-├── .github/workflows/         # Tag-triggered release packaging
+├── contracts.ts               # Protocol contract types
 ├── tests/                     # Unit, integration, and fixture e2e tests
 ├── docs/                      # Maintainer docs and architectural notes
-├── contracts.ts               # Protocol contract for maintainers and tests
 └── package.json               # Development scripts and dependencies
 ```
-
-Generated Skill output is committed under `skills/browser-control/`: the loadable extension lives in `extension/`, and generated protocol/daemon/MCP runtime files live in `scripts/`. A root copy of the MCP runtime is also generated at `bin/browser-control-mcp.mjs`.
 
 ## Development
 

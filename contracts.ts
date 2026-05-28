@@ -9,7 +9,7 @@ export type ElementTarget = ElementRef | `css=${string}`;
 export type ClickTarget = ElementTarget;
 export type CaptureFormat = 'png' | 'jpeg' | 'pdf';
 export type TabsAction = 'list' | 'switch' | 'close';
-export type NetworkAction = 'start' | 'list' | 'detail' | 'stop';
+export type NetworkAction = 'list' | 'detail';
 export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'UNKNOWN_COMMAND'
@@ -57,7 +57,7 @@ export interface CommandArgs {
   wait_for: { selector?: string; text?: string; state?: 'visible' | 'attached' | 'hidden' | 'detached'; timeoutMs?: number; tabId?: number; expression?: string };
   evaluate: { code: string; tabId?: number };
   capture: { format?: CaptureFormat; tabId?: number; fileName?: string; quality?: number; paperFormat?: 'A4' | 'Letter'; landscape?: boolean; scale?: number; printBackground?: boolean };
-  network: { action: NetworkAction; filter?: string; tabId?: number; scope?: 'session' | 'tab'; limit?: number; method?: string; statusCode?: number; type?: string; sinceTimestampMs?: number; requestId?: string };
+  network: { action: NetworkAction; filter?: string; tabId?: number; limit?: number; method?: string; statusCode?: number; requestId?: string };
   upload: { target: ElementTarget; files: string[]; tabId?: number };
   download: { url: string; filename?: string; saveAs?: boolean };
   get_text: { tabId?: number; scope?: 'viewport' | 'document' | 'full'; maxChars?: number; includeRuns?: boolean; selector?: string };

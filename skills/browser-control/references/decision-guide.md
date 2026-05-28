@@ -23,7 +23,7 @@ Use this guide to decide whether to proceed automatically, retry, or ask the use
 | `UNKNOWN_COMMAND` | Unsupported command name or typo. | Check `references/api.md` and correct command. |
 | `STALE_ELEMENT_REFERENCE` or `Element not found` | Stale `@e<structureId>_<revision>` reference or selector mismatch. | Take fresh `snapshot`, rebuild locator, retry once with new target. |
 | Click/fill appears ignored | Site blocks synthetic events or target is custom UI. | Verify with a fresh snapshot; repair the locator, use `scroll` for obscured/below-fold targets, or retry with a deliberate click/fill strategy only if safe. |
-| Empty/partial network list | Capture started too late, filter/tab/method/status/type/time range too narrow, untimestamped requests were omitted by `sinceTimestampMs`, or traffic is not XHR/fetch API traffic. | Restart capture, repeat action, adjust `filter`, `tabId`, `method`, `statusCode`, `type`, `sinceTimestampMs`, or inspect non-API resource loads separately. |
+| Empty/partial network list | Monitoring started after the request fired, filter/tab/method/status too narrow, or traffic is not same-origin XHR/fetch API traffic. | Repeat the action so monitoring (automatic on navigate) captures it, adjust `filter`, `tabId`, `method`, `statusCode`, or inspect non-API resource loads separately. |
 
 ## User escalation decisions
 

@@ -9,9 +9,7 @@ let DAEMON_WS_URL = DEFAULT_DAEMON_WS_URL;
 export const RECONNECT_DELAY_MS = 2000;
 export const MAX_RECONNECT_DELAY_MS = 30000;
 export const KEEPALIVE_INTERVAL_MS = 20000; // Keep MV3 service worker + WebSocket alive.
-export const NETWORK_CAPTURE_LIMIT = 500;
 export const NETWORK_LIST_LIMIT = 100;
-export const NETWORK_STORAGE_PREFIX = 'agentBrowserNetworkCapture:';
 export const NETWORK_API_RESOURCE_TYPES = new Set(['fetch', 'xhr', 'xmlhttprequest']);
 
 export function getDaemonWsUrl(): string {

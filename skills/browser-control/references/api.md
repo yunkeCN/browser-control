@@ -13,10 +13,10 @@ Override host and port with `BROWSER_CONTROL_HOST` and `BROWSER_CONTROL_PORT`. O
 `GET /health`, `GET /status`, and `doctor --json` expose layered runtime metadata when available:
 
 - CLI expected protocol/runtime schema and CLI-known capabilities.
-- Daemon version, runtime schema, and daemon-owned capabilities such as `actionObservation`.
-- Extension manifest/build metadata and browser-side capabilities such as `navigateFinalMetadata`, observation primitives, CDP-backed actions, and DOM pointer fallback.
+- Daemon version, runtime schema, and daemon-owned capabilities.
+- Extension manifest/build metadata and browser-side capabilities such as `navigateFinalMetadata`, CDP-backed actions, and DOM pointer fallback.
 
-Missing legacy extension metadata is a warning rather than a global command blocker. A command fails with `UNSUPPORTED` only when it explicitly requests a feature that the connected runtime metadata shows is unavailable, for example `expectChange`/`observe` or click `after` observation without extension observation primitives.
+Missing legacy extension metadata is a warning rather than a global command blocker. A command fails with `UNSUPPORTED` only when it explicitly requests a feature that the connected runtime metadata shows is unavailable.
 
 ## CLI
 
@@ -45,9 +45,11 @@ Browser command helper examples:
 ```bash
 node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{}'
 node skills/browser-control/scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1"}'
-node skills/browser-control/scripts/browser-control.js command click_probe --session demo --args '{"target":"@e1jm0sbb_1","filter":"/api/"}'
+node skills/browser-control/scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1","probe":{"filter":"/api/"}}'
 node skills/browser-control/scripts/browser-control.js command scroll --session demo --args '{"deltaY":800,"strategy":"dom"}'
 node skills/browser-control/scripts/browser-control.js command evaluate --session demo --code-file ./snippet.js
+node skills/browser-control/scripts/browser-control.js command tabs --session demo --args '{"action":"list"}'
+node skills/browser-control/scripts/browser-control.js command capture --session demo --args '{"format":"png"}'
 ```
 
 Use `--args-file` for large JSON argument objects. Use `--code-file` only with `evaluate`; it reads UTF-8 JavaScript into `args.code` and avoids shell/JSON escaping. Browser Control intentionally does not support `codeBase64`.
@@ -76,18 +78,17 @@ Fields:
 - `args`: command-specific arguments.
 - `timeoutMs`: command timeout in milliseconds.
 
-Command arguments are strict. Unknown fields fail validation instead of being ignored, with a hint when a close canonical name exists; for example `find_tab` uses the canonical `*Includes` substring fields for URL and title matching.
+Command arguments are strict. Unknown fields fail validation instead of being ignored, with a hint when a close canonical name exists.
 
-## Result envelope
+## Result formats
 
-Responses include:
+Results differ by access layer:
 
-- `id`, `ok`, `command`, `backend`, `session`, `tab`
-- `startedAt`, `endedAt`, `durationMs`
-- `data` for normal command output
-- `artifacts` for generated files such as screenshots, PDFs, downloads, and large network bodies
-- `error` with stable `code`, `message`, optional `retryable`, and optional `details`
-- `diagnostics` for extra context when available
+**Raw daemon HTTP** (`POST /command`) returns a protocol envelope with `id`, `ok`, `command`, `backend`, `session`, `tab`, `startedAt`, `endedAt`, `durationMs`, `data` (nested command output), `artifacts`, `error`, and `diagnostics`.
+
+**Controller CLI** (`browser-control <command>`) returns a flat `CommandResult`: `ok`, `summary`, `nextSteps`, `baselineId`, plus command-specific business fields at the top level (no `data` wrapper).
+
+**MCP tools** (`browser_*`) return the same flat `CommandResult` via `structuredContent`, with `summary` as the primary text content.
 
 Common error codes: `VALIDATION_ERROR`, `UNKNOWN_COMMAND`, `TIMEOUT`, `BACKEND_UNAVAILABLE`, `BACKEND_ERROR`, `UNSUPPORTED`, and `NOT_FOUND`.
 
@@ -119,19 +120,31 @@ Stable response fields:
 - `warnings`: actionable warnings, including navigation timeout/degraded metadata notes.
 - `network`: API-focused network capture diagnostics. Browser Control intentionally creates an `about:blank` tab first for new navigations so network capture can attach before target page requests begin.
 
-### `find_tab`
+### `tabs`
 
-Find an existing tab by URL, title, or active state.
+Manage tabs in the current session: list, switch, or close.
 
-Arguments: optional `urlIncludes`, `titleIncludes`, `active`, `tabId`, and `attach`. By default the first match is attached to the session and session-scoped network capture is extended to that tab; pass `attach:false` for lookup-only behavior. Older `attach_tab` calls are accepted as a compatibility alias for `find_tab` with `attach:true`, but new agent code should use `find_tab`.
+Arguments: optional `action` (`list`, `switch`, or `close`; defaults to `list`), plus action-specific options.
+
+- `action:"list"`: list all tabs known to the session. No additional arguments required.
+- `action:"switch"`: find and attach a tab by URL, title, or tab ID. Optional `urlIncludes`, `titleIncludes`, `active`, and `tabId`. The matched tab is attached to the session and session-scoped network capture is extended to it.
+- `action:"close"`: close the current tab, or pass optional `tabId` to close a specific session tab.
+
+```json
+{"command":"tabs","args":{"action":"list"}}
+{"command":"tabs","args":{"action":"switch","urlIncludes":"example.com"}}
+{"command":"tabs","args":{"action":"switch","tabId":123}}
+{"command":"tabs","args":{"action":"close"}}
+{"command":"tabs","args":{"action":"close","tabId":456}}
+```
 
 ### `snapshot`
 
 Return a Playwright-inspired ARIA snapshot for interaction and page structure. Snapshot is optimized for choosing actionable targets, not for dumping all page prose; use `get_text` when you mainly need readable page text.
 
-Arguments: optional `tabId`, `roles`, `tags`, `hasVisibleText`, `textIncludes`, `viewportOnly`, `boxes`, and `baseline`.
+Arguments: optional `tabId`, `roles`, `tags`, `hasVisibleText`, `textIncludes`, `viewportOnly`, `boxes`, and `diff_to`.
 
-When `baseline` is provided, the first call with a given baseline ID stores the current DOM structure tree. A subsequent call with the same baseline ID returns a structured diff showing added, removed, and changed subtrees instead of the full snapshot. Use this to see what DOM structure changed between two points in time without re-reading the entire tree.
+When `diff_to` is provided, the first call with a given ID stores the current DOM structure tree. A subsequent call with the same ID returns a structured diff showing added, removed, and changed subtrees instead of the full snapshot. Use this to see what DOM structure changed between two points in time without re-reading the entire tree.
 
 Response semantics:
 
@@ -141,7 +154,7 @@ Response semantics:
 - `refs` is the actionable reference index. It contains refs, roles, names, direct text, selectors, boxes, and safe input attributes.
 - The tree is built from visible or ARIA-visible nodes, includes generic roles only when they carry useful structure, normalizes text runs, collapses noisy single-child generic wrappers, and assigns refs only to visible pointer-receiving elements.
 - `boxes:true` adds viewport-relative boxes to the rendered snapshot text and tree.
-- If `snapshot` text exceeds 100k characters, Browser Control stores the full JSON snapshot as a local `snapshot` artifact, returns a short preview with `data.artifact`, and includes filtering guidance. Narrow large pages with `textIncludes`, `roles`, `tags`, `hasVisibleText:true`, or `viewportOnly:true`.
+- If `snapshot` text exceeds 100k characters, Browser Control stores the full JSON snapshot as a local `snapshot` artifact, returns a short preview with `artifact`, and includes filtering guidance. Narrow large pages with `textIncludes`, `roles`, `tags`, `hasVisibleText:true`, or `viewportOnly:true`.
 - Likely sensitive input values, such as password/token/secret/session/cookie/API-key fields, are redacted by default with `attributes.redacted:true` and optional `valueLength`.
 - `@e` references use the format `@e<structureId>_<revision>`. They are page-state references scoped to the latest snapshot of the current document, not permanent selectors. For element actions, pass the ref as `target`; CSS fallback must be explicit with `target:"css=..."`. Refresh the snapshot after navigation, dialog reconstruction, filtering, list reordering, or significant DOM changes. Browser Control rejects stale revisions with `STALE_ELEMENT_REFERENCE` rather than acting on a changed element.
 - Design notes live in `docs/adr-snapshot-aria-ai.md`.
@@ -151,55 +164,50 @@ Examples:
 ```bash
 node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"viewportOnly":true,"hasVisibleText":true}'
 node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"roles":["button","link","textbox","combobox"],"viewportOnly":true}'
-node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"baseline":"page-1"}'   # first call stores baseline
-node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"baseline":"page-1"}'   # second call returns diff
+node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"diff_to":"page-1"}'   # first call stores baseline
+node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"diff_to":"page-1"}'   # second call returns diff
 ```
 
 ### `click`
 
-Click an element by strict snapshot ref or an explicit CSS fallback.
+Click an element by snapshot ref, CSS fallback, or visible text coordinates.
 
-Arguments: `target` required, optional `tabId`, `after`, and `baseline`.
+Arguments: `target` or `text` required (mutually exclusive), optional `tabId`, `x`, `y`, `roles`, `force`, and `probe`.
+
+Target mode (ref or CSS):
 
 - `target:"@e<structureId>_<revision>"` uses a fresh snapshot ref.
 - `target:"css=<selector>"` is the explicit CSS fallback when no snapshot ref is available.
-- `after` defaults to `"auto"` (returns summary + postSnapshot when changes are detected). Use `"none"` for a raw click, or `"snapshot"` to always return a post-click snapshot.
-- `baseline` pairs with a snapshot baseline ID. When provided, the click response includes a structured DOM diff (added/removed/changed subtrees) comparing the post-click DOM against the stored snapshot baseline.
+
+Text mode:
+
+- `text` specifies visible text to click. `x` and `y` are required in text mode as viewport-relative coordinates of the text target. Optional `roles` to narrow by ARIA role.
+
+Common options:
+
+- `force`: skip visibility checks and click even if the element is covered or hidden.
+- `probe`: intercept matching API requests at the CDP level so the server never receives them. The `probe` object accepts: `filter` (URL substring to match), `includeHeaders` (default `true`), `includeBody` (default `true`), `redactSensitive` (default `true`), and `maxRequests` (default `100`). When `filter` is set, only API requests whose URL includes the filter are blocked and returned; nonmatching requests continue normally. Probe is not a full dry run: the click still executes on the page and may change frontend state, storage, dialogs, or route state — only the matching network requests are prevented from reaching the server.
 
 Browser Control chooses the click strategy internally: it prefers real CDP mouse input when safe, then falls back to DOM pointer events. Diagnostics may include `strategyUsed`, `target`, `hitTest`, `focusBefore`, `focusAfter`, `newTab` / `newTabs`, `settle`, `changes`, `postSnapshot`, and `warnings`. Covered targets fail with `COVERED_TARGET`; take a fresh snapshot, close the overlay, or choose a visible child target.
 
-For `after:"auto"` and `after:"snapshot"`, Browser Control waits briefly for the page to settle before computing changes. Defaults are `initialDelayMs:80`, `stableWindowMs:120`, and `timeoutMs:700`. `after:"auto"` includes a post snapshot when it detects a new tab, URL/title change, focus change, or visible text change. If the post snapshot text exceeds 100k characters, the full JSON snapshot is stored as a `snapshot` artifact and the response includes filtering guidance.
-
 ```json
-{"command":"click","args":{"target":"@e1jm0sbb_1","after":"auto"}}
-{"command":"click","args":{"target":"@e1jm0sbb_1","baseline":"page-1"}}
-```
-
-### `click_probe`
-
-Click an element while blocking matching API requests before they reach the server. Use this to inspect write-like request URLs and parameters during exploration without intentionally creating server-side data.
-
-Arguments: `target` required, optional `tabId`, `strategy`, `force`, `button`, `clickCount`, `modifiers`, `observeNewTab`, `expectNewTab`, `waitMs`, `filter`, `includeHeaders`, `includeBody`, `redactSensitive`, and `maxRequests`.
-
-Defaults: `waitMs:1000`, `includeHeaders:true`, `includeBody:true`, `redactSensitive:true`, and `maxRequests:100`. By default Browser Control blocks and returns fetch/XHR/XMLHttpRequest requests; when `filter` is set, only API requests whose URL includes the filter are blocked and returned. Nonmatching requests continue normally.
-
-`click_probe` is not a full dry run. The page click still happens and may change frontend state, storage, dialogs, route state, or newly opened tabs. The v1 guarantee is limited to matching requests intercepted on the current tab before reaching the server. If a click opens a new tab, Browser Control warns that the new tab's first requests may not be blocked.
-
-```json
-{"command":"click_probe","args":{"target":"@e1jm0sbb_1","filter":"/api/","waitMs":1000}}
+{"command":"click","args":{"target":"@e1jm0sbb_1"}}
+{"command":"click","args":{"target":"css=.submit-btn","force":true}}
+{"command":"click","args":{"text":"Submit","x":400,"y":300}}
+{"command":"click","args":{"target":"@e1jm0sbb_1","probe":{"filter":"/api/","includeBody":true}}}
 ```
 
 ### `fill`
 
 Clear and fill an input, textarea, contenteditable element, or select.
 
-Arguments: `target` and `value` required; optional `tabId`, `strategy`, `clear`, `commit`, `expectChange`, and `observe`.
+Arguments: `target` and `value` required; optional `tabId`, `strategy`, `clear`, and `commit`.
 
 Strategies:
 
 - `native_setter` default: use the native value setter plus input/change style events for framework compatibility.
-- `text_input`: reserved for a typed-text style implementation.
-- `paste_like`: reserved for paste-like input semantics.
+- `text_input`: accepted for forward compatibility; currently behaves as native_setter.
+- `paste_like`: accepted for forward compatibility; currently behaves as native_setter.
 
 `clear` controls whether existing text is cleared first. `commit` may be `change`, `blur`, `enter`, or `none`. Sensitive fields such as password/token inputs should report redacted diagnostics and lengths rather than values.
 
@@ -213,7 +221,7 @@ Use `value` exactly:
 
 Press a keyboard key, optionally targeting an element first.
 
-Arguments: `key` required, optional `target`, `tabId`, `strategy`, `modifiers`, `expectChange`, `observe`, `observeNewTab`, and `expectNewTab`.
+Arguments: `key` required, optional `target`, `tabId`, `strategy`, and `modifiers`.
 
 Strategies:
 
@@ -223,26 +231,19 @@ Strategies:
 
 Press diagnostics may include key/code/modifier data, focused target before and after the action, `strategyUsed`, `newTab` / `newTabs` when the key opens another tab, and `warnings`.
 
-### Action observation options
-
-`click` performs post-click observation through its `after` option. `fill` and `press` can request action-coupled observation with `expectChange` and `observe`. When enabled, Browser Control may capture a pre-action baseline and a post-action diff. The returned `actionObservation` summarizes visible text and optional network changes. A no-delta result is a warning for the agent to inspect with `snapshot` or `observe_diff` before repeating the action.
-
-`observe` options are intentionally small and stable: optional `baselineId`, `includeNetwork`, `waitMs`, and the `observe_diff` caps such as `maxAdded`, `maxRemoved`, and `maxSummaryChars`. Command result shapes for browser actions remain intentionally loose because pages and fallback strategies produce dynamic diagnostics; stable fields are the result envelope, documented action diagnostics, and optional `actionObservation`.
-
-
 ### `scroll`
 
-Scroll the document, a selected scroll container, or a viewport point/region without relying on keyboard keys. Use this for pages where `Space`, `PageDown`, or `End` may be intercepted by a focused media/player area.
+Scroll the page or a specific element. Use this instead of keyboard keys for scrolling, especially on pages where `Space`/`PageDown` may be intercepted.
 
 Arguments: optional `target`, `tabId`, `strategy` (`auto`, `dom`, or `wheel`), `deltaX`, `deltaY`, `x`, `y`, `region`, `steps`, `block`, `behavior`, and `waitMs`.
 
 Strategies:
 
-- `auto` default: use wheel input when `x`, `y`, or `region` is provided; otherwise use DOM document/container scrolling. If wheel/CDP input is unavailable in auto mode, Browser Control falls back to DOM scrolling with a warning.
-- `dom`: scroll `document.scrollingElement` or the nearest scrollable container inferred from `target`. Mode is inferred from arguments: target-only means `scrollIntoView`; `x`/`y` means absolute offsets; `deltaX`/`deltaY` means relative scrolling. A legacy `mode` override is still accepted for compatibility but is no longer part of the recommended command surface.
-- `wheel`: dispatch Chrome debugger mouse-wheel input at viewport coordinates. For wheel, `x` and `y` are CSS-pixel viewport coordinates; explicit wheel failures are recoverable instead of silently falling back.
+- `auto` (default): picks the best method based on arguments — wheel when viewport coordinates are provided, DOM scrolling otherwise.
+- `dom`: scrolls via DOM APIs (`element.scrollBy`, `scrollIntoView`). Use `deltaX`/`deltaY` for relative scrolling, `target` for scrolling an element into view.
+- `wheel`: dispatches Chrome mouse-wheel events at viewport coordinates (`x`, `y` in CSS pixels).
 
-Responses include `ok`, `target`, `strategyUsed`, `before`, `after`, `movedX`, `movedY`, optional `attemptedDeltaX`/`attemptedDeltaY` for wheel input, optional `atBoundary`, and optional `warnings`. `movedX`/`movedY` are measured movement, not requested delta.
+Responses include `ok`, `strategyUsed`, `before`, `after`, `movedX`, `movedY`, optional `atBoundary`, and optional `warnings`. `movedX`/`movedY` are measured movement, not requested delta.
 
 ```json
 {"command":"scroll","args":{"deltaY":800,"strategy":"dom"}}
@@ -281,7 +282,7 @@ Arguments: `code` required, optional `tabId`.
 {"command":"evaluate","args":{"code":"(() => ({ title: document.title }))()"}}
 ```
 
-Successful evaluations return JSON-compatible data at `data.result`. Undefined results are normalized to `null` with `data.serialization.undefinedResult=true`, so agents can distinguish "no value returned" from a transport failure. DOM nodes, errors, circular references, functions, symbols, and very large structures are sanitized with caps; when this happens, `data.serialization.warnings` and/or `data.serialization.truncated` explain the conversion.
+Successful evaluations return JSON-compatible data at `result`. Undefined results are normalized to `null` with `serialization.undefinedResult=true`, so agents can distinguish "no value returned" from a transport failure. DOM nodes, errors, circular references, functions, symbols, and very large structures are sanitized with caps; when this happens, `serialization.warnings` and/or `serialization.truncated` explain the conversion.
 
 Prefer explicit `return ...` for multi-statement snippets to avoid accidental `undefined` results.
 
@@ -302,107 +303,43 @@ The default viewport scope reuses the same visible-text extraction semantics as 
 {"command":"get_text","args":{"scope":"full","maxChars":5000,"selector":".search-results"}}
 ```
 
-### `screenshot`
+### `capture`
 
-Capture a viewport screenshot.
+Capture the current page as a screenshot or PDF.
 
-Arguments: optional `tabId`, `format` (`png` or `jpeg`), `quality`.
+Arguments: optional `tabId`, `format` (`png`, `jpeg`, or `pdf`).
 
-When Browser Control knows the target session tab, it may briefly bring that tab
-to the front so the screenshot matches the returned tab metadata, then
-best-effort restores the previously active tab. Responses may include
-`activatedTabForCapture` and `restoredActiveTabId` diagnostics.
+For image formats (`png`, `jpeg`): optional `quality`. When Browser Control knows the target session tab, it may briefly bring that tab to the front so the capture matches the returned tab metadata, then best-effort restores the previously active tab. Responses may include `activatedTabForCapture` and `restoredActiveTabId` diagnostics.
+
+For PDF format: optional `paperFormat`, `landscape`, `scale`, `printBackground`, `fileName`. Chrome permissions may restrict PDF export on some pages.
 
 Use `node skills/browser-control/scripts/screenshot.js` for routine screenshots so the agent receives a file path instead of large image data.
 
-The daemon persists returned screenshot base64 into an artifact and strips the raw payload from the normal envelope. Consumers should use `data.artifact.path` or `artifacts[0].path`; `scripts/screenshot.js` accepts both artifact-backed and raw-base64 response shapes.
+The daemon persists returned screenshot/PDF data into an artifact and strips the raw payload from the normal envelope. Consumers should use `artifact.path` or `artifacts[0].path`.
 
-### `save_as_pdf`
-
-Export a page as PDF when Chrome permissions allow it.
-
-Arguments: optional `tabId`, `paper_format`, `landscape`, `scale`, `print_background`, `file_name`.
+```json
+{"command":"capture","args":{"format":"png"}}
+{"command":"capture","args":{"format":"jpeg","quality":80}}
+{"command":"capture","args":{"format":"pdf","paperFormat":"A4","landscape":true}}
+```
 
 ### Network commands
 
-- `network_start`: start or reset API-focused capture; optional args `filter`, `tabId`, and `scope` (`session` or `tab`). `filter`, when provided, must be a URL substring string. Session-scoped capture tracks tabs associated with the session and extends when `navigate` or attached `find_tab` adds a tab. Resource loads such as images, CSS, fonts, scripts, and documents are intentionally excluded to keep the buffer focused on XHR/fetch API traffic.
-- `network_list`: list captured requests; optional args `filter`, `sinceTimestampMs`, `limit`, `tabId`, `method`, `statusCode`, and `type`. `filter`, when provided, must be a URL substring string; omit it for no filtering. `method`, `statusCode`, and `type` narrow by request metadata; `tabId` narrows session-scoped capture to one tab. `limit` is clamped to 1..100 (`NETWORK_LIST_LIMIT`). When `sinceTimestampMs` is used, requests without a comparable timestamp are excluded and counted in `omittedUntimestamped`.
-- `network_detail`: fetch request/response detail by `requestId`. Detail responses may merge matching webRequest and CDP records and expose `ids` plus `mergeConfidence`; ambiguous records are not silently merged.
-- `network_stop`: stop capture and clear persisted capture state.
+Network monitoring is automatic. `navigate` starts API-focused network capture for the session before page load. There are no explicit start or stop commands. Monitoring captures only same-origin XHR/fetch requests, with a per-tab limit of 100 entries. Resource loads such as images, CSS, fonts, scripts, and documents are intentionally excluded to keep the buffer focused on API traffic.
 
-`navigate` also starts API-focused network capture for the session before page load.
-
-### Observation commands
-
-The Action Observation Layer is specified in `docs/adr-action-observation-layer.md`. Use it when an agent needs to know what visible text and API/network activity changed after ordinary browser actions. Observation reads visible page text, so keep the existing sensitive-data and confirmation boundaries.
-
-#### `observe_start`
-
-Capture a viewport-text baseline for the current session tab and store it in daemon-managed short-lived baseline storage. The full baseline is not returned by default.
-
-Arguments: optional `tabId`, optional `mode` (`viewport_text`), optional `baselineId`, optional `includeNetworkMarker`, optional `maxTextChars`, optional `maxTextRuns`.
-
-Response data:
+- `network` with `action:"list"`: list captured requests. Optional args `filter` (URL substring string), `limit`, `tabId`, `method`, and `statusCode`. `method` and `statusCode` narrow by request metadata; `tabId` narrows to a specific tab. `limit` is clamped to 1..100.
+- `network` with `action:"detail"`: fetch request/response detail by `requestId`. Detail responses may merge matching webRequest and CDP records and expose `ids` plus `mergeConfidence`; ambiguous records are not silently merged.
 
 ```json
-{
-  "baselineId": "obs_20260520_abc123",
-  "session": "demo",
-  "tabId": 123,
-  "url": "https://example.com/page",
-  "title": "Example",
-  "observedAt": "2026-05-20T06:00:00.000Z",
-  "navigationKey": "123:https://example.com/page",
-  "networkMarker": { "markerId": "net_20260520_abc123", "timestampMs": 1779256800000 },
-  "summary": { "textRunCount": 42, "visibleTextChars": 1800, "truncated": false }
-}
+{"command":"network","args":{"action":"list","filter":"/api/"}}
+{"command":"network","args":{"action":"list","method":"POST","limit":20}}
+{"command":"network","args":{"action":"detail","requestId":"req-abc123"}}
 ```
-
-#### `observe_diff`
-
-Capture the current viewport text, compare it with a stored baseline, and return a capped added/removed visible-text delta plus optional network requests since the baseline marker.
-
-Arguments: `baselineId` required, optional `tabId`, optional `includeCurrent`, optional `includeNetwork`, optional `maxAdded`, optional `maxRemoved`, optional `maxSummaryChars`, optional `allowStaleNavigationDiff`.
-
-Response data:
-
-```json
-{
-  "baselineId": "obs_20260520_abc123",
-  "session": "demo",
-  "tabId": 123,
-  "urlChanged": false,
-  "stale": false,
-  "summary": "Visible text added: Saved successfully. Removed: Submitting.",
-  "textDiff": {
-    "addedText": ["Saved successfully"],
-    "removedText": ["Submitting"],
-    "truncated": false
-  },
-  "network": {
-    "sinceMarkerId": "net_20260520_abc123",
-    "sinceTimestampMs": 1779256800000,
-    "requestCount": 1,
-    "requests": [{ "requestId": "...", "method": "POST", "url": "/api/save", "status": 200 }],
-    "truncated": false
-  }
-}
-```
-
-Constraints:
-
-- Baselines are scoped to `session + tabId + baselineId`; cross-tab diff is invalid unless a future command explicitly supports it.
-- Navigation invalidates baselines for the navigated tab; if stale baseline data is available, different-origin navigation should not compute text diff by default.
-- Output is capped by default. Large observations should become local artifacts rather than raw response payloads.
-- Network correlation is \"requests since marker\", not proof that a request was caused by an action.
-- Visible text may contain sensitive data; do not log full observations or paste full artifacts unless appropriate and user-authorized.
 
 ### File and tab commands
 
 - `upload`: args `target`, `files`, optional `tabId`. Browser security may require user cooperation.
 - `download`: args `url` required, optional `filename` and `saveAs`. The extension currently waits up to 30 seconds for Chrome download completion/interruption metadata.
-- `list_tabs`: list tabs known to the session.
-- `close_tab`: close the current tab, or pass optional `tabId` to close a specific session tab.
 - `close_session`: close all tabs in the session and remove session state; no arguments.
 
 ## Installed skill layout

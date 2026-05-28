@@ -12,8 +12,8 @@
 import type { DaemonClient } from '../../mcp/daemon-client';
 import type { CommandResult } from '../types';
 import { runCommand, type CommandDefinition } from '../runner';
-import { executeClickProbe, type ClickProbeInput, type ClickProbeData, toClickProbeResult } from './click-probe';
-import { executeClickText, type ClickTextInput, type ClickTextData, toClickTextResult } from './click-text';
+import { executeClickProbe, type ClickProbeData, toClickProbeResult } from './click-probe';
+import { executeClickText, type ClickTextData, toClickTextResult } from './click-text';
 
 // ─── 类型定义 ────────────────────────────────────────────────────
 

@@ -92,12 +92,10 @@ export const COMMANDS: Record<string, CommandSpec> = {
   wait_for: { required: [], optional: ['selector', 'text', 'state', 'timeoutMs', 'tabId', 'expression'] },
   evaluate: { required: ['code'], optional: ['tabId'], example: { code: 'return { title: document.title }' } },
   capture: { required: [], optional: ['format', 'tabId', 'fileName', 'quality', 'paperFormat', 'landscape', 'scale', 'printBackground'] },
-  network: { required: ['action'], optional: ['filter', 'tabId', 'scope', 'limit', 'method', 'statusCode', 'type', 'sinceTimestampMs', 'requestId'] },
+  network: { required: ['action'], optional: ['filter', 'tabId', 'limit', 'method', 'statusCode', 'requestId'] },
   // daemon-internal commands (not exposed via MCP, but needed for daemon protocol validation)
-  network_start: { required: [], optional: ['filter', 'tabId', 'scope'] },
-  network_list: { required: [], optional: ['filter', 'sinceTimestampMs', 'limit', 'tabId', 'method', 'statusCode', 'type'] },
+  network_list: { required: [], optional: ['filter', 'sinceTimestampMs', 'limit', 'tabId', 'method', 'statusCode'] },
   network_detail: { required: ['requestId'] },
-  network_stop: { required: [] },
   upload: { required: ['target', 'files'], optional: ['tabId'] },
   download: { required: ['url'], optional: ['filename', 'saveAs'] },
   get_text: { required: [], optional: ['tabId', 'scope', 'maxChars', 'includeRuns', 'selector'], example: { scope: 'full', maxChars: 4000, includeRuns: true } },
@@ -417,10 +415,8 @@ export function mapNetworkCommand(command: string, args: any) {
     case 'scroll':
     case 'upload':
       return { command, args: mapTargetArgs(args) };
-    case 'network_start': return { command: 'network', args: { ...args, cmd: 'start' } };
     case 'network_list': return { command: 'network', args: { ...args, cmd: 'list' } };
     case 'network_detail': return { command: 'network', args: { ...args, cmd: 'detail' } };
-    case 'network_stop': return { command: 'network', args: { ...args, cmd: 'stop' } };
     default: return { command, args };
   }
 }

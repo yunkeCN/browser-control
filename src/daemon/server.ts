@@ -808,11 +808,12 @@ async function runActionWithObservation(request, mapped) {
 }
 
 async function runClick(request, mapped) {
+  const clickStartMs = Date.now();
+
   const start = await handleObserveStart({
     ...request,
     args: {
       tabId: request.args.tabId,
-      includeNetworkMarker: true
     }
   });
 
@@ -830,18 +831,42 @@ async function runClick(request, mapped) {
     args: {
       baselineId: start.data.baselineId,
       tabId: start.data.tabId,
-      includeNetwork: true,
+      includeNetwork: false,
       allowStaleNavigationDiff: true
     }
   }, settled.observation);
 
   const changes = summarizeActionObservation(diff.data, false);
 
+  // Query auto-monitored network records since click started
+  let network = null;
+  try {
+    const networkList = await sendCommandToExtension(request.session, 'network', {
+      cmd: 'list',
+      sinceTimestampMs: clickStartMs,
+      limit: 50
+    }, request.timeoutMs);
+    const requests = Array.isArray(networkList?.requests) ? networkList.requests : [];
+    if (requests.length > 0) {
+      network = {
+        requests: requests.map((r: any) => ({
+          requestId: r.id || r.requestId || null,
+          method: r.method || null,
+          url: r.url || null,
+          statusCode: r.statusCode || null,
+          type: r.type || null,
+        })),
+        count: requests.length
+      };
+    }
+  } catch { /* network query is best-effort */ }
+
   const data = result && typeof result === 'object' && !Array.isArray(result)
     ? { ...result }
     : { clicked: Boolean(result), result };
   data.settle = settled.settle;
   data.changes = changes;
+  if (network) data.network = network;
 
   // If the click mechanism reported failure but the pipeline detected
   // meaningful page changes, trust the evidence.

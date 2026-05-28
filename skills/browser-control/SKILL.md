@@ -30,14 +30,14 @@ The daemon listens on `http://127.0.0.1:10087` by default and the extension conn
 1. Choose a unique `session` name for the task, such as `research-<topic>` or `checkout-review`.
 2. Start or reuse the singleton daemon: `node scripts/browser-control.js start --json`.
 3. Run `node scripts/browser-control.js doctor --json` and proceed only when the daemon is reachable and `extension_connected` is true.
-4. Navigate with `navigate`, or find/attach an existing tab with `find_tab` (default attach; pass `attach:false` for lookup only).
+4. Navigate with `navigate`, or find/attach an existing tab with `tabs` (action: `switch`; default attaches the matched tab).
 5. Take a fresh `snapshot` before every element interaction. Snapshot is a compact structure/interaction view, not a full text dump; use `get_text` for reading page prose. On noisy pages, use filters such as `hasVisibleText`, `viewportOnly`, `textIncludes`, `roles`, and `tags`.
-6. Use `@e` references from the latest snapshot as `target` for `click`, `click_probe`, `fill`, `press`, `scroll`, and `upload`; refresh the snapshot after navigation or significant DOM changes. Stale revisions fail closed with `STALE_ELEMENT_REFERENCE`. Use `scroll` for non-keyboard page or region scrolling; use `target:"css=..."` only when a snapshot ref is unavailable.
-7. Let `click` choose its internal strategy. Inspect `warnings`, `hitTest`, `changes`, and `postSnapshot` before retrying. For `fill` and `press`, use default strategies first.
+6. Use `@e` references from the latest snapshot as `target` for `click`, `fill`, `press`, `scroll`, and `upload`; refresh the snapshot after navigation or significant DOM changes. Stale revisions fail closed with `STALE_ELEMENT_REFERENCE`. Use `scroll` for non-keyboard page or region scrolling; use `target:"css=..."` only when a snapshot ref is unavailable.
+7. Let `click` choose its internal strategy. Inspect `warnings` and the returned diagnostics before retrying. For `fill` and `press`, use default strategies first.
 8. Covered click targets fail with `COVERED_TARGET`; prefer fixing the target locator, closing the overlay, or choosing a visible child target.
-9. Verify important state-changing actions with click `after`, `expectChange`, `observe_start` / `observe_diff`, `snapshot`, `wait_for`, or `node scripts/screenshot.js` when visual evidence matters. For DOM structure diffs, store a snapshot baseline with `snapshot baseline=<id>`, perform the action, then call `snapshot baseline=<id>` again or use `click baseline=<id>` to get structured added/removed/changed subtrees.
+9. Verify important state-changing actions with `snapshot` (with `diff_to` to detect DOM changes), `wait_for`, or `capture` when visual evidence matters. For DOM structure diffs, take a snapshot (note its `baselineId`), perform the action, then call `snapshot diff_to=<baselineId>` to get structured added/removed/changed subtrees.
 10. Stop and ask before sensitive, destructive, account-changing, purchase/payment, upload, submit/send/post/publish, credential, MFA, or permission-grant actions.
-11. Close task-specific tabs or sessions with `close_tab` / `close_session` when finished.
+11. Close task-specific tabs or sessions with `tabs` (action: `close`) / `close_session` when finished.
 
 ## Command API
 
@@ -46,8 +46,8 @@ Send typed command envelopes to `POST http://127.0.0.1:10087/command` or use the
 ```bash
 node scripts/browser-control.js command snapshot --session demo --args '{}'
 node scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1"}'
-node scripts/browser-control.js command click_probe --session demo --args '{"target":"@e1jm0sbb_1"}'
-node scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1","after":"snapshot"}'
+node scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1","probe":{"filter":"/api/","includeBody":true}}'
+node scripts/browser-control.js command click --session demo --args '{"text":"Submit","x":200,"y":300}'
 node scripts/browser-control.js command fill --session demo --args '{"target":"@e0abc12_1","value":"draft text"}'
 node scripts/browser-control.js command get_text --session demo --args '{"scope":"viewport","maxChars":4000}'
 node scripts/browser-control.js command scroll --session demo --args '{"deltaY":800,"strategy":"dom"}'
@@ -70,11 +70,13 @@ Envelope shape:
 }
 ```
 
-Common commands: `navigate`, `find_tab`, `snapshot`, `click`, `click_probe`, `fill`, `press`, `scroll`, `wait_for`, `evaluate`, `get_text`, `screenshot`, `save_as_pdf`, `observe_start`, `observe_diff`, `network_start`, `network_list`, `network_detail`, `network_stop`, `upload`, `download`, `list_tabs`, `close_tab`, and `close_session`.
+Controller CLI and MCP tools return a flat result: `ok`, `summary`, `nextSteps`, `baselineId`, plus command-specific fields at the top level. Raw daemon HTTP (`POST /command`) wraps output in a protocol envelope with a nested `data` field; see `references/api.md` for format differences by layer.
+
+Common commands: `navigate`, `tabs`, `snapshot`, `click`, `fill`, `press`, `scroll`, `wait_for`, `evaluate`, `get_text`, `capture`, `network`, `upload`, `download`, and `close_session`.
+
+MCP tools are registered as individual tools: `browser_navigate`, `browser_tabs`, `browser_snapshot`, `browser_get_text`, `browser_click`, `browser_fill`, `browser_press`, `browser_scroll`, `browser_wait_for`, `browser_capture`, `browser_evaluate`, `browser_network`, `browser_upload`, `browser_download`, `browser_close_session`, plus `browser_status` and `browser_doctor` for diagnostics.
 
 Load `references/api.md` for the full command and CLI reference.
-
-Action commands return diagnostics when available: `strategyUsed`, `target`, `hitTest`, `focusBefore`, `focusAfter`, `newTab` / `newTabs` for actions that open another tab, `warnings`, and observation details. `click` returns `changes` by default and may return `postSnapshot` after the page settles. If a click reports no observable change, inspect whether another element covered the target before retrying.
 
 Snapshot redacts likely sensitive field values by default (`password`, token/secret/session/cookie/API-key-like fields). If you need page text rather than targets, prefer `get_text` so the agent does not spend context on layout containers. For below-fold or scrollable-region text, use `scroll` plus `get_text` instead of using `evaluate` as a scrolling workaround.
 
@@ -91,7 +93,9 @@ Load `references/recipes.md` for task playbooks:
 - download files
 - clean up sessions
 
-For quick single-action verification, use click `after` or use `expectChange` / `observe` with `fill` and `press`. For multi-step debugging or broader before/after checks, call `observe_start`, perform normal reversible actions, then call `observe_diff` to get capped added/removed visible text and network requests since the baseline marker. This does not prove request causation and may include sensitive visible text; keep summaries compact.
+For quick single-action verification, use `snapshot diff_to` to compare DOM structure before and after. For network interception during a click, use `click` with the `probe` parameter to block matching API requests before they reach the server. Note: probe is not a dry run — the click still happens and may change frontend state, storage, dialogs, or route state. Only the matching network requests are blocked.
+
+Network monitoring starts automatically on `navigate`. Use `network { action: 'list' }` to list captured same-origin xhr/fetch requests (per-tab 100 request limit) and `network { action: 'detail', requestId: '...' }` to inspect a specific request.
 
 ## Screenshots and artifacts
 
@@ -103,7 +107,7 @@ node scripts/screenshot.js -s demo -f png
 
 Artifact-producing commands return file references and metadata. Default artifact storage is `~/.browser-control/artifacts`; override it with `BROWSER_CONTROL_ARTIFACT_DIR` when needed.
 
-`screenshot` and `save_as_pdf` responses intentionally omit raw base64 after the daemon persists the file. Read the returned artifact path from `data.artifact.path` or `artifacts[0].path`; the `scripts/screenshot.js` helper does this and prints only the saved file path.
+`capture` responses intentionally omit raw base64 after the daemon persists the file. Read the returned artifact path from the result's `filePath` field; the `scripts/screenshot.js` helper does this and prints only the saved file path.
 
 ## Confirmation boundaries
 

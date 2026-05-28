@@ -230,59 +230,29 @@ async function performObservedClick(args: CommandArgs = {}, session: SessionName
   const selector = targetSelector(args);
   const beforeIds = await beginNewTabWatch();
 
-  // ── 轻量级网络捕获: 点击前开始监听，700ms 后收集同源请求 ──
-  const tab = await chrome.tabs.get(tabId);
-  const pageOrigin = tab.url ? (() => { try { return new URL(tab.url).origin; } catch { return null; } })() : null;
-  const networkUrls: string[] = [];
-  const networkStart = Date.now();
-  let networkListener: any = null;
-  if (chrome.webRequest?.onBeforeRequest && pageOrigin) {
-    networkListener = (details: any) => {
-      if (details.tabId !== tabId || typeof details.url !== 'string') return;
-      try {
-        if (new URL(details.url).origin === pageOrigin) networkUrls.push(details.url);
-      } catch {}
-    };
-    chrome.webRequest.onBeforeRequest.addListener(networkListener, { urls: ['<all_urls>'] });
-  }
-
   let clickResult: any;
 
-  try {
-    const cdpResult = await performCdpMouseClick(tabId, selector!, args || {});
-    if (!cdpResult.error || cdpResult.code === 'STALE_ELEMENT_REFERENCE') {
-      clickResult = cdpResult;
-    } else {
-      const results = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: performClick,
-        args: [selector!, {
-          strategy: 'dom_pointer',
-          force: args?.force,
-          warnings: args?.warnings
-        }],
-        world: 'MAIN'
-      });
-      clickResult = results[0]?.result as any;
-    }
-  } finally {
-    // 等够 700ms 确保捕获到点击触发的请求，再清理
-    const elapsed = Date.now() - networkStart;
-    const remaining = Math.max(0, 700 - elapsed);
-    if (remaining > 0) await new Promise(r => setTimeout(r, remaining));
-    if (networkListener) {
-      chrome.webRequest.onBeforeRequest.removeListener(networkListener);
-    }
+  const cdpResult = await performCdpMouseClick(tabId, selector!, args || {});
+  if (!cdpResult.error || cdpResult.code === 'STALE_ELEMENT_REFERENCE') {
+    clickResult = cdpResult;
+  } else {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: performClick,
+      args: [selector!, {
+        strategy: 'dom_pointer',
+        force: args?.force,
+        warnings: args?.warnings
+      }],
+      world: 'MAIN'
+    });
+    clickResult = results[0]?.result as any;
   }
 
   if (clickResult?.error && !clickResult?.recoverable) throw new Error(clickResult.error);
 
   const observed = await attachNewTabsIfAny(session, tabId, beforeIds, args || {});
-  const merged = mergeNewTabObservation(clickResult, observed);
-  if (networkUrls.length > 0) {
-    merged.network = { requests: [...new Set(networkUrls)], count: new Set(networkUrls).size };
-  }
-  return merged;
+  return mergeNewTabObservation(clickResult, observed);
 }
 
 export async function handleFill(args: CommandArgs = {}, session: SessionName): Promise<any> {

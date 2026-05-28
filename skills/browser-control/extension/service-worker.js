@@ -68,7 +68,7 @@
       return { tabId };
     }
   }
-  var DEFAULT_DAEMON_WS_URL, DAEMON_WS_URL, RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS, KEEPALIVE_INTERVAL_MS, NETWORK_CAPTURE_LIMIT, NETWORK_LIST_LIMIT, NETWORK_STORAGE_PREFIX, NETWORK_API_RESOURCE_TYPES, EXTENSION_BACKEND_NAME, ARTIFACT_SCHEMA_VERSION, EXTENSION_CAPABILITIES, extensionRuntimeMetadata;
+  var DEFAULT_DAEMON_WS_URL, DAEMON_WS_URL, RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS, KEEPALIVE_INTERVAL_MS, NETWORK_LIST_LIMIT, NETWORK_API_RESOURCE_TYPES, EXTENSION_BACKEND_NAME, ARTIFACT_SCHEMA_VERSION, EXTENSION_CAPABILITIES, extensionRuntimeMetadata;
   var init_runtime_metadata = __esm({
     "src/extension/service-worker/runtime-metadata.ts"() {
       "use strict";
@@ -77,9 +77,7 @@
       RECONNECT_DELAY_MS = 2e3;
       MAX_RECONNECT_DELAY_MS = 3e4;
       KEEPALIVE_INTERVAL_MS = 2e4;
-      NETWORK_CAPTURE_LIMIT = 500;
       NETWORK_LIST_LIMIT = 100;
-      NETWORK_STORAGE_PREFIX = "agentBrowserNetworkCapture:";
       NETWORK_API_RESOURCE_TYPES = /* @__PURE__ */ new Set(["fetch", "xhr", "xmlhttprequest"]);
       EXTENSION_BACKEND_NAME = "extension";
       ARTIFACT_SCHEMA_VERSION = "2026-05-19";
@@ -303,22 +301,15 @@
 
   // src/extension/service-worker/handlers/network-cdp.ts
   async function handleNetwork(args = {}, session) {
-    const { cmd, filter, requestId, sinceTimestampMs, limit, tabId, scope, method, statusCode, type } = args || {};
+    const { cmd, filter, requestId, sinceTimestampMs, limit, tabId, method, statusCode } = args || {};
     switch (cmd) {
-      case "start":
-        return startNetworkCapture(session, filter, { tabId, scope });
-      case "stop":
-        return stopNetworkCapture(session);
       case "list":
-        return listNetworkRequests(session, filter, { sinceTimestampMs, limit, tabId, method, statusCode, type });
+        return listNetworkRequests(session, filter, { sinceTimestampMs, limit, tabId, method, statusCode });
       case "detail":
         return getNetworkRequestDetail(session, requestId);
       default:
-        throw new Error(`Unknown network cmd: ${cmd}. Use: start, stop, list, detail`);
+        throw new Error(`Unknown network cmd: ${cmd}. Use: list, detail`);
     }
-  }
-  function networkStorageKey(session) {
-    return `${NETWORK_STORAGE_PREFIX}${session || "default"}`;
   }
   function installWebRequestListeners() {
     if (!chrome.webRequest?.onBeforeRequest || !chrome.webRequest?.onCompleted) return false;
@@ -335,64 +326,6 @@
       );
     }
     return true;
-  }
-  async function loadPersistedNetworkCapture(session) {
-    try {
-      const key = networkStorageKey(session);
-      const stored = await chrome.storage.local.get(key);
-      const value = stored?.[key];
-      if (!value || !Array.isArray(value.requests)) return null;
-      return {
-        requests: value.requests.slice(-NETWORK_CAPTURE_LIMIT),
-        filter: value.filter || null,
-        tabId: value.tabId || null,
-        tabIds: Array.isArray(value.tabIds) ? value.tabIds : value.tabId ? [value.tabId] : [],
-        scope: value.scope || (value.tabId ? "tab" : "session"),
-        auto: Boolean(value.auto),
-        persistedAt: value.persistedAt || null
-      };
-    } catch {
-      return null;
-    }
-  }
-  function persistNetworkCaptureSoon(session, capture) {
-    if (!chrome.storage?.local || !capture) return;
-    const existing = networkPersistTimers.get(session);
-    if (existing) clearTimeout(existing);
-    networkPersistTimers.set(session, setTimeout(async () => {
-      networkPersistTimers.delete(session);
-      try {
-        const key = networkStorageKey(session);
-        await chrome.storage.local.set({
-          [key]: {
-            session,
-            filter: capture.filter || null,
-            tabId: capture.tabId || null,
-            tabIds: capture.tabIds || [],
-            scope: capture.scope || "session",
-            auto: Boolean(capture.auto),
-            persistedAt: nowIso(),
-            requests: capture.requests.slice(-NETWORK_CAPTURE_LIMIT)
-          }
-        });
-      } catch (err) {
-        console.warn("[AgentBridge] Failed to persist network capture:", err?.message || err);
-      }
-    }, 250));
-  }
-  async function clearPersistedNetworkCapture(session) {
-    const pending = networkPersistTimers.get(session);
-    if (pending) {
-      clearTimeout(pending);
-      networkPersistTimers.delete(session);
-    }
-    try {
-      await chrome.storage.local.remove(networkStorageKey(session));
-    } catch {
-    }
-  }
-  function shouldCaptureUrl(capture, url) {
-    return !capture.filter || String(url || "").includes(capture.filter);
   }
   function isApiResourceType(type) {
     return NETWORK_API_RESOURCE_TYPES.has(String(type || "").toLowerCase());
@@ -414,11 +347,23 @@
       capture.debuggerAttachedTabIds = debuggerTabIds(capture).filter((id) => id !== tabId);
       if (capture.tabId === tabId) capture.tabId = capture.tabIds?.[0] || null;
       if (capture.debuggerAttachedTabId === tabId) capture.debuggerAttachedTabId = capture.debuggerAttachedTabIds?.[0] || null;
+      if (capture.origins) delete capture.origins[tabId];
     }
   }
-  function shouldCaptureRequest(capture, url, type) {
-    if (!shouldCaptureUrl(capture, url)) return false;
-    return isApiResourceType(type);
+  function isSameOriginRequest(capture, url, tabId) {
+    const origin = capture.origins?.[tabId];
+    if (!origin) return false;
+    try {
+      return new URL(url).origin === origin;
+    } catch {
+      return false;
+    }
+  }
+  function shouldCaptureRequest(capture, url, tabId, type) {
+    if (!isApiResourceType(type)) return false;
+    const urlStr = String(url || "");
+    if (capture.filter && !urlStr.includes(capture.filter)) return false;
+    return isSameOriginRequest(capture, urlStr, Number(tabId));
   }
   function removeCapturedRequest(capture, requestId) {
     const index = capture.requests.findIndex((r) => r.id === requestId || r.cdpRequestId === requestId || r.webRequestId === requestId);
@@ -444,14 +389,28 @@
       capture.requests.push(req);
     }
     Object.assign(req, patch);
-    if (capture.requests.length > NETWORK_CAPTURE_LIMIT) capture.requests.splice(0, capture.requests.length - NETWORK_CAPTURE_LIMIT);
+    if (patch.tabId !== void 0) {
+      const tabRequests = capture.requests.filter((r) => r.tabId === patch.tabId);
+      if (tabRequests.length > PER_TAB_LIMIT) {
+        const toRemove = tabRequests.length - PER_TAB_LIMIT;
+        let removed = 0;
+        capture.requests = capture.requests.filter((r) => {
+          if (removed >= toRemove) return true;
+          if (r.tabId === patch.tabId && tabRequests.indexOf(r) < toRemove) {
+            removed++;
+            return false;
+          }
+          return true;
+        });
+      }
+    }
     return req;
   }
   async function handleDebuggerNetworkEvent(session, capture, method, params, source2) {
     if (!params?.requestId) return;
     if (method === "Network.requestWillBeSent") {
       const url = params.request?.url || params.documentURL || "";
-      if (!shouldCaptureUrl(capture, url)) return;
+      if (!isSameOriginRequest(capture, url, Number(source2.tabId))) return;
       upsertCapturedRequest(capture, {
         id: params.requestId,
         cdpRequestId: params.requestId,
@@ -466,12 +425,10 @@
         tabId: source2.tabId,
         status: "pending"
       });
-      persistNetworkCaptureSoon(session, capture);
     } else if (method === "Network.responseReceived") {
       const url = params.response?.url || "";
-      if (!shouldCaptureRequest(capture, url, params.type)) {
+      if (!shouldCaptureRequest(capture, url, source2.tabId, params.type)) {
         removeCapturedRequest(capture, params.requestId);
-        persistNetworkCaptureSoon(session, capture);
         return;
       }
       upsertCapturedRequest(capture, {
@@ -488,7 +445,6 @@
         source: "debugger",
         tabId: source2.tabId
       });
-      persistNetworkCaptureSoon(session, capture);
     } else if (method === "Network.loadingFinished") {
       const req = capture.requests.find((r) => r.cdpRequestId === params.requestId || r.id === params.requestId);
       if (!req) return;
@@ -508,7 +464,6 @@
       } catch (err) {
         req.bodyError = err?.message || String(err);
       }
-      persistNetworkCaptureSoon(session, capture);
     } else if (method === "Network.loadingFailed") {
       const req = capture.requests.find((r) => r.cdpRequestId === params.requestId || r.id === params.requestId);
       if (req) {
@@ -516,7 +471,6 @@
         req.errorText = params.errorText || null;
         req.canceled = Boolean(params.canceled);
       }
-      persistNetworkCaptureSoon(session, capture);
     }
   }
   async function attachDebuggerForCapture(capture, tabId) {
@@ -538,23 +492,33 @@
     const activeTabId = getActiveTabId(session);
     const scope = options.scope || (explicitTabId ? "tab" : "session");
     const tabId = explicitTabId || activeTabId;
-    const reset = Boolean(options.reset);
-    let capture = reset ? null : networkCaptures.get(session);
-    if (!capture && !reset) capture = await loadPersistedNetworkCapture(session);
-    if (!capture) capture = { requests: [], filter: null, tabId: null, tabIds: [], scope, auto: false };
+    let capture = networkCaptures.get(session);
+    if (!capture) capture = { requests: [], filter: null, tabId: null, tabIds: [], scope, auto: false, origins: {} };
     capture.filter = options.filter !== void 0 ? options.filter || null : capture.filter || null;
     capture.scope = scope;
     const tracked = scope === "tab" ? tabId ? [tabId] : [] : [.../* @__PURE__ */ new Set([...getTrackedTabIds(session), ...tabId ? [tabId] : [], ...capture.tabIds || []])];
     capture.tabIds = tracked;
     capture.tabId = scope === "tab" ? tabId || capture.tabId || null : capture.tabId || tracked[0] || null;
     capture.auto = Boolean(capture.auto || options.auto);
+    if (!capture.origins) capture.origins = {};
+    if (tabId) {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (tab.url) {
+          try {
+            capture.origins[tabId] = new URL(tab.url).origin;
+          } catch {
+          }
+        }
+      } catch {
+      }
+    }
     networkCaptures.set(session, capture);
     const webRequest = installWebRequestListeners();
     const debuggerTargets = capture.scope === "session" ? capture.tabIds || [] : capture.tabId ? [capture.tabId] : [];
     const debuggerStatuses = [];
     for (const id of debuggerTargets) debuggerStatuses.push(`${id}:${await attachDebuggerForCapture(capture, id)}`);
     const debuggerStatus = debuggerStatuses.join(",") || "not_attached";
-    persistNetworkCaptureSoon(session, capture);
     return {
       status: "capturing",
       session,
@@ -567,29 +531,6 @@
       webRequest,
       debugger: debuggerStatus
     };
-  }
-  async function startNetworkCapture(session, filter, options = {}) {
-    const existing = networkCaptures.get(session);
-    for (const id of debuggerTabIds(existing)) {
-      try {
-        await chrome.debugger.detach({ tabId: id });
-      } catch {
-      }
-    }
-    await clearPersistedNetworkCapture(session);
-    return ensureNetworkCapture(session, { filter, reset: true, tabId: options.tabId, scope: options.scope });
-  }
-  async function stopNetworkCapture(session) {
-    const capture = networkCaptures.get(session);
-    networkCaptures.delete(session);
-    await clearPersistedNetworkCapture(session);
-    for (const id of debuggerTabIds(capture)) {
-      try {
-        await chrome.debugger.detach({ tabId: id });
-      } catch {
-      }
-    }
-    return { status: "stopped", session };
   }
   function findNetworkDebuggerCapture(tabId) {
     for (const [session, capture] of networkCaptures) {
@@ -1395,9 +1336,9 @@
     return null;
   }
   function networkListener(details) {
-    for (const [session, capture] of networkCaptures) {
+    for (const [, capture] of networkCaptures) {
       if (!captureTracksTab(capture, details.tabId)) continue;
-      if (shouldCaptureRequest(capture, details.url, details.type)) {
+      if (shouldCaptureRequest(capture, details.url, details.tabId, details.type)) {
         upsertCapturedRequest(capture, {
           id: details.requestId,
           webRequestId: details.requestId,
@@ -1410,19 +1351,17 @@
           tabId: details.tabId,
           status: "pending"
         });
-        persistNetworkCaptureSoon(session, capture);
       }
     }
   }
   function networkCompletedListener(details) {
-    for (const [session, capture] of networkCaptures) {
+    for (const [, capture] of networkCaptures) {
       if (!captureTracksTab(capture, details.tabId)) continue;
       const req = capture.requests.find((r) => r.webRequestId === details.requestId || r.id === details.requestId || r.url === details.url);
       if (req) {
         req.status = "complete";
         req.statusCode = details.statusCode;
         req.responseHeaders = details.responseHeaders;
-        persistNetworkCaptureSoon(session, capture);
       }
     }
   }
@@ -1446,11 +1385,7 @@
     return true;
   }
   async function listNetworkRequests(session, filter, options = {}) {
-    let capture = networkCaptures.get(session);
-    if (!capture) {
-      capture = await loadPersistedNetworkCapture(session);
-      if (capture) networkCaptures.set(session, capture);
-    }
+    const capture = networkCaptures.get(session);
     if (!capture) return { requests: [] };
     let requests = capture.requests;
     if (filter) requests = requests.filter((r) => String(r.url || "").includes(filter));
@@ -1507,23 +1442,17 @@
       mode: "api-only",
       methodFilter: options.method ? String(options.method).toUpperCase() : null,
       statusCodeFilter: Number.isFinite(options.statusCode) ? Number(options.statusCode) : null,
-      typeFilter: options.type ? String(options.type).toLowerCase() : null,
       totalStored: capture.requests.length,
       matched: requests.length,
       returned: responseRequests.length,
       requestLimit,
-      storageLimit: NETWORK_CAPTURE_LIMIT,
       sinceTimestampMs,
       omittedUntimestamped,
       requests: responseRequests
     };
   }
   async function getNetworkRequestDetail(session, requestId) {
-    let capture = networkCaptures.get(session);
-    if (!capture) {
-      capture = await loadPersistedNetworkCapture(session);
-      if (capture) networkCaptures.set(session, capture);
-    }
+    const capture = networkCaptures.get(session);
     if (!capture) throw new Error("No network capture for session");
     const known = capture.requests.find((r) => r.id === requestId || r.webRequestId === requestId || r.cdpRequestId === requestId) || null;
     if (!known) return { requestId, body: null, error: "Request not found in capture buffer" };
@@ -1609,7 +1538,7 @@
     merged.mergedFrom = parts.map((p) => p.id);
     return merged;
   }
-  var SPECIAL_CDP_KEYS, PRINTABLE_CDP_KEYS, networkCaptures, debuggerListenerInstalled, networkPersistTimers, actionDebuggerOwners, CLICK_PROBE_DEFAULT_WAIT_MS, CLICK_PROBE_DEFAULT_MAX_REQUESTS, CLICK_PROBE_API_RESOURCE_TYPES, SENSITIVE_FIELD_PATTERN;
+  var SPECIAL_CDP_KEYS, PRINTABLE_CDP_KEYS, networkCaptures, debuggerListenerInstalled, actionDebuggerOwners, CLICK_PROBE_DEFAULT_WAIT_MS, CLICK_PROBE_DEFAULT_MAX_REQUESTS, CLICK_PROBE_API_RESOURCE_TYPES, SENSITIVE_FIELD_PATTERN, PER_TAB_LIMIT;
   var init_network_cdp = __esm({
     "src/extension/service-worker/handlers/network-cdp.ts"() {
       "use strict";
@@ -1655,12 +1584,12 @@
       };
       networkCaptures = /* @__PURE__ */ new Map();
       debuggerListenerInstalled = false;
-      networkPersistTimers = /* @__PURE__ */ new Map();
       actionDebuggerOwners = /* @__PURE__ */ new Map();
       CLICK_PROBE_DEFAULT_WAIT_MS = 1e3;
       CLICK_PROBE_DEFAULT_MAX_REQUESTS = 100;
       CLICK_PROBE_API_RESOURCE_TYPES = /* @__PURE__ */ new Set(["fetch", "xhr", "xmlhttprequest"]);
       SENSITIVE_FIELD_PATTERN = /(^|[-_.])(cookie|authorization|proxy-authorization|x-api-key|api-key|token|access_token|refresh_token|secret|password|session|csrf|jwt)([-_.]|$)/i;
+      PER_TAB_LIMIT = 100;
     }
   });
 
@@ -4527,60 +4456,26 @@
   async function performObservedClick(args = {}, session, tabId) {
     const selector = targetSelector(args);
     const beforeIds = await beginNewTabWatch();
-    const tab = await chrome.tabs.get(tabId);
-    const pageOrigin = tab.url ? (() => {
-      try {
-        return new URL(tab.url).origin;
-      } catch {
-        return null;
-      }
-    })() : null;
-    const networkUrls = [];
-    const networkStart = Date.now();
-    let networkListener2 = null;
-    if (chrome.webRequest?.onBeforeRequest && pageOrigin) {
-      networkListener2 = (details) => {
-        if (details.tabId !== tabId || typeof details.url !== "string") return;
-        try {
-          if (new URL(details.url).origin === pageOrigin) networkUrls.push(details.url);
-        } catch {
-        }
-      };
-      chrome.webRequest.onBeforeRequest.addListener(networkListener2, { urls: ["<all_urls>"] });
-    }
     let clickResult;
-    try {
-      const cdpResult = await performCdpMouseClick(tabId, selector, args || {});
-      if (!cdpResult.error || cdpResult.code === "STALE_ELEMENT_REFERENCE") {
-        clickResult = cdpResult;
-      } else {
-        const results = await chrome.scripting.executeScript({
-          target: { tabId },
-          func: performClick,
-          args: [selector, {
-            strategy: "dom_pointer",
-            force: args?.force,
-            warnings: args?.warnings
-          }],
-          world: "MAIN"
-        });
-        clickResult = results[0]?.result;
-      }
-    } finally {
-      const elapsed = Date.now() - networkStart;
-      const remaining = Math.max(0, 700 - elapsed);
-      if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
-      if (networkListener2) {
-        chrome.webRequest.onBeforeRequest.removeListener(networkListener2);
-      }
+    const cdpResult = await performCdpMouseClick(tabId, selector, args || {});
+    if (!cdpResult.error || cdpResult.code === "STALE_ELEMENT_REFERENCE") {
+      clickResult = cdpResult;
+    } else {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: performClick,
+        args: [selector, {
+          strategy: "dom_pointer",
+          force: args?.force,
+          warnings: args?.warnings
+        }],
+        world: "MAIN"
+      });
+      clickResult = results[0]?.result;
     }
     if (clickResult?.error && !clickResult?.recoverable) throw new Error(clickResult.error);
     const observed = await attachNewTabsIfAny(session, tabId, beforeIds, args || {});
-    const merged = mergeNewTabObservation(clickResult, observed);
-    if (networkUrls.length > 0) {
-      merged.network = { requests: [...new Set(networkUrls)], count: new Set(networkUrls).size };
-    }
-    return merged;
+    return mergeNewTabObservation(clickResult, observed);
   }
   async function handleFill(args = {}, session) {
     const { value } = args || {};
@@ -5060,7 +4955,6 @@
     }
     sessionTabs.delete(session);
     activeSessions.delete(session);
-    await clearPersistedNetworkCapture(session);
     networkCaptures.delete(session);
     return { closed: session, tabCount: tabs.size };
   }

@@ -67,7 +67,8 @@ const TOOL_DEFS: ToolDef[] = [
     title: 'Manage browser tabs',
     description:
       'List, switch, or close browser tabs.\n'
-      + 'action: "list" (default) returns all tabs. "switch" finds and activates a tab by URL/title. "close" closes a tab.',
+      + 'action: "list" (default) returns all tabs. "switch" finds and activates a tab by URL/title. "close" closes a tab (destructive).',
+    annotations: { destructiveHint: true },
     controller: tabs,
   },
   {
@@ -77,7 +78,7 @@ const TOOL_DEFS: ToolDef[] = [
       'Capture the page accessibility tree with @e element references.\n'
       + 'Use @e refs as target for browser_click/browser_fill/browser_press/browser_scroll.\n'
       + 'Filter with roles, tags, textIncludes, hasVisibleText, viewportOnly to narrow results.\n'
-      + 'Pass diff_to with a previous baselineId to detect page changes (added/removed/changed elements).\n'
+      + 'diff_to is a two-step mechanism: first call with an ID stores the baseline (returns a normal snapshot); second call with the same ID returns the structured diff (added/removed/changed elements). Do not expect diff output on the first call.\n'
       + '@e refs become stale after page changes — always re-snapshot before the next interaction.',
     annotations: { readOnlyHint: true },
     controller: snapshot,
@@ -98,7 +99,7 @@ const TOOL_DEFS: ToolDef[] = [
       'Click a page element. Three modes:\n'
       + '1. By @e ref: { target: "@eabc_1" } — use refs from browser_snapshot.\n'
       + '2. With network interception: { target: "@eabc_1", probe: { filter: "/api/", includeBody: true } } — captures matching requests via CDP.\n'
-      + '3. By text + position: { text: "Submit", x: 200, y: 300 } — finds nearest visible text match.\n'
+      + '3. By text + position: { text: "Submit", x: 200, y: 300 } — x and y are required in text mode.\n'
       + 'target and text are mutually exclusive; provide one.',
     annotations: { destructiveHint: true },
     controller: click,
@@ -108,9 +109,10 @@ const TOOL_DEFS: ToolDef[] = [
     title: 'Fill form field',
     description:
       'Type a value into a form field.\n'
-      + 'strategy: "native_setter" (default), "text_input" (character-by-character), "paste_like" (clipboard simulation).\n'
+      + 'strategy: "native_setter" (default). "text_input" and "paste_like" are accepted for forward compatibility but currently behave as native_setter.\n'
       + 'commit: "change" (default, triggers change event), "blur", "enter" (submits), "none" (value only).\n'
-      + 'If value not applied, try strategy "text_input" or "paste_like" as fallback.',
+      + 'If value not applied, try a different commit mode ("blur", "enter") or use browser_evaluate as fallback.\n'
+      + 'Set expectChange: true to get post-action observation diagnostics.',
     annotations: { destructiveHint: true },
     controller: fill,
   },
@@ -120,7 +122,8 @@ const TOOL_DEFS: ToolDef[] = [
     description:
       'Press a keyboard key, optionally on a specific element.\n'
       + 'Common keys: Enter, Tab, Escape, ArrowDown, Backspace.\n'
-      + 'modifiers: ["Control", "Shift", "Alt", "Meta"] for shortcuts.',
+      + 'modifiers: ["Control", "Shift", "Alt", "Meta"] for shortcuts.\n'
+      + 'Set expectChange: true to get post-action observation diagnostics.',
     annotations: { destructiveHint: true },
     controller: press,
   },
@@ -162,11 +165,12 @@ const TOOL_DEFS: ToolDef[] = [
   },
   {
     command: 'network',
-    title: 'Network monitoring',
+    title: 'Query network requests',
     description:
-      'Monitor network requests.\n'
-      + 'action: "start" (begin capture), "list" (show captured requests), "detail" (inspect one request by requestId), "stop" (end capture).\n'
-      + 'scope: "tab" (default) or "session" (all tabs). filter: URL substring match.',
+      'Query captured network requests. Monitoring starts automatically on navigate.\n'
+      + 'action: "list" (show captured same-origin API requests), "detail" (inspect one request by requestId).\n'
+      + 'Only same-origin xhr/fetch requests are captured. Each tab keeps last 100 requests.',
+    annotations: { readOnlyHint: true },
     controller: network,
   },
   {
@@ -299,7 +303,7 @@ async function runTool(
     return toCommandToolResult({
       ...result,
       activeSession: nextSession,
-      summary: `${result.summary} | 当前活跃会话: ${nextSession}`,
+      summary: `${result.summary} | Active session: ${nextSession}`,
     });
   }
 
@@ -322,7 +326,7 @@ function toCommandToolResult<T>(result: CommandResult<T>): CallToolResult {
         type: 'text',
         text: result.ok
           ? result.summary
-          : `${result.summary}${result.nextSteps ? '\n\n下一步建议:\n' + result.nextSteps.map((s, i) => `${i + 1}. ${s}`).join('\n') : ''}`,
+          : `${result.summary}${result.nextSteps ? '\n\nNext steps:\n' + result.nextSteps.map((s, i) => `${i + 1}. ${s}`).join('\n') : ''}`,
       },
     ],
     structuredContent: result as unknown as Record<string, unknown>,

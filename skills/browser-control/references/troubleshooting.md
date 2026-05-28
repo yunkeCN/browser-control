@@ -84,9 +84,9 @@ Artifacts are written under `~/.browser-control/artifacts` unless `BROWSER_CONTR
 ## Network capture is missing requests
 
 - Capture is scoped to the active session tab.
-- `navigate` starts API-focused capture before load.
-- Resource requests are intentionally excluded. Network capture is API-focused on XHR/fetch traffic; inspect page resource loads separately with browser tooling or `performance.getEntriesByType('resource')` when needed.
-- Service-worker restarts can affect timing; restart capture and repeat the action when in doubt.
+- Network monitoring starts automatically on `navigate` and captures same-origin XHR/fetch traffic only.
+- Resource requests (images, CSS, fonts, scripts, document loads) are intentionally excluded; inspect page resource loads separately with browser tooling or `performance.getEntriesByType('resource')` when needed.
+- If requests were missed, repeat the triggering action so automatic monitoring captures them.
 
 ## Known limitations
 

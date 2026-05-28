@@ -24,6 +24,8 @@ export interface GetTextInput {
   scope?: 'viewport' | 'document' | 'full';
   /** 最大字符数（可选，默认由 daemon 决定） */
   maxChars?: number;
+  /** 是否返回 textRuns 数组（可选） */
+  includeRuns?: boolean;
   /** CSS 选择器，只获取匹配元素的文本（可选） */
   selector?: string;
 }
@@ -36,6 +38,12 @@ export interface GetTextData {
   length: number;
   /** 是否因超出 maxChars 被截断 */
   truncated: boolean;
+  /** 页面 URL */
+  url?: string;
+  /** 页面标题 */
+  title?: string;
+  /** 文本片段数组（仅 includeRuns:true 时返回） */
+  textRuns?: unknown[];
 }
 
 // ─── 命令定义 ────────────────────────────────────────────────────
@@ -45,7 +53,7 @@ const def: CommandDefinition<GetTextInput, GetTextData> = {
   requiredArgs: [],
 
   validate: (args: Record<string, unknown>): GetTextInput => {
-    const validKeys = ['tabId', 'scope', 'maxChars', 'selector'];
+    const validKeys = ['tabId', 'scope', 'maxChars', 'includeRuns', 'selector'];
     const unknownKeys = Object.keys(args).filter((k) => !validKeys.includes(k));
     if (unknownKeys.length > 0) {
       throw new Error(
@@ -96,6 +104,11 @@ const def: CommandDefinition<GetTextInput, GetTextData> = {
     const text = rawData.text as string;
     const length = (typeof rawData.length === 'number' ? rawData.length : text.length) as number;
     const truncated = rawData.truncated === true;
+    const url = typeof rawData.url === 'string' ? rawData.url : undefined;
+    const title = typeof rawData.title === 'string' ? rawData.title : undefined;
+    const textRuns = Array.isArray(rawData.textRuns) ? rawData.textRuns
+      : Array.isArray(rawData.runs) ? rawData.runs
+      : undefined;
 
     return {
       ok: true,
@@ -105,6 +118,9 @@ const def: CommandDefinition<GetTextInput, GetTextData> = {
       text,
       length,
       truncated,
+      url,
+      title,
+      textRuns,
     };
   },
 };

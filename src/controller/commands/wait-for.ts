@@ -28,6 +28,8 @@ export interface WaitForInput {
   timeoutMs?: number;
   /** 标签页 ID（可选，默认使用当前活跃标签页） */
   tabId?: number;
+  /** JavaScript 表达式，返回 truthy 时成功（可选） */
+  expression?: string;
 }
 
 /** wait-for 命令的输出数据 */
@@ -45,7 +47,7 @@ const def: CommandDefinition<WaitForInput, WaitForData> = {
   requiredArgs: [],
 
   validate: (args: Record<string, unknown>): WaitForInput => {
-    const validKeys = ['selector', 'text', 'state', 'timeoutMs', 'tabId'];
+    const validKeys = ['selector', 'text', 'state', 'timeoutMs', 'tabId', 'expression'];
     const unknownKeys = Object.keys(args).filter((k) => !validKeys.includes(k));
     if (unknownKeys.length > 0) {
       throw new Error(

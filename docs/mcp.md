@@ -1,6 +1,6 @@
 # Browser Control MCP server
 
-Browser Control includes a stdio MCP server for controlling the same local Chrome daemon used by the Skill CLI. It exposes the full Browser Control protocol through a small tool surface.
+Browser Control includes a stdio MCP server for controlling the same local Chrome daemon used by the Skill CLI. Each browser command is registered as an independent MCP tool with a typed schema and annotations.
 
 ## Start
 
@@ -49,13 +49,11 @@ Build or refresh both generated copies with:
 npm run build:mcp
 ```
 
-The generated `.mjs` file is self-contained. You may copy `skills/browser-control/scripts/browser-control-mcp.mjs` elsewhere and point the MCP client at the copy.
+The generated `.mjs` file is self-contained. You may copy it elsewhere and point the MCP client at the copy.
 
 ## Runtime
 
 After saving the config, restart or reload the MCP client. The first tool call starts or reuses the Browser Control daemon automatically. Chrome still needs the Browser Control extension loaded from `skills/browser-control/extension/`.
-
-Running `node scripts/browser-control-mcp.mjs` directly is only a smoke check; it waits for MCP stdio messages and normally prints nothing.
 
 Use environment variables for non-default daemon settings:
 
@@ -76,37 +74,37 @@ Use environment variables for non-default daemon settings:
 
 ## Tools
 
-- `browser_control_command`: run any Browser Control protocol command.
-- `browser_control_close_session`: close the active MCP-managed session.
-- `browser_control_status`: daemon status, compatibility diagnostics, and active session.
-- `browser_control_doctor`: deeper setup diagnostics.
+Each command is an independent tool with typed parameters and MCP annotations:
 
-`browser_control_command` takes:
+| Tool | Description | Annotation |
+|------|-------------|------------|
+| `browser_navigate` | Navigate to URL | `openWorldHint` |
+| `browser_tabs` | List, switch, or close tabs | `destructiveHint` |
+| `browser_snapshot` | Capture page accessibility tree | `readOnlyHint` |
+| `browser_get_text` | Extract page text | `readOnlyHint` |
+| `browser_click` | Click element (ref, text, or probe mode) | `destructiveHint` |
+| `browser_fill` | Fill form field | `destructiveHint` |
+| `browser_press` | Press keyboard key | `destructiveHint` |
+| `browser_scroll` | Scroll page or element | — |
+| `browser_wait_for` | Wait for condition | `readOnlyHint` |
+| `browser_capture` | Screenshot or PDF | — |
+| `browser_evaluate` | Execute JavaScript | `destructiveHint` |
+| `browser_network` | Query captured network requests | `readOnlyHint` |
+| `browser_upload` | Upload files | `destructiveHint` |
+| `browser_download` | Download file | — |
+| `browser_close_session` | Close session | — |
+| `browser_status` | Daemon status and diagnostics | `readOnlyHint` |
+| `browser_doctor` | Setup troubleshooting | `readOnlyHint` |
 
-- `command`: protocol command name, such as `navigate`, `snapshot`, `click`, `fill`, `get_text`, or `network_list`.
-- `args`: command arguments, default `{}`.
-- `session`: optional; omit it for normal use. The MCP server manages an active session per process.
-- `timeoutMs`: optional command timeout.
-- `id`: optional request id.
-
-For element actions, prefer `snapshot` to get `@e` references. Pass the chosen ref as `target`; use `target:"css=..."` only as an explicit CSS fallback. To avoid large snapshots when looking for visible text, filter first:
+Tool parameters are called directly (no `command`/`args` wrapping):
 
 ```json
-{
-  "name": "browser_control_command",
-  "arguments": {
-    "command": "snapshot",
-    "args": {
-      "textIncludes": "新增工单",
-      "hasVisibleText": true,
-      "viewportOnly": true,
-      "roles": ["button", "link", "textbox"]
-    }
-  }
-}
+{ "name": "browser_snapshot", "arguments": { "viewportOnly": true, "hasVisibleText": true } }
+{ "name": "browser_click", "arguments": { "target": "@eabc_1" } }
+{ "name": "browser_navigate", "arguments": { "url": "https://example.com" } }
 ```
 
-Snapshot responses return `data.snapshot` as compact ARIA text plus `data.tree` and `data.refs` as structured JSON. If the snapshot text exceeds 100k characters, the daemon stores the full JSON payload as a local snapshot artifact, returns a preview plus `data.artifact`, and recommends narrowing with `textIncludes`, `roles`, `tags`, `hasVisibleText`, or `viewportOnly`.
+Snapshot MCP responses include `tree` (compact ARIA text with embedded `@e` refs), `elementCount`, `title`, `url`, and optional `diff` when `diff_to` is used. The raw daemon returns additional `refs` JSON and structured tree; MCP returns the controller's flat CommandResult via `structuredContent`. If the snapshot text exceeds 100k characters, the daemon stores the full JSON payload as a local artifact and recommends narrowing with `textIncludes`, `roles`, `tags`, `hasVisibleText`, or `viewportOnly`.
 
 The server also provides prompts:
 
@@ -119,40 +117,37 @@ The server also provides prompts:
 Check readiness:
 
 ```json
-{
-  "name": "browser_control_status",
-  "arguments": {}
-}
+{ "name": "browser_status", "arguments": {} }
 ```
 
-Navigate:
+Navigate and snapshot:
 
 ```json
-{
-  "name": "browser_control_command",
-  "arguments": {
-    "command": "navigate",
-    "args": {
-      "url": "https://example.com",
-      "newTab": true
-    }
-  }
-}
+{ "name": "browser_navigate", "arguments": { "url": "https://example.com" } }
+{ "name": "browser_snapshot", "arguments": { "viewportOnly": true, "hasVisibleText": true } }
 ```
 
-Close the current task session:
+Click with network interception:
 
 ```json
-{
-  "name": "browser_control_close_session",
-  "arguments": {}
-}
+{ "name": "browser_click", "arguments": { "target": "@eabc_1", "probe": { "filter": "/api/", "includeBody": true } } }
+```
+
+Query network requests:
+
+```json
+{ "name": "browser_network", "arguments": { "action": "list", "filter": "/api/" } }
+```
+
+Close session:
+
+```json
+{ "name": "browser_close_session", "arguments": {} }
 ```
 
 ## Notes
 
-- The MCP server validates schemas and returns hints, but does not ask the user for confirmation or block sensitive commands.
-- Sensitive or side-effecting protocol commands are documented in `browser_control_safety` and include `riskNotes` in command results.
-- Artifact-producing commands return local paths and metadata; raw screenshot, PDF, download, and large network body data is not inlined.
+- The MCP server validates schemas but does not ask the user for confirmation or block sensitive commands. Tools marked `destructiveHint` may cause side effects.
+- Artifact-producing commands return local paths and metadata; raw image, PDF, and large network body data is not inlined.
 - If another service owns the daemon port, stop that service or set `BROWSER_CONTROL_PORT`.
 - If `extension_connected` is false, load or reload the bundled Chrome extension.

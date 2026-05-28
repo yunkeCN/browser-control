@@ -102,7 +102,7 @@ Use only when the user asked for a submission or final action.
 3. Ask for confirmation unless the current user instruction already explicitly authorizes this exact final action.
 4. Snapshot, click the final control by `@e`, and verify result:
    ```bash
-   node scripts/browser-control.js command click --session submit-task --args '{"target":"@e0submit_1","after":"snapshot"}'
+   node scripts/browser-control.js command click --session submit-task --args '{"target":"@e0submit_1"}'
    node scripts/browser-control.js command wait_for --session submit-task --args '{"text":"Success","timeoutMs":10000}'
    ```
 
@@ -130,9 +130,9 @@ Verification evidence: screenshot file path and, when relevant, a snapshot descr
 Use when the user asks for an archival page export.
 
 1. Navigate and wait until the page is ready.
-2. Call `save_as_pdf`:
+2. Call `capture` with `format: "pdf"`:
    ```bash
-   node scripts/browser-control.js command save_as_pdf --session pdf-task --args '{"file_name":"page.pdf","paper_format":"A4","print_background":true}'
+   node scripts/browser-control.js command capture --session pdf-task --args '{"format":"pdf","fileName":"page.pdf","paperFormat":"A4","printBackground":true}'
    ```
 3. Report the artifact path returned by the response.
 
@@ -144,23 +144,19 @@ Stop/ask conditions: page requires login/MFA or exporting sensitive documents wi
 
 Use when the user asks which API a page calls or why data appears.
 
-1. Start capture explicitly or rely on `navigate` starting API-focused capture:
+Network monitoring starts automatically on `navigate` (same-origin XHR/fetch only; non-API resources such as images, CSS, fonts, scripts, and document loads are excluded).
+
+1. Navigate or perform the triggering UI action:
    ```bash
-   node scripts/browser-control.js command network_start --session net-task --args '{"filter":"api"}'
+   node scripts/browser-control.js command navigate --session net-task --args '{"url":"https://example.com","newTab":true}'
    ```
-   `filter` is a URL substring string; omit it for no filtering. Network capture is API-focused and intentionally excludes non-XHR/fetch resources such as images, CSS, fonts, scripts, and document loads.
-2. Navigate or perform the triggering UI action.
-3. List requests:
+2. List captured requests:
    ```bash
-   node scripts/browser-control.js command network_list --session net-task --args '{}'
+   node scripts/browser-control.js command network --session net-task --args '{"action":"list"}'
    ```
-4. Fetch details for relevant `requestId` values:
+3. Fetch details for relevant `requestId` values:
    ```bash
-   node scripts/browser-control.js command network_detail --session net-task --args '{"requestId":"<id>"}'
-   ```
-5. Stop capture if done:
-   ```bash
-   node scripts/browser-control.js command network_stop --session net-task --args '{}'
+   node scripts/browser-control.js command network --session net-task --args '{"action":"detail","requestId":"<id>"}'
    ```
 
 Verification evidence: request URL, method, status, response metadata/body or artifact path.
@@ -191,7 +187,7 @@ node scripts/browser-control.js command close_session --session demo --args '{}'
 node scripts/session-cleanup.js --dry-run
 ```
 
-Verification evidence: `close_session` response or `list_tabs` shows no remaining task tabs.
+Verification evidence: `close_session` response or `tabs` with `action: "list"` shows no remaining task tabs.
 
 
 ## Run multiline JavaScript safely

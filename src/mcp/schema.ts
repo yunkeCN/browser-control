@@ -12,13 +12,13 @@ const elementTarget = z.string().min(1).refine(value => /^@e[^\s_]+_\d+$/.test(v
   message: 'must be an @e<structureId>_<revision> reference from snapshot or an explicit css=<selector> fallback'
 });
 const observeOptions = z.object({
-  baselineId: z.string().optional(),
-  includeNetwork: z.boolean().optional(),
-  waitMs: z.number().nonnegative().optional(),
-  maxAdded: z.number().int().positive().optional(),
-  maxRemoved: z.number().int().positive().optional(),
-  maxSummaryChars: z.number().int().positive().optional()
-}).strict();
+  baselineId: z.string().optional().describe('Snapshot baseline ID to diff against after the action.'),
+  includeNetwork: z.boolean().optional().describe('Include network activity in observation diagnostics.'),
+  waitMs: z.number().nonnegative().optional().describe('Milliseconds to wait before observing changes.'),
+  maxAdded: z.number().int().positive().optional().describe('Max added elements to report.'),
+  maxRemoved: z.number().int().positive().optional().describe('Max removed elements to report.'),
+  maxSummaryChars: z.number().int().positive().optional().describe('Max characters for observation summary.')
+}).strict().describe('Post-action observation options. Captures DOM/network changes after the action completes.');
 
 /** Per-command argument schemas (without envelope fields) */
 export const commandArgSchemas = {
@@ -47,8 +47,8 @@ export const commandArgSchemas = {
   click: z.object({
     target: elementTarget.optional().describe('Element reference (@e ref or css= selector). Mutually exclusive with text.'),
     text: z.string().min(1).optional().describe('Text to match on page. Mutually exclusive with target. Requires x and y.'),
-    x: z.number().optional().describe('Approximate x coordinate for text mode disambiguation.'),
-    y: z.number().optional().describe('Approximate y coordinate for text mode disambiguation.'),
+    x: z.number().optional().describe('X viewport coordinate. Required when using text mode.'),
+    y: z.number().optional().describe('Y viewport coordinate. Required when using text mode.'),
     roles: z.array(z.string()).optional().describe('ARIA roles filter for text mode.'),
     tabId,
     force: z.boolean().optional().describe('Skip visibility checks.'),
@@ -67,7 +67,7 @@ export const commandArgSchemas = {
     strategy: z.enum(['native_setter', 'text_input', 'paste_like']).optional(),
     clear: z.boolean().optional(),
     commit: z.enum(['change', 'blur', 'enter', 'none']).optional(),
-    expectChange: z.boolean().optional(),
+    expectChange: z.boolean().optional().describe('Hint that the action should cause visible page changes. When true, the response includes observation diagnostics.'),
     observe: observeOptions.optional()
   }).strict(),
   press: z.object({
@@ -76,9 +76,9 @@ export const commandArgSchemas = {
     tabId,
     strategy: z.enum(['auto', 'cdp_keyboard', 'dom_keyboard']).optional(),
     modifiers: z.array(z.string()).optional(),
-    expectChange: z.boolean().optional(),
+    expectChange: z.boolean().optional().describe('Hint that the action should cause visible page changes. When true, the response includes observation diagnostics.'),
     observe: observeOptions.optional(),
-    observeNewTab: z.boolean().optional(),
+    observeNewTab: z.boolean().optional().describe('Observe changes in a newly opened tab instead of the current tab.'),
     expectNewTab: z.boolean().optional()
   }).strict(),
   scroll: z.object({
@@ -115,15 +115,12 @@ export const commandArgSchemas = {
     printBackground: z.boolean().optional().describe('Print background for PDF.'),
   }).strict(),
   network: z.object({
-    action: z.enum(['start', 'list', 'detail', 'stop']).describe('Network operation.'),
-    filter: z.string().optional().describe('URL substring filter for start/list.'),
+    action: z.enum(['list', 'detail']).describe('Network query operation.'),
+    filter: z.string().optional().describe('URL substring filter for list.'),
     tabId,
-    scope: z.enum(['session', 'tab']).optional().describe('Capture scope for start.'),
-    limit: z.number().int().positive().optional().describe('Max requests for list.'),
+    limit: z.number().int().positive().optional().describe('Max requests for list. Defaults to 100.'),
     method: z.string().optional().describe('HTTP method filter for list.'),
     statusCode: z.number().int().optional().describe('Status code filter for list.'),
-    type: z.string().optional().describe('Resource type filter for list.'),
-    sinceTimestampMs: z.number().nonnegative().optional().describe('Timestamp filter for list.'),
     requestId: z.string().min(1).optional().describe('Request ID for detail (required for detail action).'),
   }).strict(),
   upload: z.object({ target: elementTarget, files: z.array(z.string().min(1)), tabId }).strict(),
