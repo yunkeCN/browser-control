@@ -52,13 +52,13 @@ export const commandArgSchemas = {
     roles: z.array(z.string()).optional().describe('ARIA roles filter for text mode.'),
     tabId,
     force: z.boolean().optional().describe('Skip visibility checks.'),
-    probe: z.object({
-      filter: z.string().optional().describe('URL substring to capture matching network requests.'),
-      includeHeaders: z.boolean().optional().describe('Include response headers in captured requests.'),
-      includeBody: z.boolean().optional().describe('Include response body in captured requests.'),
-      redactSensitive: z.boolean().optional().describe('Redact sensitive data in captured requests.'),
-      maxRequests: z.number().int().positive().optional().describe('Maximum number of requests to capture.'),
-    }).strict().optional().describe('Enable CDP network interception during click. Captures matching requests with headers/body.'),
+    interceptRequests: z.object({
+      filter: z.string().optional().describe('URL substring for matching API requests to intercept.'),
+      includeHeaders: z.boolean().optional().describe('Include request headers in intercepted requests.'),
+      includeBody: z.boolean().optional().describe('Include request body in intercepted requests.'),
+      redactSensitive: z.boolean().optional().describe('Redact sensitive data in intercepted requests.'),
+      maxRequests: z.number().int().positive().optional().describe('Maximum number of intercepted requests to return.'),
+    }).strict().optional().describe('Use this when you need to inspect the API requests and request parameters triggered by a click, but do not want matching requests to actually reach the server. This is not a dry run: the page click still happens, while matching requests are blocked and returned.'),
   }).strict(),
   fill: z.object({
     target: elementTarget,

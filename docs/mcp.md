@@ -82,7 +82,7 @@ Each command is an independent tool with typed parameters and MCP annotations:
 | `browser_tabs` | List, switch, or close tabs | `destructiveHint` |
 | `browser_snapshot` | Capture page accessibility tree | `readOnlyHint` |
 | `browser_get_text` | Extract page text | `readOnlyHint` |
-| `browser_click` | Click element (ref, text, or probe mode) | `destructiveHint` |
+| `browser_click` | Click element (ref, text, or request interception mode) | `destructiveHint` |
 | `browser_fill` | Fill form field | `destructiveHint` |
 | `browser_press` | Press keyboard key | `destructiveHint` |
 | `browser_scroll` | Scroll page or element | — |
@@ -127,10 +127,10 @@ Navigate and snapshot:
 { "name": "browser_snapshot", "arguments": { "viewportOnly": true, "hasVisibleText": true } }
 ```
 
-Click with network interception:
+Click with request interception:
 
 ```json
-{ "name": "browser_click", "arguments": { "target": "@eabc_1", "probe": { "filter": "/api/", "includeBody": true } } }
+{ "name": "browser_click", "arguments": { "target": "@eabc_1", "interceptRequests": { "filter": "/api/", "includeBody": true } } }
 ```
 
 Query network requests:

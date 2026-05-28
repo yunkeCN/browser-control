@@ -3689,7 +3689,7 @@ var COMMANDS = {
   click: {
     required: [],
     requiredOneOf: ["target", "text"],
-    optional: ["target", "text", "x", "y", "roles", "tabId", "force", "probe"],
+    optional: ["target", "text", "x", "y", "roles", "tabId", "force", "interceptRequests"],
     example: { target: "@e1abc23_1" }
   },
   fill: {
@@ -3822,11 +3822,14 @@ function validateKnownArgs(request, spec) {
   if (request.command === "network" && field === "index") {
     hints.unshift('Use args.requestId from network { action: "list" }; numeric index is not supported.');
   }
+  if (request.command === "click" && field === "probe") {
+    hints.unshift("Use args.interceptRequests when you need to inspect API requests and request parameters triggered by a click, but do not want matching requests to actually reach the server.");
+  }
   if (TARGET_COMMANDS.has(request.command) && LEGACY_TARGET_ARGS.includes(field)) {
     hints.unshift(`${request.command} now accepts args.target for element targeting. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.`);
   }
   if (request.command === "click" && ["strategy", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].includes(field)) {
-    hints.unshift("click accepts target (or text+x+y), optional tabId, force, and probe. For network interception use probe: { filter, includeBody, includeHeaders }.");
+    hints.unshift("click accepts target (or text+x+y), optional tabId, force, and interceptRequests. Use interceptRequests to inspect click-triggered API requests while blocking matching requests before they reach the server.");
   }
   if (request.command === "get_text" && field === "selectors") {
     hints.unshift("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes.");

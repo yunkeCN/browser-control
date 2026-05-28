@@ -3,7 +3,7 @@
  *
  * 三种模式:
  * 1. 基础点击: { target: "@eref_1" } — 通过 @e ref 或 css= 选择器点击
- * 2. 请求拦截点击: { target: "@eref_1", probe: { filter: "/api/" } } — 点击 + CDP 网络拦截
+ * 2. 请求拦截: { target: "@eref_1", interceptRequests: { filter: "/api/" } } — 点击 + CDP 网络拦截和请求观察
  * 3. 文本定位点击: { text: "Submit", x: 200, y: 300 } — 通过文本+坐标定位并点击
  *
  * target 和 text 互斥，至少提供一个。
@@ -18,7 +18,7 @@ import { executeClickText, type ClickTextData, toClickTextResult } from './click
 // ─── 类型定义 ────────────────────────────────────────────────────
 
 /** 请求拦截配置 */
-export interface ClickProbeOptions {
+export interface ClickRequestInterceptionOptions {
   /** URL 子串过滤 */
   filter?: string;
   /** 包含响应头 */
@@ -44,7 +44,7 @@ export interface ClickInput {
   tabId?: number;
   force?: boolean;
   // 模式 2: 请求拦截
-  probe?: ClickProbeOptions;
+  interceptRequests?: ClickRequestInterceptionOptions;
 }
 
 /** click 命令的输出数据 */
@@ -117,33 +117,33 @@ export const clickDef: CommandDefinition<ClickInput, ClickData | ClickProbeData 
       throw new Error('force 必须是布尔值');
     }
 
-    // probe 验证
-    let probe: ClickProbeOptions | undefined;
-    if (args.probe !== undefined) {
-      if (typeof args.probe !== 'object' || args.probe === null || Array.isArray(args.probe)) {
-        throw new Error('probe 必须是对象');
+    // 请求拦截验证
+    let interceptRequests: ClickRequestInterceptionOptions | undefined;
+    if (args.interceptRequests !== undefined) {
+      if (typeof args.interceptRequests !== 'object' || args.interceptRequests === null || Array.isArray(args.interceptRequests)) {
+        throw new Error('interceptRequests 必须是对象');
       }
-      const p = args.probe as Record<string, unknown>;
-      probe = {};
-      if (p.filter !== undefined) {
-        if (typeof p.filter !== 'string') throw new Error('probe.filter 必须是字符串');
-        probe.filter = p.filter;
+      const requestInterception = args.interceptRequests as Record<string, unknown>;
+      interceptRequests = {};
+      if (requestInterception.filter !== undefined) {
+        if (typeof requestInterception.filter !== 'string') throw new Error('interceptRequests.filter 必须是字符串');
+        interceptRequests.filter = requestInterception.filter;
       }
-      if (p.includeHeaders !== undefined) {
-        if (typeof p.includeHeaders !== 'boolean') throw new Error('probe.includeHeaders 必须是布尔值');
-        probe.includeHeaders = p.includeHeaders;
+      if (requestInterception.includeHeaders !== undefined) {
+        if (typeof requestInterception.includeHeaders !== 'boolean') throw new Error('interceptRequests.includeHeaders 必须是布尔值');
+        interceptRequests.includeHeaders = requestInterception.includeHeaders;
       }
-      if (p.includeBody !== undefined) {
-        if (typeof p.includeBody !== 'boolean') throw new Error('probe.includeBody 必须是布尔值');
-        probe.includeBody = p.includeBody;
+      if (requestInterception.includeBody !== undefined) {
+        if (typeof requestInterception.includeBody !== 'boolean') throw new Error('interceptRequests.includeBody 必须是布尔值');
+        interceptRequests.includeBody = requestInterception.includeBody;
       }
-      if (p.redactSensitive !== undefined) {
-        if (typeof p.redactSensitive !== 'boolean') throw new Error('probe.redactSensitive 必须是布尔值');
-        probe.redactSensitive = p.redactSensitive;
+      if (requestInterception.redactSensitive !== undefined) {
+        if (typeof requestInterception.redactSensitive !== 'boolean') throw new Error('interceptRequests.redactSensitive 必须是布尔值');
+        interceptRequests.redactSensitive = requestInterception.redactSensitive;
       }
-      if (p.maxRequests !== undefined) {
-        if (typeof p.maxRequests !== 'number') throw new Error('probe.maxRequests 必须是数字');
-        probe.maxRequests = p.maxRequests;
+      if (requestInterception.maxRequests !== undefined) {
+        if (typeof requestInterception.maxRequests !== 'number') throw new Error('interceptRequests.maxRequests 必须是数字');
+        interceptRequests.maxRequests = requestInterception.maxRequests;
       }
     }
 
@@ -151,7 +151,7 @@ export const clickDef: CommandDefinition<ClickInput, ClickData | ClickProbeData 
       target: args.target as string,
       tabId: args.tabId as number | undefined,
       force: args.force as boolean | undefined,
-      probe,
+      interceptRequests,
     };
   },
 
@@ -171,16 +171,16 @@ export const clickDef: CommandDefinition<ClickInput, ClickData | ClickProbeData 
     }
 
     // 模式 2: 请求拦截点击
-    if (input.probe) {
+    if (input.interceptRequests) {
       return executeClickProbe({
         target: input.target!,
         tabId: input.tabId,
         force: input.force,
-        filter: input.probe.filter,
-        includeHeaders: input.probe.includeHeaders,
-        includeBody: input.probe.includeBody,
-        redactSensitive: input.probe.redactSensitive,
-        maxRequests: input.probe.maxRequests,
+        filter: input.interceptRequests.filter,
+        includeHeaders: input.interceptRequests.includeHeaders,
+        includeBody: input.interceptRequests.includeBody,
+        redactSensitive: input.interceptRequests.redactSensitive,
+        maxRequests: input.interceptRequests.maxRequests,
       }, daemon);
     }
 

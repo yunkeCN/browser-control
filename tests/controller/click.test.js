@@ -126,12 +126,12 @@ test('click 成功: 带 changes 和 baselineId', async (t) => {
   assert.match(result.summary, /观察基线/);
 });
 
-// ─── probe 模式 ─────────────────────────────────────────────────
+// ─── 请求拦截和观察模式 ─────────────────────────────────────────
 
-test('click 成功: probe 模式捕获网络请求', async (t) => {
+test('click 成功: 请求拦截和观察模式捕获网络请求', async (t) => {
   const fake = createFakeDaemon({
     onCommand: (envelope) => {
-      // probe 模式: click 发第一个请求，然后 probe 内部可能发多个
+      // 请求拦截和观察模式: click 发第一个请求，然后内部可能发多个
       // 但统一 click 入口的 executeClickProbe 最终返回 data
       return {
         id: envelope.id,
@@ -163,7 +163,7 @@ test('click 成功: probe 模式捕获网络请求', async (t) => {
 
   const result = await click({
     target: '@e91_1',
-    probe: { filter: '/api/', includeBody: true },
+    interceptRequests: { filter: '/api/', includeBody: true },
     session: 'mcp-active-session',
   }, client);
 
@@ -178,7 +178,7 @@ test('click 成功: probe 模式捕获网络请求', async (t) => {
   assert.equal(fake.requests[0].session, 'mcp-active-session');
 });
 
-test('click 成功: probe 模式无网络请求', async (t) => {
+test('click 成功: 请求拦截和观察模式无网络请求', async (t) => {
   const fake = createFakeDaemon({
     onCommand: (envelope) => ({
       id: envelope.id,
@@ -207,7 +207,7 @@ test('click 成功: probe 模式无网络请求', async (t) => {
 
   const result = await click({
     target: '@e91_1',
-    probe: { filter: '/api/' },
+    interceptRequests: { filter: '/api/' },
   }, client);
 
   assert.equal(result.ok, true);

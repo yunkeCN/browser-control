@@ -46,7 +46,7 @@ Send typed command envelopes to `POST http://127.0.0.1:10087/command` or use the
 ```bash
 node scripts/browser-control.js command snapshot --session demo --args '{}'
 node scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1"}'
-node scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1","probe":{"filter":"/api/","includeBody":true}}'
+node scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1","interceptRequests":{"filter":"/api/","includeBody":true}}'
 node scripts/browser-control.js command click --session demo --args '{"text":"Submit","x":200,"y":300}'
 node scripts/browser-control.js command fill --session demo --args '{"target":"@e0abc12_1","value":"draft text"}'
 node scripts/browser-control.js command get_text --session demo --args '{"scope":"viewport","maxChars":4000}'
@@ -93,7 +93,7 @@ Load `references/recipes.md` for task playbooks:
 - download files
 - clean up sessions
 
-For quick single-action verification, use `snapshot diff_to` to compare DOM structure before and after. For network interception during a click, use `click` with the `probe` parameter to block matching API requests before they reach the server. Note: probe is not a dry run — the click still happens and may change frontend state, storage, dialogs, or route state. Only the matching network requests are blocked.
+For quick single-action verification, use `snapshot diff_to` to compare DOM structure before and after. To inspect API requests and request parameters triggered by a click without letting matching requests reach the server, use `click` with `interceptRequests`. This is not a dry run: the click still happens and may change frontend state, storage, dialogs, or route state. Only matching network requests are blocked and returned.
 
 Network monitoring starts automatically on `navigate`. Use `network { action: 'list' }` to list captured same-origin xhr/fetch requests (per-tab 100 request limit) and `network { action: 'detail', requestId: '...' }` to inspect a specific request.
 

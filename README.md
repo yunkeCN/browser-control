@@ -99,7 +99,7 @@ Browser Control provides 15 commands, available through both CLI and MCP:
 | `tabs` | List, switch, or close tabs |
 | `snapshot` | Capture page accessibility tree with @e refs |
 | `get_text` | Extract page text content |
-| `click` | Click element (by ref, text+position, or with network probe) |
+| `click` | Click element (by ref, text+position, or with request interception) |
 | `fill` | Fill form fields |
 | `press` | Press keyboard keys |
 | `scroll` | Scroll page or element |

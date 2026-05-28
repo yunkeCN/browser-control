@@ -36,8 +36,8 @@ export interface ProtocolErrorShape {
   details?: unknown;
 }
 
-/** Click probe options for CDP network interception */
-export interface ClickProbeOptions {
+/** Options for intercepting matching API requests during a real click and returning their request details */
+export interface ClickRequestInterceptionOptions {
   filter?: string;
   includeHeaders?: boolean;
   includeBody?: boolean;
@@ -50,7 +50,7 @@ export interface CommandArgs {
   navigate: { url: string; newTab?: boolean; timeoutMs?: number };
   tabs: { action?: TabsAction; urlIncludes?: string; titleIncludes?: string; active?: boolean; tabId?: number };
   snapshot: { tabId?: number; roles?: string[]; tags?: string[]; hasVisibleText?: boolean; textIncludes?: string; viewportOnly?: boolean; boxes?: boolean; diff_to?: string };
-  click: { target?: ClickTarget; text?: string; x?: number; y?: number; roles?: string[]; tabId?: number; force?: boolean; probe?: ClickProbeOptions };
+  click: { target?: ClickTarget; text?: string; x?: number; y?: number; roles?: string[]; tabId?: number; force?: boolean; interceptRequests?: ClickRequestInterceptionOptions };
   fill: { target: ElementTarget; value: string; tabId?: number; strategy?: 'native_setter' | 'text_input' | 'paste_like'; clear?: boolean; commit?: 'change' | 'blur' | 'enter' | 'none'; expectChange?: boolean; observe?: ObserveOptions };
   press: { key: string; target?: ElementTarget; tabId?: number; strategy?: 'auto' | 'cdp_keyboard' | 'dom_keyboard'; modifiers?: string[]; expectChange?: boolean; observe?: ObserveOptions; observeNewTab?: boolean; expectNewTab?: boolean };
   scroll: { target?: ElementTarget; tabId?: number; strategy?: 'auto' | 'dom' | 'wheel'; deltaX?: number; deltaY?: number; x?: number; y?: number; region?: { x: number; y: number; width: number; height: number }; steps?: number; block?: ScrollLogicalPosition; behavior?: ScrollBehavior; waitMs?: number };

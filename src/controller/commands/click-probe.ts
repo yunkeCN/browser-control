@@ -2,7 +2,7 @@
  * 点击探测 — 内部实现
  *
  * 通过 CDP Fetch.enable 主动拦截点击期间的网络请求。
- * 由统一 click 命令的 probe 模式调用。
+ * 由统一 click 命令的请求拦截和观察模式调用。
  */
 
 import type { DaemonClient } from '../../mcp/daemon-client';
@@ -43,7 +43,7 @@ export async function executeClickProbe(
   );
   const response = await daemon.command(envelope);
   const raw = response.data as Record<string, unknown>;
-  // 标记为 probe 模式，供 toResult 识别
+  // 标记为内部 click_probe 模式，供 toResult 识别
   return { ...raw, _mode: 'probe' };
 }
 
@@ -53,7 +53,7 @@ export function toClickProbeResult(raw: Record<string, unknown>): CommandResult<
   if (!clickData) {
     return {
       ok: false,
-      summary: '点击探测失败: daemon 未返回结果',
+      summary: '请求拦截观察失败: daemon 未返回结果',
       nextSteps: ['请确认目标元素在当前页面中存在', '重试 click 命令'],
     };
   }

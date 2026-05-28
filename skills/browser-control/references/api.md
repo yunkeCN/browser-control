@@ -45,7 +45,7 @@ Browser command helper examples:
 ```bash
 node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{}'
 node skills/browser-control/scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1"}'
-node skills/browser-control/scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1","probe":{"filter":"/api/"}}'
+node skills/browser-control/scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1","interceptRequests":{"filter":"/api/"}}'
 node skills/browser-control/scripts/browser-control.js command scroll --session demo --args '{"deltaY":800,"strategy":"dom"}'
 node skills/browser-control/scripts/browser-control.js command evaluate --session demo --code-file ./snippet.js
 node skills/browser-control/scripts/browser-control.js command tabs --session demo --args '{"action":"list"}'
@@ -172,7 +172,7 @@ node skills/browser-control/scripts/browser-control.js command snapshot --sessio
 
 Click an element by snapshot ref, CSS fallback, or visible text coordinates.
 
-Arguments: `target` or `text` required (mutually exclusive), optional `tabId`, `x`, `y`, `roles`, `force`, and `probe`.
+Arguments: `target` or `text` required (mutually exclusive), optional `tabId`, `x`, `y`, `roles`, `force`, and `interceptRequests`.
 
 Target mode (ref or CSS):
 
@@ -186,7 +186,7 @@ Text mode:
 Common options:
 
 - `force`: skip visibility checks and click even if the element is covered or hidden.
-- `probe`: intercept matching API requests at the CDP level so the server never receives them. The `probe` object accepts: `filter` (URL substring to match), `includeHeaders` (default `true`), `includeBody` (default `true`), `redactSensitive` (default `true`), and `maxRequests` (default `100`). When `filter` is set, only API requests whose URL includes the filter are blocked and returned; nonmatching requests continue normally. Probe is not a full dry run: the click still executes on the page and may change frontend state, storage, dialogs, or route state — only the matching network requests are prevented from reaching the server.
+- `interceptRequests`: use this when you need to inspect the API requests and request parameters triggered by a click, but do not want matching requests to actually reach the server. The object accepts: `filter` (URL substring to match), `includeHeaders` (default `true`), `includeBody` (default `true`), `redactSensitive` (default `true`), and `maxRequests` (default `100`). When `filter` is set, only API requests whose URL includes the filter are blocked and returned; nonmatching requests continue normally. This is not a full dry run: the click still executes on the page and may change frontend state, storage, dialogs, or route state — only the matching network requests are prevented from reaching the server.
 
 Browser Control chooses the click strategy internally: it prefers real CDP mouse input when safe, then falls back to DOM pointer events. After the actual click returns, Browser Control waits 500ms before settle/diff capture so delayed UI changes have time to appear. Diagnostics may include `strategyUsed`, `target`, `hitTest`, `focusBefore`, `focusAfter`, `newTab` / `newTabs`, `settle`, `changes`, `postSnapshot`, and `warnings`. `clicked:true` means the click event was triggered; verify business-state completion with `changes`, a fresh `snapshot`, or `wait_for`. Covered targets fail with `COVERED_TARGET`; take a fresh snapshot, close the overlay, or choose a visible child target.
 
@@ -194,7 +194,7 @@ Browser Control chooses the click strategy internally: it prefers real CDP mouse
 {"command":"click","args":{"target":"@e1jm0sbb_1"}}
 {"command":"click","args":{"target":"css=.submit-btn","force":true}}
 {"command":"click","args":{"text":"Submit","x":400,"y":300}}
-{"command":"click","args":{"target":"@e1jm0sbb_1","probe":{"filter":"/api/","includeBody":true}}}
+{"command":"click","args":{"target":"@e1jm0sbb_1","interceptRequests":{"filter":"/api/","includeBody":true}}}
 ```
 
 ### `fill`

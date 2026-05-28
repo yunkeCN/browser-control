@@ -34604,7 +34604,7 @@ var COMMANDS = {
   click: {
     required: [],
     requiredOneOf: ["target", "text"],
-    optional: ["target", "text", "x", "y", "roles", "tabId", "force", "probe"],
+    optional: ["target", "text", "x", "y", "roles", "tabId", "force", "interceptRequests"],
     example: { target: "@e1abc23_1" }
   },
   fill: {
@@ -34737,11 +34737,14 @@ function validateKnownArgs(request, spec) {
   if (request.command === "network" && field === "index") {
     hints.unshift('Use args.requestId from network { action: "list" }; numeric index is not supported.');
   }
+  if (request.command === "click" && field === "probe") {
+    hints.unshift("Use args.interceptRequests when you need to inspect API requests and request parameters triggered by a click, but do not want matching requests to actually reach the server.");
+  }
   if (TARGET_COMMANDS.has(request.command) && LEGACY_TARGET_ARGS.includes(field)) {
     hints.unshift(`${request.command} now accepts args.target for element targeting. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.`);
   }
   if (request.command === "click" && ["strategy", "button", "clickCount", "modifiers", "expectChange", "observe", "observeNewTab", "expectNewTab"].includes(field)) {
-    hints.unshift("click accepts target (or text+x+y), optional tabId, force, and probe. For network interception use probe: { filter, includeBody, includeHeaders }.");
+    hints.unshift("click accepts target (or text+x+y), optional tabId, force, and interceptRequests. Use interceptRequests to inspect click-triggered API requests while blocking matching requests before they reach the server.");
   }
   if (request.command === "get_text" && field === "selectors") {
     hints.unshift("get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes.");
@@ -35088,13 +35091,13 @@ var commandArgSchemas = {
     roles: external_exports.array(external_exports.string()).optional().describe("ARIA roles filter for text mode."),
     tabId,
     force: external_exports.boolean().optional().describe("Skip visibility checks."),
-    probe: external_exports.object({
-      filter: external_exports.string().optional().describe("URL substring to capture matching network requests."),
-      includeHeaders: external_exports.boolean().optional().describe("Include response headers in captured requests."),
-      includeBody: external_exports.boolean().optional().describe("Include response body in captured requests."),
-      redactSensitive: external_exports.boolean().optional().describe("Redact sensitive data in captured requests."),
-      maxRequests: external_exports.number().int().positive().optional().describe("Maximum number of requests to capture.")
-    }).strict().optional().describe("Enable CDP network interception during click. Captures matching requests with headers/body.")
+    interceptRequests: external_exports.object({
+      filter: external_exports.string().optional().describe("URL substring for matching API requests to intercept."),
+      includeHeaders: external_exports.boolean().optional().describe("Include request headers in intercepted requests."),
+      includeBody: external_exports.boolean().optional().describe("Include request body in intercepted requests."),
+      redactSensitive: external_exports.boolean().optional().describe("Redact sensitive data in intercepted requests."),
+      maxRequests: external_exports.number().int().positive().optional().describe("Maximum number of intercepted requests to return.")
+    }).strict().optional().describe("Use this when you need to inspect the API requests and request parameters triggered by a click, but do not want matching requests to actually reach the server. This is not a dry run: the page click still happens, while matching requests are blocked and returned.")
   }).strict(),
   fill: external_exports.object({
     target: elementTarget,
@@ -36001,7 +36004,7 @@ function toClickProbeResult(raw) {
   if (!clickData) {
     return {
       ok: false,
-      summary: "\u70B9\u51FB\u63A2\u6D4B\u5931\u8D25: daemon \u672A\u8FD4\u56DE\u7ED3\u679C",
+      summary: "\u8BF7\u6C42\u62E6\u622A\u89C2\u5BDF\u5931\u8D25: daemon \u672A\u8FD4\u56DE\u7ED3\u679C",
       nextSteps: ["\u8BF7\u786E\u8BA4\u76EE\u6807\u5143\u7D20\u5728\u5F53\u524D\u9875\u9762\u4E2D\u5B58\u5728", "\u91CD\u8BD5 click \u547D\u4EE4"]
     };
   }
@@ -36363,39 +36366,39 @@ var clickDef = {
     if (args.force !== void 0 && typeof args.force !== "boolean") {
       throw new Error("force \u5FC5\u987B\u662F\u5E03\u5C14\u503C");
     }
-    let probe;
-    if (args.probe !== void 0) {
-      if (typeof args.probe !== "object" || args.probe === null || Array.isArray(args.probe)) {
-        throw new Error("probe \u5FC5\u987B\u662F\u5BF9\u8C61");
+    let interceptRequests;
+    if (args.interceptRequests !== void 0) {
+      if (typeof args.interceptRequests !== "object" || args.interceptRequests === null || Array.isArray(args.interceptRequests)) {
+        throw new Error("interceptRequests \u5FC5\u987B\u662F\u5BF9\u8C61");
       }
-      const p = args.probe;
-      probe = {};
-      if (p.filter !== void 0) {
-        if (typeof p.filter !== "string") throw new Error("probe.filter \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
-        probe.filter = p.filter;
+      const requestInterception = args.interceptRequests;
+      interceptRequests = {};
+      if (requestInterception.filter !== void 0) {
+        if (typeof requestInterception.filter !== "string") throw new Error("interceptRequests.filter \u5FC5\u987B\u662F\u5B57\u7B26\u4E32");
+        interceptRequests.filter = requestInterception.filter;
       }
-      if (p.includeHeaders !== void 0) {
-        if (typeof p.includeHeaders !== "boolean") throw new Error("probe.includeHeaders \u5FC5\u987B\u662F\u5E03\u5C14\u503C");
-        probe.includeHeaders = p.includeHeaders;
+      if (requestInterception.includeHeaders !== void 0) {
+        if (typeof requestInterception.includeHeaders !== "boolean") throw new Error("interceptRequests.includeHeaders \u5FC5\u987B\u662F\u5E03\u5C14\u503C");
+        interceptRequests.includeHeaders = requestInterception.includeHeaders;
       }
-      if (p.includeBody !== void 0) {
-        if (typeof p.includeBody !== "boolean") throw new Error("probe.includeBody \u5FC5\u987B\u662F\u5E03\u5C14\u503C");
-        probe.includeBody = p.includeBody;
+      if (requestInterception.includeBody !== void 0) {
+        if (typeof requestInterception.includeBody !== "boolean") throw new Error("interceptRequests.includeBody \u5FC5\u987B\u662F\u5E03\u5C14\u503C");
+        interceptRequests.includeBody = requestInterception.includeBody;
       }
-      if (p.redactSensitive !== void 0) {
-        if (typeof p.redactSensitive !== "boolean") throw new Error("probe.redactSensitive \u5FC5\u987B\u662F\u5E03\u5C14\u503C");
-        probe.redactSensitive = p.redactSensitive;
+      if (requestInterception.redactSensitive !== void 0) {
+        if (typeof requestInterception.redactSensitive !== "boolean") throw new Error("interceptRequests.redactSensitive \u5FC5\u987B\u662F\u5E03\u5C14\u503C");
+        interceptRequests.redactSensitive = requestInterception.redactSensitive;
       }
-      if (p.maxRequests !== void 0) {
-        if (typeof p.maxRequests !== "number") throw new Error("probe.maxRequests \u5FC5\u987B\u662F\u6570\u5B57");
-        probe.maxRequests = p.maxRequests;
+      if (requestInterception.maxRequests !== void 0) {
+        if (typeof requestInterception.maxRequests !== "number") throw new Error("interceptRequests.maxRequests \u5FC5\u987B\u662F\u6570\u5B57");
+        interceptRequests.maxRequests = requestInterception.maxRequests;
       }
     }
     return {
       target: args.target,
       tabId: args.tabId,
       force: args.force,
-      probe
+      interceptRequests
     };
   },
   execute: async (input, daemon) => {
@@ -36408,16 +36411,16 @@ var clickDef = {
         tabId: input.tabId
       }, daemon);
     }
-    if (input.probe) {
+    if (input.interceptRequests) {
       return executeClickProbe({
         target: input.target,
         tabId: input.tabId,
         force: input.force,
-        filter: input.probe.filter,
-        includeHeaders: input.probe.includeHeaders,
-        includeBody: input.probe.includeBody,
-        redactSensitive: input.probe.redactSensitive,
-        maxRequests: input.probe.maxRequests
+        filter: input.interceptRequests.filter,
+        includeHeaders: input.interceptRequests.includeHeaders,
+        includeBody: input.interceptRequests.includeBody,
+        redactSensitive: input.interceptRequests.redactSensitive,
+        maxRequests: input.interceptRequests.maxRequests
       }, daemon);
     }
     const envelope = daemon.buildEnvelope(
@@ -37472,7 +37475,7 @@ var TOOL_DEFS = [
   {
     command: "click",
     title: "Click element",
-    description: 'Click a page element. Three modes:\n1. By @e ref: { target: "@eabc_1" } \u2014 use refs from browser_snapshot.\n2. With network interception: { target: "@eabc_1", probe: { filter: "/api/", includeBody: true } } \u2014 captures matching requests via CDP.\n3. By text + position: { text: "Submit", x: 200, y: 300 } \u2014 x and y are required in text mode.\ntarget and text are mutually exclusive; provide one.',
+    description: 'Click a page element. Three modes:\n1. By @e ref: { target: "@eabc_1" } \u2014 use refs from browser_snapshot.\n2. Intercept requests: { target: "@eabc_1", interceptRequests: { filter: "/api/", includeBody: true } } \u2014 use when you need to inspect API requests and request parameters triggered by a click, but do not want matching requests to actually reach the server.\n3. By text + position: { text: "Submit", x: 200, y: 300 } \u2014 x and y are required in text mode.\ntarget and text are mutually exclusive; provide one.',
     annotations: { destructiveHint: true },
     controller: click
   },
@@ -37660,7 +37663,7 @@ function registerBrowserControlPrompts(server) {
     '- Need readable page text \u2192 browser_get_text (scope: "viewport" for visible, "full" for all rendered, "document" for raw innerText)',
     "- Need to run custom JS in page \u2192 browser_evaluate",
     "- Need to detect DOM structure changes \u2192 browser_snapshot with diff_to",
-    "- Need to inspect API traffic \u2192 browser_network or browser_click with probe",
+    "- Need to inspect API traffic \u2192 browser_network, or browser_click with interceptRequests when you need to inspect click-triggered requests without letting matching requests reach the server",
     "",
     "## Typical loop",
     "",
@@ -37669,7 +37672,7 @@ function registerBrowserControlPrompts(server) {
     "## Detecting page changes",
     "",
     "- DOM structure changes (new elements, dialogs, removed items): browser_snapshot with diff_to=<baselineId>.",
-    '- API calls triggered by a click: browser_click with probe parameter (e.g. probe: { filter: "/api/" }).',
+    '- API calls triggered by a click: browser_click with interceptRequests (e.g. interceptRequests: { filter: "/api/" }) blocks matching requests during the real click and returns request details.',
     '- Network requests triggered by any action: browser_network { action: "list" } to view captured same-origin API requests.',
     "",
     "diff_to is a two-step mechanism: the first call with a given ID stores the baseline and returns a normal snapshot; the second call with the same ID returns the structured diff. Do not expect diff output on the first call.",
@@ -37730,7 +37733,7 @@ function registerBrowserControlPrompts(server) {
       "Cross-tool usage patterns:",
       "- Narrow snapshot results before interaction: use textIncludes, roles, tags, hasVisibleText, viewportOnly to filter.",
       "- Verify state changes: snapshot with diff_to, or wait_for with text/selector, or capture for visual evidence.",
-      "- Intercept API during click: browser_click with probe captures matching requests; use browser_network for post-hoc inspection.",
+      "- Intercept API requests during click: browser_click with interceptRequests blocks matching requests during the real click and returns request details; use browser_network for post-hoc inspection.",
       '- Read specific page region: browser_get_text with selector (e.g. selector: ".search-results") avoids sidebar/nav noise.',
       "- Scroll then read: browser_scroll + browser_get_text for below-fold content (prefer over keyboard or evaluate workarounds).",
       "",
@@ -37742,7 +37745,7 @@ function registerBrowserControlPrompts(server) {
       'browser_snapshot({ textIncludes: "Login", hasVisibleText: true, viewportOnly: true, roles: ["button", "link", "textbox"] })',
       'browser_snapshot({ diff_to: "s1_abc123" })',
       'browser_click({ target: "@eabc_1" })',
-      'browser_click({ target: "@eabc_1", probe: { filter: "/api/", includeBody: true } })',
+      'browser_click({ target: "@eabc_1", interceptRequests: { filter: "/api/", includeBody: true } })',
       'browser_click({ text: "Submit", x: 200, y: 300 })',
       'browser_fill({ target: "@eabc_1", value: "draft", clear: true })',
       'browser_press({ key: "Enter" })',

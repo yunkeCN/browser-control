@@ -46,7 +46,7 @@ test('protocol exposes unified target args and keeps action diagnostics', () => 
   assert.equal(click.args.force, true);
   assert.deepEqual(COMMANDS.click.required, []);
   assert.deepEqual(COMMANDS.click.requiredOneOf, ['target', 'text']);
-  assert.deepEqual(COMMANDS.click.optional, ['target', 'text', 'x', 'y', 'roles', 'tabId', 'force', 'probe']);
+  assert.deepEqual(COMMANDS.click.optional, ['target', 'text', 'x', 'y', 'roles', 'tabId', 'force', 'interceptRequests']);
   assert.equal(COMMANDS.click.strategies, undefined);
   assert.deepEqual(mapNetworkCommand('click', click.args), {
     command: 'click',
@@ -115,19 +115,29 @@ test('target is a strict element action target with explicit CSS fallback', () =
   );
 });
 
-test('click probe is exposed via click command probe parameter and click_probe daemon-internal command', () => {
-  // click with probe parameter (MCP-exposed)
-  const clickWithProbe = validateRequest(normalizeRequest({
+test('click request interception is exposed via click command parameter and click_probe daemon-internal command', () => {
+  // click with request interception/observation parameter (MCP-exposed)
+  const clickWithRequestInterception = validateRequest(normalizeRequest({
     command: 'click',
     args: {
       target: '@e1abc_1',
-      probe: { filter: '/api/', includeBody: true }
+      interceptRequests: { filter: '/api/', includeBody: true }
     }
   }));
-  assert.equal(clickWithProbe.command, 'click');
-  assert.equal(clickWithProbe.args.target, '@e1abc_1');
-  assert.deepEqual(clickWithProbe.args.probe, { filter: '/api/', includeBody: true });
-  assert.equal(COMMANDS.click.optional.includes('probe'), true);
+  assert.equal(clickWithRequestInterception.command, 'click');
+  assert.equal(clickWithRequestInterception.args.target, '@e1abc_1');
+  assert.deepEqual(clickWithRequestInterception.args.interceptRequests, { filter: '/api/', includeBody: true });
+  assert.equal(COMMANDS.click.optional.includes('interceptRequests'), true);
+  assert.equal(COMMANDS.click.optional.includes('interceptAndObserveRequests'), false);
+  assert.equal(COMMANDS.click.optional.includes('probe'), false);
+
+  assert.throws(
+    () => validateRequest(normalizeRequest({ command: 'click', args: { target: '@e1abc_1', probe: { filter: '/api/' } } })),
+    err => err instanceof ProtocolError &&
+      err.code === 'VALIDATION_ERROR' &&
+      err.details?.field === 'probe' &&
+      /interceptRequests/.test((err.details?.hints || []).join(' '))
+  );
 
   // click_probe daemon-internal command
   const probe = validateRequest(normalizeRequest({
@@ -164,14 +174,14 @@ test('protocol docs and TypeScript contracts expose action observe options and n
   const contracts = fs.readFileSync(path.join(path.resolve(__dirname, '..'), 'contracts.ts'), 'utf8');
   const api = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'references', 'api.md'), 'utf8');
 
-  // click in contracts: target?, text?, probe?, no after
+  // click in contracts: target?, text?, interceptRequests?, no after
   assert.match(contracts, /click:\s*\{[^}]*target\?:\s*ClickTarget/s);
-  assert.match(contracts, /click:\s*\{[^}]*probe\?:\s*ClickProbeOptions/s);
+  assert.match(contracts, /click:\s*\{[^}]*interceptRequests\?:\s*ClickRequestInterceptionOptions/s);
   assert.doesNotMatch(contracts.match(/click:\s*\{[^}]+}/s)?.[0] || '', /after\?/);
-  // ClickProbeOptions interface exists with probe fields
-  assert.match(contracts, /export interface ClickProbeOptions/);
+  // ClickRequestInterceptionOptions interface exists with request interception fields
+  assert.match(contracts, /export interface ClickRequestInterceptionOptions/);
   for (const option of ['filter', 'includeHeaders', 'includeBody', 'redactSensitive', 'maxRequests']) {
-    assert.match(contracts, new RegExp(`ClickProbeOptions[\\s\\S]*?${option}\\??:\\s*`));
+    assert.match(contracts, new RegExp(`ClickRequestInterceptionOptions[\\s\\S]*?${option}\\??:\\s*`));
   }
   // click_probe is NOT in MCP-exposed CommandArgs (daemon-internal only)
   assert.doesNotMatch(contracts, /click_probe:/);
@@ -191,8 +201,8 @@ test('protocol docs and TypeScript contracts expose action observe options and n
   assert.match(contracts, /export interface NavigateResult/);
   assert.match(contracts, /navigationComplete:\s*boolean/);
   assert.match(api, /Stable response fields:/);
-  // click probe is documented inline in the click section, not as standalone click_probe
-  assert.match(api, /probe.*not a full dry run/s);
+  // request interception is documented inline in the click section, not as standalone click_probe
+  assert.match(api, /interceptRequests.*not a full dry run/s);
   assert.match(api, /Arguments: `target` or `text` required/);
   assert.match(api, /postSnapshot/);
   assert.doesNotMatch(contracts, /urlContains|titleContains/);
