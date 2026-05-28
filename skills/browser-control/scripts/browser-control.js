@@ -27,6 +27,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
+// src/controller/cli.ts
+var import_node_fs2 = __toESM(require("node:fs"));
+
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
 __export(external_exports, {
@@ -15861,24 +15864,51 @@ var networkDef = {
             nextSteps: ["\u8BF7\u786E\u8BA4 requestId \u6709\u6548"]
           };
         }
-        const requestRaw = rawData.request;
-        if (!requestRaw) {
+        if (typeof rawData.error === "string" && rawData.error) {
           return {
             ok: false,
-            summary: "\u8BF7\u6C42\u8BE6\u60C5\u83B7\u53D6\u5931\u8D25: daemon \u672A\u8FD4\u56DE\u8BF7\u6C42\u6570\u636E",
+            summary: `\u8BF7\u6C42\u8BE6\u60C5\u83B7\u53D6\u5931\u8D25: ${rawData.error}`,
             nextSteps: ["\u8BF7\u786E\u8BA4 requestId \u6709\u6548"]
           };
         }
-        const method = String(requestRaw.method || "");
-        const url2 = String(requestRaw.url || "");
-        const statusCode = Number(requestRaw.statusCode) || 0;
-        const responseRaw = rawData.response;
-        const response = responseRaw ? { statusCode: Number(responseRaw.statusCode) || 0 } : void 0;
+        const method = typeof rawData.method === "string" ? rawData.method : "";
+        const url2 = typeof rawData.url === "string" ? rawData.url : "";
+        if (!method || !url2) {
+          return {
+            ok: false,
+            summary: "\u8BF7\u6C42\u8BE6\u60C5\u83B7\u53D6\u5931\u8D25: extension \u672A\u8FD4\u56DE method/url",
+            nextSteps: ["\u8BF7\u786E\u8BA4 requestId \u6709\u6548"]
+          };
+        }
+        const statusCode = typeof rawData.statusCode === "number" ? rawData.statusCode : null;
+        const requestId = String(rawData.requestId || rawData.id || "");
         return {
           ok: true,
           summary: `\u8BF7\u6C42\u8BE6\u60C5: ${method} ${url2} \u2192 ${statusCode}`,
-          request: { method, url: url2, statusCode },
-          response
+          requestId,
+          id: typeof rawData.id === "string" ? rawData.id : void 0,
+          ids: rawData.ids,
+          webRequestId: typeof rawData.webRequestId === "string" ? rawData.webRequestId : null,
+          cdpRequestId: typeof rawData.cdpRequestId === "string" ? rawData.cdpRequestId : null,
+          mergeConfidence: typeof rawData.mergeConfidence === "string" ? rawData.mergeConfidence : void 0,
+          mergedFrom: rawData.mergedFrom,
+          method,
+          url: url2,
+          tabId: typeof rawData.tabId === "number" ? rawData.tabId : null,
+          status: typeof rawData.status === "string" ? rawData.status : null,
+          statusCode,
+          statusText: typeof rawData.statusText === "string" ? rawData.statusText : null,
+          requestHeaders: rawData.requestHeaders,
+          requestBody: rawData.requestBody,
+          responseHeaders: rawData.responseHeaders,
+          mimeType: typeof rawData.mimeType === "string" ? rawData.mimeType : null,
+          body: typeof rawData.body === "string" ? rawData.body : null,
+          json: rawData.json,
+          base64Encoded: Boolean(rawData.base64Encoded),
+          bodyLength: typeof rawData.bodyLength === "number" ? rawData.bodyLength : void 0,
+          bodyError: rawData.bodyError,
+          artifactRecommended: Boolean(rawData.artifactRecommended),
+          artifact: rawData.artifact
         };
       }
       default:
@@ -16497,7 +16527,7 @@ var DISPATCH = {
 function printHelp() {
   console.log(`Browser Control CLI
 
-\u7528\u6CD5: browser-control <command> [--args <json>] [--json]
+\u7528\u6CD5: browser-control <command> [--session <name>] [--args <json>] [--args-file <path>] [--code-file <path>] [--timeout-ms <ms>] [--id <id>] [--json]
 
 \u547D\u4EE4: ${Object.keys(DISPATCH).join(", ")}
 
@@ -16509,14 +16539,44 @@ function printHelp() {
   doctor    \u8FD0\u884C daemon \u8BCA\u65AD
 
 \u793A\u4F8B:
-  browser-control navigate --args '{"url":"https://example.com"}'
-  browser-control click --args '{"target":"@eyws8mg_1"}'
-  browser-control click --args '{"text":"\u65B0\u589E\u5206\u652F","x":200,"y":300}'
+  browser-control navigate --session demo --args '{"url":"https://example.com"}'
+  browser-control click --session demo --args '{"target":"@eyws8mg_1"}'
+  browser-control click --session demo --args '{"text":"\u65B0\u589E\u5206\u652F","x":200,"y":300}'
+  browser-control evaluate --session demo --code-file ./snippet.js
   browser-control status
 `);
 }
+function failArgParse(summary) {
+  console.error(JSON.stringify({ ok: false, summary }));
+  process.exit(1);
+}
+function requireFlagValue(argv, index, flag) {
+  const value = argv[index + 1];
+  if (!value || value.startsWith("--")) {
+    failArgParse(`${flag} \u9700\u8981\u4E00\u4E2A\u53C2\u6570\u503C`);
+  }
+  return value;
+}
+function parseJsonObject(text, label) {
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      failArgParse(`${label} \u5FC5\u987B\u662F JSON object`);
+    }
+    return parsed;
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      failArgParse(`${label} \u5FC5\u987B\u662F\u6709\u6548\u7684 JSON`);
+    }
+    throw err;
+  }
+}
 function parseArgs(argv) {
   const args = {};
+  const envelopeArgs = {};
+  let inlineArgs;
+  let fileArgs;
+  let codeFile;
   let command = "";
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === "--help" || argv[i] === "-h") {
@@ -16525,13 +16585,51 @@ function parseArgs(argv) {
     }
     if (!command && !argv[i].startsWith("--")) {
       command = argv[i];
-    } else if (argv[i] === "--args" && i + 1 < argv.length) {
+    } else if (argv[i] === "--args") {
+      const value = requireFlagValue(argv, i, "--args");
+      inlineArgs = parseJsonObject(value, "--args");
+      i += 1;
+    } else if (argv[i] === "--args-file") {
+      const filePath = requireFlagValue(argv, i, "--args-file");
       try {
-        Object.assign(args, JSON.parse(argv[++i]));
-      } catch {
-        console.error(JSON.stringify({ ok: false, summary: "--args \u5FC5\u987B\u662F\u6709\u6548\u7684 JSON" }));
-        process.exit(1);
+        fileArgs = parseJsonObject(import_node_fs2.default.readFileSync(filePath, "utf8"), "--args-file");
+      } catch (err) {
+        if (err.code) {
+          failArgParse(`\u8BFB\u53D6 --args-file \u5931\u8D25: ${err.message}`);
+        }
+        throw err;
       }
+      i += 1;
+    } else if (argv[i] === "--code-file") {
+      codeFile = requireFlagValue(argv, i, "--code-file");
+      i += 1;
+    } else if (argv[i] === "--session") {
+      envelopeArgs.session = requireFlagValue(argv, i, "--session");
+      i += 1;
+    } else if (argv[i] === "--id") {
+      envelopeArgs.id = requireFlagValue(argv, i, "--id");
+      i += 1;
+    } else if (argv[i] === "--timeout-ms") {
+      const value = Number(requireFlagValue(argv, i, "--timeout-ms"));
+      if (!Number.isFinite(value) || value <= 0) {
+        failArgParse("--timeout-ms \u5FC5\u987B\u662F\u6B63\u6570");
+      }
+      envelopeArgs.timeoutMs = value;
+      i += 1;
+    } else if (argv[i] === "--json") {
+    } else if (argv[i].startsWith("--")) {
+      failArgParse(`\u672A\u77E5\u53C2\u6570: ${argv[i]}`);
+    }
+  }
+  if (codeFile !== void 0 && command !== "evaluate") {
+    failArgParse("--code-file \u53EA\u80FD\u7528\u4E8E evaluate \u547D\u4EE4");
+  }
+  Object.assign(args, fileArgs, inlineArgs, envelopeArgs);
+  if (codeFile !== void 0) {
+    try {
+      args.code = import_node_fs2.default.readFileSync(codeFile, "utf8");
+    } catch (err) {
+      failArgParse(`\u8BFB\u53D6 --code-file \u5931\u8D25: ${err.message}`);
     }
   }
   return { command, args };

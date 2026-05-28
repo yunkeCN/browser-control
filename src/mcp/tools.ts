@@ -97,7 +97,8 @@ const TOOL_DEFS: ToolDef[] = [
     title: 'Click element',
     description:
       'Click a page element. Three modes:\n'
-      + '1. By @e ref: { target: "@eabc_1" } — use refs from browser_snapshot.\n'
+      + 'Prefer target mode with @e refs from browser_snapshot whenever possible; use text + position only as a fallback when no reliable ref is available.\n'
+      + '1. By @e ref: { target: "@eabc_1" } — recommended; use refs from browser_snapshot.\n'
       + '2. Intercept requests: { target: "@eabc_1", interceptRequests: { filter: "/api/", includeBody: true } } — use when you need to inspect API requests and request parameters triggered by a click, but do not want matching requests to actually reach the server.\n'
       + '3. By text + position: { text: "Submit", x: 200, y: 300 } — x and y are required in text mode.\n'
       + 'target and text are mutually exclusive; provide one.',

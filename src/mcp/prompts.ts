@@ -97,6 +97,7 @@ export function registerBrowserControlPrompts(server: McpServer): void {
       '',
       'Cross-tool usage patterns:',
       '- Narrow snapshot results before interaction: use textIncludes, roles, tags, hasVisibleText, viewportOnly to filter.',
+      '- Clicks: prefer browser_click with target "@e..." refs from browser_snapshot; use text+x+y only when no reliable target ref is available.',
       '- Verify state changes: snapshot with diff_to, or wait_for with text/selector, or capture for visual evidence.',
       '- Intercept API requests during click: browser_click with interceptRequests blocks matching requests during the real click and returns request details; use browser_network for post-hoc inspection.',
       '- Read specific page region: browser_get_text with selector (e.g. selector: ".search-results") avoids sidebar/nav noise.',

@@ -36797,24 +36797,51 @@ var networkDef = {
             nextSteps: ["\u8BF7\u786E\u8BA4 requestId \u6709\u6548"]
           };
         }
-        const requestRaw = rawData.request;
-        if (!requestRaw) {
+        if (typeof rawData.error === "string" && rawData.error) {
           return {
             ok: false,
-            summary: "\u8BF7\u6C42\u8BE6\u60C5\u83B7\u53D6\u5931\u8D25: daemon \u672A\u8FD4\u56DE\u8BF7\u6C42\u6570\u636E",
+            summary: `\u8BF7\u6C42\u8BE6\u60C5\u83B7\u53D6\u5931\u8D25: ${rawData.error}`,
             nextSteps: ["\u8BF7\u786E\u8BA4 requestId \u6709\u6548"]
           };
         }
-        const method = String(requestRaw.method || "");
-        const url2 = String(requestRaw.url || "");
-        const statusCode = Number(requestRaw.statusCode) || 0;
-        const responseRaw = rawData.response;
-        const response = responseRaw ? { statusCode: Number(responseRaw.statusCode) || 0 } : void 0;
+        const method = typeof rawData.method === "string" ? rawData.method : "";
+        const url2 = typeof rawData.url === "string" ? rawData.url : "";
+        if (!method || !url2) {
+          return {
+            ok: false,
+            summary: "\u8BF7\u6C42\u8BE6\u60C5\u83B7\u53D6\u5931\u8D25: extension \u672A\u8FD4\u56DE method/url",
+            nextSteps: ["\u8BF7\u786E\u8BA4 requestId \u6709\u6548"]
+          };
+        }
+        const statusCode = typeof rawData.statusCode === "number" ? rawData.statusCode : null;
+        const requestId = String(rawData.requestId || rawData.id || "");
         return {
           ok: true,
           summary: `\u8BF7\u6C42\u8BE6\u60C5: ${method} ${url2} \u2192 ${statusCode}`,
-          request: { method, url: url2, statusCode },
-          response
+          requestId,
+          id: typeof rawData.id === "string" ? rawData.id : void 0,
+          ids: rawData.ids,
+          webRequestId: typeof rawData.webRequestId === "string" ? rawData.webRequestId : null,
+          cdpRequestId: typeof rawData.cdpRequestId === "string" ? rawData.cdpRequestId : null,
+          mergeConfidence: typeof rawData.mergeConfidence === "string" ? rawData.mergeConfidence : void 0,
+          mergedFrom: rawData.mergedFrom,
+          method,
+          url: url2,
+          tabId: typeof rawData.tabId === "number" ? rawData.tabId : null,
+          status: typeof rawData.status === "string" ? rawData.status : null,
+          statusCode,
+          statusText: typeof rawData.statusText === "string" ? rawData.statusText : null,
+          requestHeaders: rawData.requestHeaders,
+          requestBody: rawData.requestBody,
+          responseHeaders: rawData.responseHeaders,
+          mimeType: typeof rawData.mimeType === "string" ? rawData.mimeType : null,
+          body: typeof rawData.body === "string" ? rawData.body : null,
+          json: rawData.json,
+          base64Encoded: Boolean(rawData.base64Encoded),
+          bodyLength: typeof rawData.bodyLength === "number" ? rawData.bodyLength : void 0,
+          bodyError: rawData.bodyError,
+          artifactRecommended: Boolean(rawData.artifactRecommended),
+          artifact: rawData.artifact
         };
       }
       default:
@@ -37126,7 +37153,7 @@ var TOOL_DEFS = [
   {
     command: "click",
     title: "Click element",
-    description: 'Click a page element. Three modes:\n1. By @e ref: { target: "@eabc_1" } \u2014 use refs from browser_snapshot.\n2. Intercept requests: { target: "@eabc_1", interceptRequests: { filter: "/api/", includeBody: true } } \u2014 use when you need to inspect API requests and request parameters triggered by a click, but do not want matching requests to actually reach the server.\n3. By text + position: { text: "Submit", x: 200, y: 300 } \u2014 x and y are required in text mode.\ntarget and text are mutually exclusive; provide one.',
+    description: 'Click a page element. Three modes:\nPrefer target mode with @e refs from browser_snapshot whenever possible; use text + position only as a fallback when no reliable ref is available.\n1. By @e ref: { target: "@eabc_1" } \u2014 recommended; use refs from browser_snapshot.\n2. Intercept requests: { target: "@eabc_1", interceptRequests: { filter: "/api/", includeBody: true } } \u2014 use when you need to inspect API requests and request parameters triggered by a click, but do not want matching requests to actually reach the server.\n3. By text + position: { text: "Submit", x: 200, y: 300 } \u2014 x and y are required in text mode.\ntarget and text are mutually exclusive; provide one.',
     annotations: { destructiveHint: true },
     controller: click
   },
@@ -37383,6 +37410,7 @@ function registerBrowserControlPrompts(server) {
       "",
       "Cross-tool usage patterns:",
       "- Narrow snapshot results before interaction: use textIncludes, roles, tags, hasVisibleText, viewportOnly to filter.",
+      '- Clicks: prefer browser_click with target "@e..." refs from browser_snapshot; use text+x+y only when no reliable target ref is available.',
       "- Verify state changes: snapshot with diff_to, or wait_for with text/selector, or capture for visual evidence.",
       "- Intercept API requests during click: browser_click with interceptRequests blocks matching requests during the real click and returns request details; use browser_network for post-hoc inspection.",
       '- Read specific page region: browser_get_text with selector (e.g. selector: ".search-results") avoids sidebar/nav noise.',

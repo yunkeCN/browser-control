@@ -323,8 +323,8 @@ test('public docs and contracts stay aligned with current command argument surfa
   const screenshotHelper = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'scripts', 'screenshot.js'), 'utf8');
 
   assert.doesNotMatch(api, /command <name>/);
-  assert.doesNotMatch(api, /--args-file <path>/);
-  assert.doesNotMatch(api, /--code-file <path>/);
+  assert.match(api, /--args-file <path>/);
+  assert.match(api, /--code-file <path>/);
   assert.match(api, /codeBase64/);
   assert.match(api, /download`: args `url` required/);
   assert.match(contracts, /download:\s*\{\s*url:\s*string;[^}]*saveAs\?:\s*boolean/s);
@@ -336,7 +336,7 @@ test('public docs and contracts stay aligned with current command argument surfa
   assert.match(contracts, /network:\s*\{[^}]*action:\s*NetworkAction;[^}]*filter\?:\s*string;[^}]*limit\?:\s*number/s);
   assert.doesNotMatch(api, /includeResources/);
   assert.doesNotMatch(contracts, /includeResources/);
-  assert.match(recipes, /snapshot --args '\{"session":"read-page","hasVisibleText":true,"viewportOnly":true\}'/);
+  assert.match(recipes, /snapshot --session read-page --args '\{"hasVisibleText":true,"viewportOnly":true\}'/);
   assert.match(api, /### `scroll`/);
   assert.match(api, /strategy.*wheel.*x.*y.*deltaY/s);
   assert.match(api, /backward-compatible `document`/);

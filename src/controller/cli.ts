@@ -4,6 +4,7 @@
  *
  * 用法: browser-control <command> [--args <json>]
  */
+import fs from 'node:fs';
 import { navigate } from './commands/navigate.js';
 import { snapshot } from './commands/snapshot.js';
 import { click } from './commands/click.js';
@@ -35,7 +36,7 @@ const DISPATCH: Record<string, (args: Record<string, unknown>, client: DaemonCli
 function printHelp(): void {
   console.log(`Browser Control CLI
 
-用法: browser-control <command> [--args <json>] [--json]
+用法: browser-control <command> [--session <name>] [--args <json>] [--args-file <path>] [--code-file <path>] [--timeout-ms <ms>] [--id <id>] [--json]
 
 命令: ${Object.keys(DISPATCH).join(', ')}
 
@@ -47,15 +48,48 @@ function printHelp(): void {
   doctor    运行 daemon 诊断
 
 示例:
-  browser-control navigate --args '{"url":"https://example.com"}'
-  browser-control click --args '{"target":"@eyws8mg_1"}'
-  browser-control click --args '{"text":"新增分支","x":200,"y":300}'
+  browser-control navigate --session demo --args '{"url":"https://example.com"}'
+  browser-control click --session demo --args '{"target":"@eyws8mg_1"}'
+  browser-control click --session demo --args '{"text":"新增分支","x":200,"y":300}'
+  browser-control evaluate --session demo --code-file ./snippet.js
   browser-control status
 `);
 }
 
+function failArgParse(summary: string): never {
+  console.error(JSON.stringify({ ok: false, summary }));
+  process.exit(1);
+}
+
+function requireFlagValue(argv: string[], index: number, flag: string): string {
+  const value = argv[index + 1];
+  if (!value || value.startsWith('--')) {
+    failArgParse(`${flag} 需要一个参数值`);
+  }
+  return value;
+}
+
+function parseJsonObject(text: string, label: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      failArgParse(`${label} 必须是 JSON object`);
+    }
+    return parsed as Record<string, unknown>;
+  } catch (err: unknown) {
+    if (err instanceof SyntaxError) {
+      failArgParse(`${label} 必须是有效的 JSON`);
+    }
+    throw err;
+  }
+}
+
 function parseArgs(argv: string[]): { command: string; args: Record<string, unknown> } {
   const args: Record<string, unknown> = {};
+  const envelopeArgs: Record<string, unknown> = {};
+  let inlineArgs: Record<string, unknown> | undefined;
+  let fileArgs: Record<string, unknown> | undefined;
+  let codeFile: string | undefined;
   let command = '';
 
   for (let i = 2; i < argv.length; i++) {
@@ -65,13 +99,54 @@ function parseArgs(argv: string[]): { command: string; args: Record<string, unkn
     }
     if (!command && !argv[i].startsWith('--')) {
       command = argv[i];
-    } else if (argv[i] === '--args' && i + 1 < argv.length) {
+    } else if (argv[i] === '--args') {
+      const value = requireFlagValue(argv, i, '--args');
+      inlineArgs = parseJsonObject(value, '--args');
+      i += 1;
+    } else if (argv[i] === '--args-file') {
+      const filePath = requireFlagValue(argv, i, '--args-file');
       try {
-        Object.assign(args, JSON.parse(argv[++i]));
-      } catch {
-        console.error(JSON.stringify({ ok: false, summary: '--args 必须是有效的 JSON' }));
-        process.exit(1);
+        fileArgs = parseJsonObject(fs.readFileSync(filePath, 'utf8'), '--args-file');
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code) {
+          failArgParse(`读取 --args-file 失败: ${(err as Error).message}`);
+        }
+        throw err;
       }
+      i += 1;
+    } else if (argv[i] === '--code-file') {
+      codeFile = requireFlagValue(argv, i, '--code-file');
+      i += 1;
+    } else if (argv[i] === '--session') {
+      envelopeArgs.session = requireFlagValue(argv, i, '--session');
+      i += 1;
+    } else if (argv[i] === '--id') {
+      envelopeArgs.id = requireFlagValue(argv, i, '--id');
+      i += 1;
+    } else if (argv[i] === '--timeout-ms') {
+      const value = Number(requireFlagValue(argv, i, '--timeout-ms'));
+      if (!Number.isFinite(value) || value <= 0) {
+        failArgParse('--timeout-ms 必须是正数');
+      }
+      envelopeArgs.timeoutMs = value;
+      i += 1;
+    } else if (argv[i] === '--json') {
+      // Controller commands already print JSON. Keep --json accepted for consistency with lifecycle commands.
+    } else if (argv[i].startsWith('--')) {
+      failArgParse(`未知参数: ${argv[i]}`);
+    }
+  }
+
+  if (codeFile !== undefined && command !== 'evaluate') {
+    failArgParse('--code-file 只能用于 evaluate 命令');
+  }
+
+  Object.assign(args, fileArgs, inlineArgs, envelopeArgs);
+  if (codeFile !== undefined) {
+    try {
+      args.code = fs.readFileSync(codeFile, 'utf8');
+    } catch (err: unknown) {
+      failArgParse(`读取 --code-file 失败: ${(err as Error).message}`);
     }
   }
 

@@ -110,8 +110,30 @@ test('network detail 成功: 获取请求详情', async (t) => {
       backend: 'extension',
       session: envelope.session,
       data: {
-        request: { method: 'GET', url: 'https://api.example.com/data', statusCode: 200 },
-        response: { statusCode: 200 },
+        requestId: 'req_001',
+        id: 'req_001',
+        ids: { id: 'req_001', webRequestId: 'req_001', cdpRequestId: 'cdp_001' },
+        webRequestId: 'req_001',
+        cdpRequestId: 'cdp_001',
+        mergeConfidence: 'heuristic',
+        mergedFrom: ['req_001', 'cdp_001'],
+        method: 'POST',
+        url: 'https://api.example.com/data',
+        tabId: 123,
+        status: 'complete',
+        statusCode: 200,
+        statusText: null,
+        requestHeaders: { 'Content-Type': 'application/json' },
+        requestBody: '{"name":"draft"}',
+        responseHeaders: [{ name: 'content-type', value: 'application/json' }],
+        mimeType: 'application/json',
+        body: '{"ok":true}',
+        json: { ok: true },
+        base64Encoded: false,
+        bodyLength: 11,
+        bodyError: null,
+        artifactRecommended: false,
+        artifact: null,
       },
     }),
   });
@@ -122,15 +144,45 @@ test('network detail 成功: 获取请求详情', async (t) => {
   const result = await network({ action: 'detail', requestId: 'req_001' }, client);
 
   assert.equal(result.ok, true);
-  assert.match(result.summary, /GET/);
+  assert.match(result.summary, /POST/);
   assert.match(result.summary, /api\.example\.com/);
   assert.match(result.summary, /200/);
-  assert.equal(result.request.method, 'GET');
-  assert.equal(result.request.url, 'https://api.example.com/data');
-  assert.equal(result.response.statusCode, 200);
+  assert.equal(result.requestId, 'req_001');
+  assert.equal(result.method, 'POST');
+  assert.equal(result.url, 'https://api.example.com/data');
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.requestBody, '{"name":"draft"}');
+  assert.deepEqual(result.json, { ok: true });
+  assert.equal(result.body, '{"ok":true}');
+  assert.equal(result.ids.cdpRequestId, 'cdp_001');
 
   assert.equal(fake.requests[0].command, 'network_detail');
   assert.equal(fake.requests[0].args.requestId, 'req_001');
+});
+
+test('network detail 失败: extension 返回 requestId 未命中', async (t) => {
+  const fake = createFakeDaemon({
+    onCommand: (envelope) => ({
+      id: envelope.id,
+      ok: true,
+      command: 'network_detail',
+      backend: 'extension',
+      session: envelope.session,
+      data: {
+        requestId: 'missing',
+        body: null,
+        error: 'Request not found in capture buffer',
+      },
+    }),
+  });
+  await fake.listen();
+  t.after(() => fake.close());
+
+  const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
+  const result = await network({ action: 'detail', requestId: 'missing' }, client);
+
+  assert.equal(result.ok, false);
+  assert.match(result.summary, /Request not found/);
 });
 
 // ─── 失败用例 ───────────────────────────────────────────────────

@@ -36,8 +36,30 @@ export interface NetworkListData {
 }
 
 export interface NetworkDetailData {
-  request: { method: string; url: string; statusCode: number };
-  response?: { statusCode: number };
+  requestId: string;
+  id?: string;
+  ids?: unknown;
+  webRequestId?: string | null;
+  cdpRequestId?: string | null;
+  mergeConfidence?: string;
+  mergedFrom?: unknown;
+  method: string;
+  url: string;
+  tabId?: number | null;
+  status?: string | null;
+  statusCode: number | null;
+  statusText?: string | null;
+  requestHeaders?: unknown;
+  requestBody?: unknown;
+  responseHeaders?: unknown;
+  mimeType?: string | null;
+  body?: string | null;
+  json?: unknown;
+  base64Encoded?: boolean;
+  bodyLength?: number;
+  bodyError?: unknown;
+  artifactRecommended?: boolean;
+  artifact?: unknown;
 }
 
 export type NetworkData = NetworkListData | NetworkDetailData;
@@ -131,23 +153,51 @@ const networkDef: CommandDefinition<NetworkInput, NetworkData> = {
             nextSteps: ['请确认 requestId 有效'],
           };
         }
-        const requestRaw = rawData.request as Record<string, unknown> | undefined;
-        if (!requestRaw) {
+        if (typeof rawData.error === 'string' && rawData.error) {
           return {
             ok: false,
-            summary: '请求详情获取失败: daemon 未返回请求数据',
+            summary: `请求详情获取失败: ${rawData.error}`,
             nextSteps: ['请确认 requestId 有效'],
           };
         }
-        const method = String(requestRaw.method || '');
-        const url = String(requestRaw.url || '');
-        const statusCode = Number(requestRaw.statusCode) || 0;
-        const responseRaw = rawData.response as Record<string, unknown> | undefined;
-        const response = responseRaw ? { statusCode: Number(responseRaw.statusCode) || 0 } : undefined;
+        const method = typeof rawData.method === 'string' ? rawData.method : '';
+        const url = typeof rawData.url === 'string' ? rawData.url : '';
+        if (!method || !url) {
+          return {
+            ok: false,
+            summary: '请求详情获取失败: extension 未返回 method/url',
+            nextSteps: ['请确认 requestId 有效'],
+          };
+        }
+        const statusCode = typeof rawData.statusCode === 'number' ? rawData.statusCode : null;
+        const requestId = String(rawData.requestId || rawData.id || '');
         return {
           ok: true,
           summary: `请求详情: ${method} ${url} → ${statusCode}`,
-          request: { method, url, statusCode }, response,
+          requestId,
+          id: typeof rawData.id === 'string' ? rawData.id : undefined,
+          ids: rawData.ids,
+          webRequestId: typeof rawData.webRequestId === 'string' ? rawData.webRequestId : null,
+          cdpRequestId: typeof rawData.cdpRequestId === 'string' ? rawData.cdpRequestId : null,
+          mergeConfidence: typeof rawData.mergeConfidence === 'string' ? rawData.mergeConfidence : undefined,
+          mergedFrom: rawData.mergedFrom,
+          method,
+          url,
+          tabId: typeof rawData.tabId === 'number' ? rawData.tabId : null,
+          status: typeof rawData.status === 'string' ? rawData.status : null,
+          statusCode,
+          statusText: typeof rawData.statusText === 'string' ? rawData.statusText : null,
+          requestHeaders: rawData.requestHeaders,
+          requestBody: rawData.requestBody,
+          responseHeaders: rawData.responseHeaders,
+          mimeType: typeof rawData.mimeType === 'string' ? rawData.mimeType : null,
+          body: typeof rawData.body === 'string' ? rawData.body : null,
+          json: rawData.json,
+          base64Encoded: Boolean(rawData.base64Encoded),
+          bodyLength: typeof rawData.bodyLength === 'number' ? rawData.bodyLength : undefined,
+          bodyError: rawData.bodyError,
+          artifactRecommended: Boolean(rawData.artifactRecommended),
+          artifact: rawData.artifact,
         };
       }
 

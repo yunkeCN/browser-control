@@ -44,17 +44,17 @@ The daemon listens on `http://127.0.0.1:10087` by default and the extension conn
 Send typed command envelopes to `POST http://127.0.0.1:10087/command` or use the CLI helper:
 
 ```bash
-node scripts/browser-control.js snapshot --args '{"session":"demo"}'
-node scripts/browser-control.js click --args '{"session":"demo","target":"@e1jm0sbb_1"}'
-node scripts/browser-control.js click --args '{"session":"demo","target":"@e1jm0sbb_1","interceptRequests":{"filter":"/api/","includeBody":true}}'
-node scripts/browser-control.js click --args '{"session":"demo","text":"Submit","x":200,"y":300}'
-node scripts/browser-control.js fill --args '{"session":"demo","target":"@e0abc12_1","value":"draft text"}'
-node scripts/browser-control.js get_text --args '{"session":"demo","scope":"viewport","maxChars":4000}'
-node scripts/browser-control.js scroll --args '{"session":"demo","deltaY":800,"strategy":"dom"}'
-node scripts/browser-control.js scroll --args '{"session":"demo","strategy":"wheel","x":400,"y":500,"deltaY":800}'
-node scripts/browser-control.js snapshot --args '{"session":"demo","hasVisibleText":true,"viewportOnly":true}'
-node scripts/browser-control.js snapshot --args '{"session":"demo","roles":["button","link","textbox","combobox"],"viewportOnly":true}'
-node scripts/browser-control.js evaluate --args '{"session":"demo","code":"return document.title"}'
+node scripts/browser-control.js snapshot --session demo --args '{}'
+node scripts/browser-control.js click --session demo --args '{"target":"@e1jm0sbb_1"}'
+node scripts/browser-control.js click --session demo --args '{"target":"@e1jm0sbb_1","interceptRequests":{"filter":"/api/","includeBody":true}}'
+node scripts/browser-control.js click --session demo --args '{"text":"Submit","x":200,"y":300}'
+node scripts/browser-control.js fill --session demo --args '{"target":"@e0abc12_1","value":"draft text"}'
+node scripts/browser-control.js get_text --session demo --args '{"scope":"viewport","maxChars":4000}'
+node scripts/browser-control.js scroll --session demo --args '{"deltaY":800,"strategy":"dom"}'
+node scripts/browser-control.js scroll --session demo --args '{"strategy":"wheel","x":400,"y":500,"deltaY":800}'
+node scripts/browser-control.js snapshot --session demo --args '{"hasVisibleText":true,"viewportOnly":true}'
+node scripts/browser-control.js snapshot --session demo --args '{"roles":["button","link","textbox","combobox"],"viewportOnly":true}'
+node scripts/browser-control.js evaluate --session demo --code-file ./snippet.js
 ```
 
 Envelope shape:

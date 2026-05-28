@@ -32,6 +32,8 @@ test('cli exposes production commands in help, including lifecycle, doctor, and 
   assert.match(result.stdout, /status/);
   assert.match(result.stdout, /navigate/);
   assert.match(result.stdout, /snapshot/);
+  assert.match(result.stdout, /--args-file/);
+  assert.match(result.stdout, /--code-file/);
 });
 
 test('cli start and stop manage daemon process via process manager', async (t) => {
@@ -279,4 +281,61 @@ test('cli passes inline --args JSON to command handler', async (t) => {
   assert.ok(received);
   assert.equal(received.command, 'evaluate');
   assert.equal(received.args.code, 'return document.title');
+});
+
+test('cli supports args-file, code-file, and envelope flags', async (t) => {
+  let received = null;
+  const server = http.createServer((req, res) => {
+    if (req.url === '/command' && req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        received = JSON.parse(body);
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, command: received.command, args: received.args }));
+      });
+      return;
+    }
+    res.writeHead(404); res.end('{}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-control-cli-files-'));
+  const argsFile = path.join(dir, 'args.json');
+  const codeFile = path.join(dir, 'snippet.js');
+  fs.writeFileSync(argsFile, JSON.stringify({ code: 'return "from args";', tabId: 5 }));
+  fs.writeFileSync(codeFile, 'return document.title;');
+
+  const result = await spawnCli([
+    'evaluate',
+    '--session', 'file-session',
+    '--id', 'req-cli',
+    '--timeout-ms', '12345',
+    '--args-file', argsFile,
+    '--args', '{"tabId":7}',
+    '--code-file', codeFile
+  ], { BROWSER_CONTROL_PORT: String(server.address().port) });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.ok(received);
+  assert.equal(received.id, 'req-cli');
+  assert.equal(received.session, 'file-session');
+  assert.equal(received.timeoutMs, 12345);
+  assert.equal(received.command, 'evaluate');
+  assert.equal(received.args.tabId, 7);
+  assert.equal(received.args.code, 'return document.title;');
+});
+
+test('cli restricts --code-file to evaluate', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-control-cli-code-file-'));
+  const codeFile = path.join(dir, 'snippet.js');
+  fs.writeFileSync(codeFile, 'return document.title;');
+
+  const result = spawnSync(process.execPath, [cli, 'snapshot', '--code-file', codeFile], { encoding: 'utf8' });
+
+  assert.notEqual(result.status, 0);
+  const parsed = JSON.parse(result.stdout || result.stderr);
+  assert.equal(parsed.ok, false);
+  assert.match(parsed.summary, /--code-file/);
 });
