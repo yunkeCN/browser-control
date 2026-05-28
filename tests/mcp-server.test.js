@@ -276,6 +276,15 @@ test('mcp tools forward commands to daemon via controller layer', async (t) => {
   assert.equal(fake.requests[1].command, 'navigate');
   assert.equal(fake.requests[1].args.url, 'https://example.com');
   assert.equal(navResult.structuredContent.ok, true);
+
+  const clickResult = await client.callTool({
+    name: 'browser_click',
+    arguments: { target: '@eabc_1' }
+  });
+  assert.equal(fake.requests.length, 3);
+  assert.equal(fake.requests[2].command, 'click');
+  assert.equal(fake.requests[2].session, fake.requests[1].session);
+  assert.equal(clickResult.structuredContent.ok, true);
 });
 
 test('mcp session management: consecutive calls share the same active session', async (t) => {

@@ -14713,7 +14713,14 @@ async function runCommand(def10, args, daemon) {
       ...timeoutMs !== void 0 ? { timeoutMs } : {},
       ...id !== void 0 ? { id } : {}
     };
-    raw = await def10.execute(executeArgs, daemon);
+    const scopedDaemon = Object.create(daemon);
+    scopedDaemon.buildEnvelope = (command, input2) => daemon.buildEnvelope(command, {
+      ...session !== void 0 ? { session } : {},
+      ...timeoutMs !== void 0 ? { timeoutMs } : {},
+      ...id !== void 0 ? { id } : {},
+      ...input2
+    });
+    raw = await def10.execute(executeArgs, scopedDaemon);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {

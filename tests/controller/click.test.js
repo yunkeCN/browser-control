@@ -36,7 +36,7 @@ test('click 成功: 基础 target 模式', async (t) => {
 
   const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
 
-  const result = await click({ target: '@e91_1' }, client);
+  const result = await click({ target: '@e91_1', session: 'mcp-active-session' }, client);
 
   assert.equal(result.ok, true);
   assert.match(result.summary, /已点击元素/);
@@ -45,6 +45,7 @@ test('click 成功: 基础 target 模式', async (t) => {
 
   assert.equal(fake.requests.length, 1);
   assert.equal(fake.requests[0].command, 'click');
+  assert.equal(fake.requests[0].session, 'mcp-active-session');
   assert.equal(fake.requests[0].args.target, '@e91_1');
 });
 
@@ -163,6 +164,7 @@ test('click 成功: probe 模式捕获网络请求', async (t) => {
   const result = await click({
     target: '@e91_1',
     probe: { filter: '/api/', includeBody: true },
+    session: 'mcp-active-session',
   }, client);
 
   assert.equal(result.ok, true);
@@ -172,6 +174,8 @@ test('click 成功: probe 模式捕获网络请求', async (t) => {
   assert.ok(Array.isArray(result.networkRequests));
   assert.equal(result.networkRequests[0].url, '/api/submit');
   assert.equal(result.networkRequests[0].method, 'POST');
+  assert.equal(fake.requests[0].command, 'click_probe');
+  assert.equal(fake.requests[0].session, 'mcp-active-session');
 });
 
 test('click 成功: probe 模式无网络请求', async (t) => {
@@ -260,10 +264,14 @@ test('click 成功: text 模式', async (t) => {
 
   const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
 
-  const result = await click({ text: 'Submit', x: 200, y: 300 }, client);
+  const result = await click({ text: 'Submit', x: 200, y: 300, session: 'mcp-active-session' }, client);
 
   assert.equal(result.ok, true);
   assert.equal(result.clicked, true);
+  assert.equal(fake.requests[0].command, 'snapshot');
+  assert.equal(fake.requests[0].session, 'mcp-active-session');
+  assert.equal(fake.requests[1].command, 'click');
+  assert.equal(fake.requests[1].session, 'mcp-active-session');
 });
 
 // ─── 失败用例 ───────────────────────────────────────────────────

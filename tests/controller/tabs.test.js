@@ -48,7 +48,7 @@ test('tabs list 成功: 返回多标签页列表', async (t) => {
 
   const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
 
-  const result = await tabs({ action: 'list' }, client);
+  const result = await tabs({ action: 'list', session: 'mcp-active-session' }, client);
 
   assert.equal(result.ok, true);
   assert.match(result.summary, /标签页列表/);
@@ -68,6 +68,7 @@ test('tabs list 成功: 返回多标签页列表', async (t) => {
 
   assert.equal(fake.requests.length, 1);
   assert.equal(fake.requests[0].command, 'list_tabs');
+  assert.equal(fake.requests[0].session, 'mcp-active-session');
 });
 
 test('tabs list 成功: 无标签页', async (t) => {
@@ -135,7 +136,7 @@ test('tabs switch 成功: 按 URL 查找', async (t) => {
 
   const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
 
-  const result = await tabs({ action: 'switch', urlIncludes: 'google.com' }, client);
+  const result = await tabs({ action: 'switch', urlIncludes: 'google.com', session: 'mcp-active-session' }, client);
 
   assert.equal(result.ok, true);
   assert.match(result.summary, /已切换到标签页/);
@@ -149,6 +150,7 @@ test('tabs switch 成功: 按 URL 查找', async (t) => {
   assert.equal(result.url, 'https://google.com');
 
   assert.equal(fake.requests[0].command, 'find_tab');
+  assert.equal(fake.requests[0].session, 'mcp-active-session');
   assert.equal(fake.requests[0].args.urlIncludes, 'google.com');
 });
 

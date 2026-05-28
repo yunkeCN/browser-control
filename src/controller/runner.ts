@@ -50,7 +50,7 @@ export async function runCommand<TInput, TData>(
       ok: false,
       summary: `参数验证失败: ${message}`,
       nextSteps,
-    };
+    } as CommandResult<TData>;
   }
 
   // ── 2. 调用 daemon ───────────────────────────────────────────
@@ -63,7 +63,14 @@ export async function runCommand<TInput, TData>(
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       ...(id !== undefined ? { id } : {}),
     };
-    raw = await def.execute(executeArgs as TInput, daemon);
+    const scopedDaemon = Object.create(daemon) as DaemonClient;
+    scopedDaemon.buildEnvelope = (command: string, input: Record<string, unknown>) => daemon.buildEnvelope(command, {
+      ...(session !== undefined ? { session } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(id !== undefined ? { id } : {}),
+      ...input,
+    });
+    raw = await def.execute(executeArgs as TInput, scopedDaemon);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -73,7 +80,7 @@ export async function runCommand<TInput, TData>(
         '请运行 browser_status 或 browser_doctor 检查 daemon 状态',
         '如果 daemon 未运行，请等待自动启动或手动启动 daemon',
       ],
-    };
+    } as CommandResult<TData>;
   }
 
   // ── 3. 检查 daemon 业务错误 ──────────────────────────────────
@@ -101,7 +108,7 @@ export async function runCommand<TInput, TData>(
       ok: false,
       summary: `执行失败: ${errMsg}`,
       nextSteps: nextSteps.length > 0 ? nextSteps : undefined,
-    };
+    } as CommandResult<TData>;
   }
 
   // ── 4. 转换为 LLM-friendly 输出 ─────────────────────────────
@@ -113,6 +120,6 @@ export async function runCommand<TInput, TData>(
       ok: false,
       summary: `结果转换失败: ${message}`,
       nextSteps: ['这是一个内部错误，请联系开发者'],
-    };
+    } as CommandResult<TData>;
   }
 }
