@@ -4244,6 +4244,138 @@ function extractArtifacts(command, result, store = new ArtifactStore()) {
   return { data, artifacts };
 }
 
+// src/shared/snapshot-diff.ts
+function computeSnapshotDiff(baselineTree, currentTree) {
+  const baselineNodes = flattenTree(baselineTree, []);
+  const currentNodes = flattenTree(currentTree, []);
+  const baselineMap = /* @__PURE__ */ new Map();
+  for (const node of baselineNodes) {
+    if (node.structureId) baselineMap.set(node.structureId, node);
+  }
+  const currentMap = /* @__PURE__ */ new Map();
+  for (const node of currentNodes) {
+    if (node.structureId) currentMap.set(node.structureId, node);
+  }
+  const added = [];
+  const removed = [];
+  const changed = [];
+  for (const node of currentNodes) {
+    if (!node.structureId) continue;
+    if (!baselineMap.has(node.structureId)) {
+      added.push({
+        role: node.role,
+        name: node.name,
+        tag: node.tag,
+        text: node.text || void 0,
+        ref: node.ref,
+        position: node.path.join(" > "),
+        childrenCount: node.childCount,
+        childLabels: node.childLabels
+      });
+    }
+  }
+  for (const node of baselineNodes) {
+    if (!node.structureId) continue;
+    if (!currentMap.has(node.structureId)) {
+      removed.push({
+        role: node.role,
+        name: node.name,
+        tag: node.tag,
+        text: node.text || void 0,
+        ref: node.ref,
+        position: node.path.join(" > "),
+        childrenCount: node.childCount,
+        childLabels: node.childLabels
+      });
+    }
+  }
+  for (const node of currentNodes) {
+    if (!node.structureId) continue;
+    const baseline = baselineMap.get(node.structureId);
+    if (!baseline) continue;
+    if (baseline.text !== node.text) {
+      changed.push({
+        ref: node.ref || baseline.ref || "",
+        structureId: node.structureId,
+        role: node.role,
+        name: node.name,
+        tag: node.tag,
+        attr: "text",
+        from: baseline.text,
+        to: node.text
+      });
+    }
+  }
+  const hasChanges = added.length > 0 || removed.length > 0 || changed.length > 0;
+  const summary = buildSummary(added, removed, changed);
+  return { added, removed, changed, summary, hasChanges };
+}
+function flattenTree(nodes, parents, depth = 0) {
+  if (depth > 20) return [];
+  const result = [];
+  for (const item of nodes) {
+    if (!item || typeof item === "string") continue;
+    if (!("tag" in item)) continue;
+    const node = item;
+    const text = node.text || "";
+    const ref = node.ref || void 0;
+    const structureId = ref ? extractStructureId(ref) : void 0;
+    const role = node.role || "generic";
+    const name = node.name || "";
+    const tag = node.tag || "";
+    const children = extractChildren(node.children);
+    const childLabels = children.slice(0, 10).map((c) => c.role ? `${c.role} "${c.text || c.name || ""}"` : c.text || "");
+    result.push({
+      ref,
+      structureId,
+      role,
+      name,
+      tag,
+      text,
+      path: [...parents, `${role} "${name || text || role}"`],
+      childCount: children.length,
+      childLabels
+    });
+    result.push(...flattenTree(children, [...parents, `${role} "${name || text || role}"`], depth + 1));
+  }
+  return result;
+}
+function extractChildren(children) {
+  if (!children) return [];
+  return children.filter(
+    (c) => typeof c === "object" && "tag" in c
+  );
+}
+function extractStructureId(ref) {
+  const match = /^@e([a-z0-9]+)_\d+$/i.exec(ref);
+  return match ? match[1] : void 0;
+}
+function buildSummary(added, removed, changed) {
+  const parts = [];
+  if (added.length > 0) {
+    const byRole = countBy(added, (n) => n.role);
+    const desc = [...byRole.entries()].map(([role, count]) => `${count} \u4E2A ${role}`).join("\u3001");
+    parts.push(`\u65B0\u589E ${added.length} \u4E2A\u5143\u7D20\uFF08${desc}\uFF09`);
+  }
+  if (removed.length > 0) {
+    const byRole = countBy(removed, (n) => n.role);
+    const desc = [...byRole.entries()].map(([role, count]) => `${count} \u4E2A ${role}`).join("\u3001");
+    parts.push(`\u79FB\u9664 ${removed.length} \u4E2A\u5143\u7D20\uFF08${desc}\uFF09`);
+  }
+  if (changed.length > 0) {
+    parts.push(`\u53D8\u5316 ${changed.length} \u4E2A\u5143\u7D20`);
+  }
+  return parts.length > 0 ? parts.join("\uFF1B") : "\u65E0\u53D8\u5316";
+}
+function countBy(items, keyFn) {
+  const map = /* @__PURE__ */ new Map();
+  for (const item of items) {
+    const key = keyFn(item);
+    map.set(key, (map.get(key) || 0) + 1);
+  }
+  return map;
+}
+
 // package.json
 var package_default = {
   name: "browser-control",
@@ -4653,6 +4785,20 @@ function runDaemonServer() {
     }
     return null;
   }
+  function findLatestTreeForTab(session, tabId) {
+    let latest = null;
+    let latestMs = -1;
+    for (const record of snapshotStore.values()) {
+      if (record.session !== session) continue;
+      if (record.tabId !== tabId) continue;
+      if (!record.tree) continue;
+      if (record.createdAtMs > latestMs) {
+        latestMs = record.createdAtMs;
+        latest = { baselineId: record.baselineId, tree: record.tree };
+      }
+    }
+    return latest;
+  }
   function indexTextRuns(runs) {
     const map = /* @__PURE__ */ new Map();
     for (const run of runs) {
@@ -4975,26 +5121,40 @@ function runDaemonServer() {
     const diffTo = request.args.diff_to;
     const observation = await captureObservation(request);
     const snapshotResult = await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
-    const baselineId = makeObservationBaselineId();
-    const now = Date.now();
-    const record = {
-      baselineId,
-      session: request.session,
-      tabId: observation.tabId || request.args.tabId || null,
-      createdAt: new Date(now).toISOString(),
-      createdAtMs: now,
-      lastAccessedAtMs: now,
-      expiresAt: new Date(now + OBSERVATION_DEFAULTS.ttlMs).toISOString(),
-      expiresAtMs: now + OBSERVATION_DEFAULTS.ttlMs,
-      url: observation.url || null,
-      title: observation.title || "",
-      navigationKey: observationNavigationKey(observation),
-      networkMarker: null,
-      observation,
-      tree: snapshotResult?.tree || snapshotResult?.snapshot?.tree || null
-    };
-    snapshotStore.set(observationStorageKey(request.session, record.tabId, baselineId), record);
-    enforceSessionObservationCap(request.session);
+    const tabId = observation.tabId || request.args.tabId || null;
+    const newTree = snapshotResult?.tree || snapshotResult?.snapshot?.tree || null;
+    let baselineId;
+    if (newTree) {
+      const prev = findLatestTreeForTab(request.session, tabId);
+      if (prev) {
+        const diff = computeSnapshotDiff(prev.tree, newTree);
+        if (!diff.hasChanges) {
+          baselineId = prev.baselineId;
+        }
+      }
+    }
+    if (!baselineId) {
+      baselineId = makeObservationBaselineId();
+      const now = Date.now();
+      const record = {
+        baselineId,
+        session: request.session,
+        tabId,
+        createdAt: new Date(now).toISOString(),
+        createdAtMs: now,
+        lastAccessedAtMs: now,
+        expiresAt: new Date(now + OBSERVATION_DEFAULTS.ttlMs).toISOString(),
+        expiresAtMs: now + OBSERVATION_DEFAULTS.ttlMs,
+        url: observation.url || null,
+        title: observation.title || "",
+        navigationKey: observationNavigationKey(observation),
+        networkMarker: null,
+        observation,
+        tree: newTree
+      };
+      snapshotStore.set(observationStorageKey(request.session, tabId, baselineId), record);
+      enforceSessionObservationCap(request.session);
+    }
     let baselineTree = null;
     if (diffTo) {
       const baseline = findObservationBaseline(request.session, diffTo, request.args.tabId);

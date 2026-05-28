@@ -15439,7 +15439,7 @@ var init_navigate = __esm({
   }
 });
 
-// src/controller/commands/snapshot-diff.ts
+// src/shared/snapshot-diff.ts
 function computeSnapshotDiff(baselineTree, currentTree) {
   const baselineNodes = flattenTree(baselineTree, []);
   const currentNodes = flattenTree(currentTree, []);
@@ -15571,8 +15571,16 @@ function countBy(items, keyFn) {
   return map2;
 }
 var init_snapshot_diff = __esm({
+  "src/shared/snapshot-diff.ts"() {
+    "use strict";
+  }
+});
+
+// src/controller/commands/snapshot-diff.ts
+var init_snapshot_diff2 = __esm({
   "src/controller/commands/snapshot-diff.ts"() {
     "use strict";
+    init_snapshot_diff();
   }
 });
 
@@ -15604,7 +15612,7 @@ var init_snapshot = __esm({
   "src/controller/commands/snapshot.ts"() {
     "use strict";
     init_runner();
-    init_snapshot_diff();
+    init_snapshot_diff2();
     snapshotDef = {
       name: "snapshot",
       requiredArgs: [],
@@ -15928,6 +15936,10 @@ var init_click_text = __esm({
           const clickEnv = clickResp.data;
           const clickData = clickEnv.data;
           const clicked = clickData?.clicked === true;
+          const newTabOpened = Boolean(clickData?.newTabOpened);
+          const network = clickData?.network;
+          const changes = clickData?.changes;
+          const clickBaselineId = typeof changes?.baselineId === "string" ? changes.baselineId : void 0;
           return {
             _status: clicked ? "clicked" : "click_failed",
             _method: "ref",
@@ -15938,7 +15950,10 @@ var init_click_text = __esm({
             _distance: Math.round(best.dist),
             _candidateCount: visibleCandidates.length,
             _boxX: cx,
-            _boxY: cy
+            _boxY: cy,
+            _newTabOpened: newTabOpened,
+            _network: network,
+            _baselineId: clickBaselineId
           };
         }
         const result = await cdpClickAt(cx, cy, daemon, input.tabId);
@@ -15957,6 +15972,9 @@ var init_click_text = __esm({
       },
       toResult: (raw) => {
         const status = raw._status;
+        const newTabOpened = raw._newTabOpened;
+        const network = raw._network;
+        const baselineId = raw._baselineId;
         switch (status) {
           case "clicked": {
             const method = raw._method;
@@ -15969,6 +15987,9 @@ var init_click_text = __esm({
               parts.push(`\u5DF2\u70B9\u51FB\u5750\u6807 (${raw._boxX}, ${raw._boxY}) \u5904\u7684 "${raw._text}"\uFF08${raw._role}\uFF09`);
             }
             parts.push(`\u8DDD\u79BB ${distancePx}px\uFF0C\u5171 ${candidateCount} \u4E2A\u5019\u9009`);
+            if (network) {
+              parts.push(`\u89E6\u53D1 ${network.count || network.requests?.length || 0} \u4E2A\u63A5\u53E3\u8BF7\u6C42`);
+            }
             const riskNotes = [];
             if (distancePx > MAX_REASONABLE_DISTANCE_PX) {
               parts.push(`\u26A0 \u6700\u8FD1\u5339\u914D\u8DDD\u79BB ${distancePx}px\uFF0C\u5750\u6807\u53EF\u80FD\u504F\u5DEE\u8FC7\u5927`);
@@ -15980,9 +16001,12 @@ var init_click_text = __esm({
               return {
                 ok: true,
                 summary: parts.join(" | "),
+                baselineId,
                 riskNotes: riskNotes.length ? riskNotes : void 0,
                 data: {
                   clicked: true,
+                  newTabOpened,
+                  network,
                   matchedText: raw._text,
                   matchedRole: raw._role,
                   method: "ref",
@@ -16016,6 +16040,8 @@ var init_click_text = __esm({
               summary: `\u5DF2\u627E\u5230\u5143\u7D20 "${raw._text}"\uFF08ref=${raw._ref}\uFF09\uFF0C\u4F46\u70B9\u51FB\u672A\u751F\u6548\uFF08\u53EF\u80FD\u88AB\u906E\u6321\u6216\u5DF2\u79FB\u9664\uFF09`,
               data: {
                 clicked: false,
+                newTabOpened,
+                network,
                 matchedText: raw._text,
                 matchedRole: raw._role,
                 method: "ref",

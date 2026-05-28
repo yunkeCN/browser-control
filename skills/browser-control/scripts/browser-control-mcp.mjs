@@ -35786,7 +35786,7 @@ async function navigate(args, client) {
   return runCommand(def, args, client);
 }
 
-// src/controller/commands/snapshot-diff.ts
+// src/shared/snapshot-diff.ts
 function computeSnapshotDiff(baselineTree, currentTree) {
   const baselineNodes = flattenTree(baselineTree, []);
   const currentNodes = flattenTree(currentTree, []);
@@ -38376,6 +38376,20 @@ function runDaemonServer() {
     }
     return null;
   }
+  function findLatestTreeForTab(session, tabId2) {
+    let latest = null;
+    let latestMs = -1;
+    for (const record2 of snapshotStore.values()) {
+      if (record2.session !== session) continue;
+      if (record2.tabId !== tabId2) continue;
+      if (!record2.tree) continue;
+      if (record2.createdAtMs > latestMs) {
+        latestMs = record2.createdAtMs;
+        latest = { baselineId: record2.baselineId, tree: record2.tree };
+      }
+    }
+    return latest;
+  }
   function indexTextRuns(runs) {
     const map2 = /* @__PURE__ */ new Map();
     for (const run of runs) {
@@ -38698,26 +38712,40 @@ function runDaemonServer() {
     const diffTo = request.args.diff_to;
     const observation = await captureObservation(request);
     const snapshotResult = await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
-    const baselineId = makeObservationBaselineId();
-    const now = Date.now();
-    const record2 = {
-      baselineId,
-      session: request.session,
-      tabId: observation.tabId || request.args.tabId || null,
-      createdAt: new Date(now).toISOString(),
-      createdAtMs: now,
-      lastAccessedAtMs: now,
-      expiresAt: new Date(now + OBSERVATION_DEFAULTS.ttlMs).toISOString(),
-      expiresAtMs: now + OBSERVATION_DEFAULTS.ttlMs,
-      url: observation.url || null,
-      title: observation.title || "",
-      navigationKey: observationNavigationKey(observation),
-      networkMarker: null,
-      observation,
-      tree: snapshotResult?.tree || snapshotResult?.snapshot?.tree || null
-    };
-    snapshotStore.set(observationStorageKey(request.session, record2.tabId, baselineId), record2);
-    enforceSessionObservationCap(request.session);
+    const tabId2 = observation.tabId || request.args.tabId || null;
+    const newTree = snapshotResult?.tree || snapshotResult?.snapshot?.tree || null;
+    let baselineId;
+    if (newTree) {
+      const prev = findLatestTreeForTab(request.session, tabId2);
+      if (prev) {
+        const diff = computeSnapshotDiff(prev.tree, newTree);
+        if (!diff.hasChanges) {
+          baselineId = prev.baselineId;
+        }
+      }
+    }
+    if (!baselineId) {
+      baselineId = makeObservationBaselineId();
+      const now = Date.now();
+      const record2 = {
+        baselineId,
+        session: request.session,
+        tabId: tabId2,
+        createdAt: new Date(now).toISOString(),
+        createdAtMs: now,
+        lastAccessedAtMs: now,
+        expiresAt: new Date(now + OBSERVATION_DEFAULTS.ttlMs).toISOString(),
+        expiresAtMs: now + OBSERVATION_DEFAULTS.ttlMs,
+        url: observation.url || null,
+        title: observation.title || "",
+        navigationKey: observationNavigationKey(observation),
+        networkMarker: null,
+        observation,
+        tree: newTree
+      };
+      snapshotStore.set(observationStorageKey(request.session, tabId2, baselineId), record2);
+      enforceSessionObservationCap(request.session);
+    }
     let baselineTree = null;
     if (diffTo) {
       const baseline = findObservationBaseline(request.session, diffTo, request.args.tabId);
