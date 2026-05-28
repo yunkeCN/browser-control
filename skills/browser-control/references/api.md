@@ -32,9 +32,9 @@ Commands:
 
 - `start [--json]`: start the singleton daemon or report that an existing Browser Control daemon is already running.
 - `stop [--json]`: stop the daemon tracked by Browser Control state.
-- `restart`: stop then start the daemon.
+- `restart [--json]`: stop then start the daemon.
 - `status [--json]`: report daemon reachability, PID state, port, extension connection, sessions, and artifact/log paths.
-- `doctor [--json]`: run daemon, Chrome, and extension diagnostics with next steps.
+- `doctor [--json]`: run daemon, Chrome, and extension diagnostics with next steps. If the daemon is running but the extension is disconnected, use `node skills/browser-control/scripts/open-chrome.js --json` to inspect the installed extension profile, then `node skills/browser-control/scripts/open-chrome.js` to open it. Diagnostics do not open Chrome automatically.
 - `diagnose daemon|chrome|extension [--json]`: show a focused diagnostic subset.
 - `logs [-n N] [-f]`: print or follow daemon logs.
 - `command <name> [--session <name>] [--args <json>] [--args-file <path>] [--code-file <path>] [--timeout-ms <ms>] [--id <id>] [--version <version>]`: send a browser command envelope to `POST /command`.
@@ -188,7 +188,7 @@ Common options:
 - `force`: skip visibility checks and click even if the element is covered or hidden.
 - `probe`: intercept matching API requests at the CDP level so the server never receives them. The `probe` object accepts: `filter` (URL substring to match), `includeHeaders` (default `true`), `includeBody` (default `true`), `redactSensitive` (default `true`), and `maxRequests` (default `100`). When `filter` is set, only API requests whose URL includes the filter are blocked and returned; nonmatching requests continue normally. Probe is not a full dry run: the click still executes on the page and may change frontend state, storage, dialogs, or route state — only the matching network requests are prevented from reaching the server.
 
-Browser Control chooses the click strategy internally: it prefers real CDP mouse input when safe, then falls back to DOM pointer events. Diagnostics may include `strategyUsed`, `target`, `hitTest`, `focusBefore`, `focusAfter`, `newTab` / `newTabs`, `settle`, `changes`, `postSnapshot`, and `warnings`. Covered targets fail with `COVERED_TARGET`; take a fresh snapshot, close the overlay, or choose a visible child target.
+Browser Control chooses the click strategy internally: it prefers real CDP mouse input when safe, then falls back to DOM pointer events. After the actual click returns, Browser Control waits 500ms before settle/diff capture so delayed UI changes have time to appear. Diagnostics may include `strategyUsed`, `target`, `hitTest`, `focusBefore`, `focusAfter`, `newTab` / `newTabs`, `settle`, `changes`, `postSnapshot`, and `warnings`. `clicked:true` means the click event was triggered; verify business-state completion with `changes`, a fresh `snapshot`, or `wait_for`. Covered targets fail with `COVERED_TARGET`; take a fresh snapshot, close the overlay, or choose a visible child target.
 
 ```json
 {"command":"click","args":{"target":"@e1jm0sbb_1"}}
@@ -242,6 +242,8 @@ Strategies:
 - `auto` (default): picks the best method based on arguments — wheel when viewport coordinates are provided, DOM scrolling otherwise.
 - `dom`: scrolls via DOM APIs (`element.scrollBy`, `scrollIntoView`). Use `deltaX`/`deltaY` for relative scrolling, `target` for scrolling an element into view.
 - `wheel`: dispatches Chrome mouse-wheel events at viewport coordinates (`x`, `y` in CSS pixels).
+
+If `auto` tries wheel scrolling and CDP wheel input is unavailable, Browser Control falls back to DOM relative scrolling without treating the wheel pointer `x`/`y` as absolute DOM scroll targets.
 
 Responses include `ok`, `strategyUsed`, `before`, `after`, `movedX`, `movedY`, optional `atBoundary`, and optional `warnings`. `movedX`/`movedY` are measured movement, not requested delta.
 

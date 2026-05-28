@@ -101,7 +101,6 @@ export interface NetworkCapture {
   persistedAt?: string | null;
   debuggerAttachedTabId?: number | null;
   debuggerAttachedTabIds?: number[];
-  origins?: Record<number, string>;
 }
 
 export interface NetworkRequest {

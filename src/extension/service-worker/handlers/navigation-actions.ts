@@ -334,8 +334,9 @@ export async function handleScroll(args: CommandArgs = {}, session: SessionName)
   if (strategy === 'wheel' || (strategy === 'auto' && (args?.x !== undefined || args?.y !== undefined || args?.region))) {
     const cdpResult = await performCdpWheelScroll(tabId, args || {});
     if (!cdpResult.error || strategy === 'wheel') return cdpResult;
+    const { x, y, region, ...domArgs } = args || {};
     args = {
-      ...args,
+      ...domArgs,
       strategy: 'dom',
       warnings: [
         ...(args?.warnings || []),

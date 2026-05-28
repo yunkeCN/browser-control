@@ -148,6 +148,14 @@ test('extension announces runtime metadata and browser-side capabilities', () =>
 test('session network capture and detail merge are represented in service-worker source', () => {
   assert.match(networkCdpSource, /captureScope/);
   assert.match(networkCdpSource, /trackedTabIds/);
+  assert.match(networkCdpSource, /async function currentTabOrigin/);
+  assert.match(networkCdpSource, /await chrome\.tabs\.get\(tabId\)/);
+  assert.match(networkCdpSource, /async function isSameOriginRequest/);
+  assert.match(networkCdpSource, /async function shouldCaptureRequest/);
+  assert.match(networkCdpSource, /await isSameOriginRequest\(urlStr,\s*Number\(tabId\)\)/);
+  assert.match(networkCdpSource, /handleWebRequestBeforeRequest\(details\)\.catch/);
+  assert.doesNotMatch(networkCdpSource, /function liveDocumentOrigin/);
+  assert.doesNotMatch(networkCdpSource, /capture\.origins/);
   assert.match(networkCdpSource, /function mergeNetworkRequest/);
   assert.match(networkCdpSource, /mergeConfidence/);
   assert.match(networkCdpSource, /same method \+ URL|r\.url !== known\.url/);

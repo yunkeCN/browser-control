@@ -6,15 +6,14 @@ export function performEvaluate(code: unknown): any {
   }
 
   function runEvaluationSource(source: string): any {
-    const hasExplicitReturn = /\breturn\b/.test(source);
-    if (!hasExplicitReturn) {
-      try {
-        // Expression-first mode preserves snippets such as document.title
-        // or (() => ({ ok: true }))().
-        return eval('(async () => (' + source + '))()');
-      } catch (expressionError) {
-        // Fall back to function-body mode for multi-statement snippets.
-      }
+    try {
+      // Expression-first mode preserves snippets such as document.title
+      // and IIFEs that contain their own return statements.
+      return eval('(async () => (' + source + '))()');
+    } catch (expressionError) {
+      if (!(expressionError instanceof SyntaxError) && (expressionError as any)?.name !== 'SyntaxError') throw expressionError;
+      // Fall back to function-body mode only when the expression wrapper cannot parse,
+      // for snippets such as "return { ok: true }" or multi-statement bodies.
     }
     return eval('(async () => { ' + source + ' })()');
   }

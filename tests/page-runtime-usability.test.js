@@ -273,3 +273,21 @@ test('performDomScroll keeps selector-only default as scrollIntoView', async () 
   assert.equal(result.ok, true);
   assert.equal(sandbox.card.scrollIntoViewCalled, true);
 });
+
+test('performEvaluate preserves IIFE expressions that contain return', async () => {
+  const sandbox = { document: { title: 'Eval Fixture' }, Promise, WeakSet, JSON, String, Number, Boolean, Object, Array, Error, Date, SyntaxError };
+  vm.createContext(sandbox);
+  const performEvaluate = vm.runInContext(`(${extractFunction(serviceWorker, 'performEvaluate')})`, sandbox);
+  const result = await performEvaluate('(() => { return { ok: true, title: document.title } })()');
+  assert.equal(result.result.ok, true);
+  assert.equal(result.result.title, 'Eval Fixture');
+});
+
+test('performEvaluate still supports function-body return snippets', async () => {
+  const sandbox = { document: { title: 'Eval Fixture' }, Promise, WeakSet, JSON, String, Number, Boolean, Object, Array, Error, Date, SyntaxError };
+  vm.createContext(sandbox);
+  const performEvaluate = vm.runInContext(`(${extractFunction(serviceWorker, 'performEvaluate')})`, sandbox);
+  const result = await performEvaluate('return { ok: true, title: document.title }');
+  assert.equal(result.result.ok, true);
+  assert.equal(result.result.title, 'Eval Fixture');
+});

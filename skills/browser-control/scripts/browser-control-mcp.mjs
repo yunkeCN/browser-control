@@ -35392,14 +35392,29 @@ function resolveDaemonRunner(options) {
   throw new Error("Unable to locate Browser Control daemon entry. Run npm run build:daemon or set BROWSER_CONTROL_DAEMON_ENTRY.");
 }
 function findBuiltDaemonEntry() {
-  const here = dirname2(fileURLToPath2(import.meta.url));
+  const here = currentModuleDir();
   const candidates = [
     resolve2(process.cwd(), "skills/browser-control/scripts/daemon.js"),
-    resolve2(here, "../../skills/browser-control/scripts/daemon.js"),
-    resolve2(here, "../skills/browser-control/scripts/daemon.js")
+    ...here ? [
+      resolve2(here, "../../skills/browser-control/scripts/daemon.js"),
+      resolve2(here, "../skills/browser-control/scripts/daemon.js")
+    ] : []
   ];
   for (const candidate of candidates) {
     if (fs2.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+function currentModuleDir() {
+  try {
+    if (typeof import.meta !== "undefined" && import.meta.url) {
+      return dirname2(fileURLToPath2(import.meta.url));
+    }
+  } catch {
+  }
+  try {
+    if (typeof __dirname === "string") return __dirname;
+  } catch {
   }
   return null;
 }
@@ -35501,7 +35516,8 @@ function assessCompatibility(status) {
   }
   if (status.extension_connected !== true) {
     warnings.push("Chrome extension is not connected. Browser commands will return BACKEND_UNAVAILABLE until the extension is loaded.");
-    nextSteps.push("Load or reload the Browser Control Chrome extension, then run browser_status or browser_doctor.");
+    nextSteps.push("Run node skills/browser-control/scripts/open-chrome.js --json to find the Chrome profile where the extension is installed.");
+    nextSteps.push("If a matching profile is found, run node skills/browser-control/scripts/open-chrome.js to open Chrome with that profile, then run browser-control doctor --json.");
   }
   const extension2 = runtime?.extension || null;
   if (extension2?.version && expectedVersion && extension2.version !== expectedVersion) {
@@ -36431,9 +36447,13 @@ var clickDef = {
     const baselineId = typeof changes?.baselineId === "string" ? changes.baselineId : void 0;
     const newTabOpened = Boolean(clickData.newTabOpened);
     const rawNetwork = clickData.network;
-    const network2 = rawNetwork?.requests?.length ? { requests: rawNetwork.requests, count: rawNetwork.count || rawNetwork.requests.length } : void 0;
+    const network2 = rawNetwork ? { requests: Array.isArray(rawNetwork.requests) ? rawNetwork.requests : [], count: rawNetwork.count || rawNetwork.requests?.length || 0 } : void 0;
+    const warnings = [
+      ...Array.isArray(clickData.warnings) ? clickData.warnings.map(String) : [],
+      ...Array.isArray(changes?.warnings) ? changes.warnings.map(String) : []
+    ];
     const parts = ["\u5DF2\u70B9\u51FB\u5143\u7D20"];
-    if (network2) {
+    if (network2 && network2.count > 0) {
       parts.push(`\u89E6\u53D1 ${network2.count} \u4E2A\u63A5\u53E3\u8BF7\u6C42`);
     }
     if (baselineId) {
@@ -36445,7 +36465,10 @@ var clickDef = {
       baselineId,
       clicked: true,
       newTabOpened,
-      network: network2
+      network: network2,
+      settle: clickData.settle,
+      changes,
+      warnings: warnings.length ? warnings : void 0
     };
   }
 };
@@ -36618,12 +36641,21 @@ var def4 = {
         nextSteps: ["\u8BF7\u786E\u8BA4\u9875\u9762\u5DF2\u52A0\u8F7D\u5B8C\u6210", "\u91CD\u8BD5 scroll \u547D\u4EE4"]
       };
     }
-    const scrolled = Boolean(rawData.scrolled);
-    const newPosition = rawData.newPosition ? String(rawData.newPosition) : void 0;
+    const movedX = typeof rawData.movedX === "number" ? rawData.movedX : void 0;
+    const movedY = typeof rawData.movedY === "number" ? rawData.movedY : void 0;
+    const scrolled = rawData.scrolled !== void 0 ? Boolean(rawData.scrolled) : rawData.ok !== void 0 ? Boolean(rawData.ok) : Boolean((movedX || 0) !== 0 || (movedY || 0) !== 0);
+    const newPosition = rawData.newPosition ? String(rawData.newPosition) : rawData.after && typeof rawData.after === "object" ? `x=${String(rawData.after.scrollX ?? 0)}, y=${String(rawData.after.scrollY ?? 0)}` : void 0;
+    const warnings = Array.isArray(rawData.warnings) ? rawData.warnings.map(String) : void 0;
     if (!scrolled) {
       return {
         ok: false,
-        summary: "\u6EDA\u52A8\u672A\u751F\u6548: \u9875\u9762\u53EF\u80FD\u5DF2\u6EDA\u52A8\u5230\u5E95\u90E8\u6216\u76EE\u6807\u5143\u7D20\u4E0D\u53EF\u6EDA\u52A8",
+        summary: warnings?.length ? `\u6EDA\u52A8\u672A\u751F\u6548: ${warnings.join("; ")}` : "\u6EDA\u52A8\u672A\u751F\u6548: \u9875\u9762\u53EF\u80FD\u5DF2\u6EDA\u52A8\u5230\u5E95\u90E8\u6216\u76EE\u6807\u5143\u7D20\u4E0D\u53EF\u6EDA\u52A8",
+        strategyUsed: typeof rawData.strategyUsed === "string" ? rawData.strategyUsed : void 0,
+        movedX,
+        movedY,
+        before: rawData.before,
+        after: rawData.after,
+        warnings,
         nextSteps: ["\u8BF7\u5C1D\u8BD5\u589E\u5927 deltaY \u6216 deltaX \u7684\u503C", "\u786E\u8BA4\u76EE\u6807\u5143\u7D20\u5B58\u5728\u6EDA\u52A8\u5BB9\u5668"]
       };
     }
@@ -36631,7 +36663,13 @@ var def4 = {
       ok: true,
       summary: `\u5DF2\u6EDA\u52A8\u9875\u9762${newPosition ? ` | ${newPosition}` : ""}`,
       scrolled: true,
-      newPosition
+      newPosition,
+      strategyUsed: typeof rawData.strategyUsed === "string" ? rawData.strategyUsed : void 0,
+      movedX,
+      movedY,
+      before: rawData.before,
+      after: rawData.after,
+      warnings
     };
   }
 };
@@ -37993,6 +38031,7 @@ function runDaemonServer() {
     maxNetworkRequests: 100
   };
   const CLICK_SETTLE = {
+    postClickDelayMs: 500,
     initialDelayMs: 80,
     stableWindowMs: 120,
     timeoutMs: 700
@@ -38037,10 +38076,21 @@ function runDaemonServer() {
   }
   function capabilityWarnings() {
     const warnings = [];
+    if (!extensionConnected) {
+      warnings.push("Chrome extension is not connected. Browser commands require Chrome with the Browser Control extension loaded.");
+    }
     if (extensionConnected && !extensionRuntime) {
       warnings.push("Connected extension has not sent runtime metadata; it may be an older extension. Ordinary commands remain enabled, but reload the source extension for full diagnostics.");
     }
     return warnings;
+  }
+  function extensionConnectionNextSteps() {
+    if (extensionConnected) return [];
+    return [
+      "Run: node skills/browser-control/scripts/open-chrome.js --json",
+      "If it reports an installed extension profile, run: node skills/browser-control/scripts/open-chrome.js",
+      "Then run: browser-control doctor --json"
+    ];
   }
   function extensionHasCapabilities(capabilities) {
     if (!extensionRuntime) return null;
@@ -38559,6 +38609,7 @@ function runDaemonServer() {
             settled: true,
             elapsedMs: Date.now() - startedAtMs,
             captures,
+            postClickDelayMs: CLICK_SETTLE.postClickDelayMs,
             initialDelayMs: CLICK_SETTLE.initialDelayMs,
             stableWindowMs: CLICK_SETTLE.stableWindowMs,
             timeoutMs: CLICK_SETTLE.timeoutMs
@@ -38575,6 +38626,7 @@ function runDaemonServer() {
         timedOut: true,
         elapsedMs: Date.now() - startedAtMs,
         captures,
+        postClickDelayMs: CLICK_SETTLE.postClickDelayMs,
         initialDelayMs: CLICK_SETTLE.initialDelayMs,
         stableWindowMs: CLICK_SETTLE.stableWindowMs,
         timeoutMs: CLICK_SETTLE.timeoutMs
@@ -38624,6 +38676,7 @@ function runDaemonServer() {
       }
     });
     const result = await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
+    await delay(CLICK_SETTLE.postClickDelayMs);
     const settleTargetTabId = result?.newTab?.id || Array.isArray(result?.newTabs) && result.newTabs.length === 1 && result.newTabs[0]?.id || start.data.tabId;
     const settled = await waitForClickSettle(request, settleTargetTabId);
     const diff = await handleObserveDiff({
@@ -38811,6 +38864,7 @@ function runDaemonServer() {
       capabilities: DAEMON_CAPABILITIES,
       runtime: runtimeMetadata(),
       warnings: capabilityWarnings(),
+      nextSteps: extensionConnectionNextSteps(),
       extensionConnected,
       extension_connected: extensionConnected,
       artifactDir: CONFIG.artifactDir,
@@ -38830,6 +38884,7 @@ function runDaemonServer() {
       capabilities: DAEMON_CAPABILITIES,
       runtime: runtimeMetadata(),
       warnings: capabilityWarnings(),
+      nextSteps: extensionConnectionNextSteps(),
       extension_connected: extensionConnected,
       uptime_seconds: Math.floor(process.uptime()),
       sessions: [...sessions.entries()].map(([name, s]) => ({

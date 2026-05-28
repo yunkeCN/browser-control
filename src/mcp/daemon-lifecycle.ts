@@ -50,7 +50,8 @@ export function assessCompatibility(status: Record<string, unknown>): { compatib
 
   if (status.extension_connected !== true) {
     warnings.push('Chrome extension is not connected. Browser commands will return BACKEND_UNAVAILABLE until the extension is loaded.');
-    nextSteps.push('Load or reload the Browser Control Chrome extension, then run browser_status or browser_doctor.');
+    nextSteps.push('Run node skills/browser-control/scripts/open-chrome.js --json to find the Chrome profile where the extension is installed.');
+    nextSteps.push('If a matching profile is found, run node skills/browser-control/scripts/open-chrome.js to open Chrome with that profile, then run browser-control doctor --json.');
   }
   const extension = (runtime?.extension || null) as Record<string, unknown> | null;
   if (extension?.version && expectedVersion && extension.version !== expectedVersion) {

@@ -194,14 +194,32 @@ function resolveDaemonRunner(options: DaemonProcessOptions): { command: string; 
 }
 
 function findBuiltDaemonEntry(): string | null {
-  const here = dirname(fileURLToPath(import.meta.url));
+  const here = currentModuleDir();
   const candidates = [
     resolve(process.cwd(), 'skills/browser-control/scripts/daemon.js'),
-    resolve(here, '../../skills/browser-control/scripts/daemon.js'),
-    resolve(here, '../skills/browser-control/scripts/daemon.js')
+    ...(here ? [
+      resolve(here, '../../skills/browser-control/scripts/daemon.js'),
+      resolve(here, '../skills/browser-control/scripts/daemon.js')
+    ] : [])
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function currentModuleDir(): string | null {
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.url) {
+      return dirname(fileURLToPath(import.meta.url));
+    }
+  } catch {
+    // CommonJS bundles may not have import.meta.url.
+  }
+  try {
+    if (typeof __dirname === 'string') return __dirname;
+  } catch {
+    // ESM runtimes do not expose __dirname.
   }
   return null;
 }

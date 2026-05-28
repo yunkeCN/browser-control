@@ -347,23 +347,36 @@
       capture.debuggerAttachedTabIds = debuggerTabIds(capture).filter((id) => id !== tabId);
       if (capture.tabId === tabId) capture.tabId = capture.tabIds?.[0] || null;
       if (capture.debuggerAttachedTabId === tabId) capture.debuggerAttachedTabId = capture.debuggerAttachedTabIds?.[0] || null;
-      if (capture.origins) delete capture.origins[tabId];
     }
   }
-  function isSameOriginRequest(capture, url, tabId) {
-    const origin = capture.origins?.[tabId];
-    if (!origin) return false;
+  function originFromUrl(value) {
+    if (!value) return null;
     try {
-      return new URL(url).origin === origin;
+      const origin = new URL(String(value)).origin;
+      return origin && origin !== "null" ? origin : null;
     } catch {
-      return false;
+      return null;
     }
   }
-  function shouldCaptureRequest(capture, url, tabId, type) {
+  async function currentTabOrigin(tabId) {
+    if (!Number.isFinite(tabId) || tabId < 0) return null;
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      return originFromUrl(tab.url);
+    } catch {
+      return null;
+    }
+  }
+  async function isSameOriginRequest(url, tabId) {
+    const tabOrigin = await currentTabOrigin(tabId);
+    const requestOrigin = originFromUrl(url);
+    return Boolean(tabOrigin && requestOrigin && tabOrigin === requestOrigin);
+  }
+  async function shouldCaptureRequest(capture, url, tabId, type) {
     if (!isApiResourceType(type)) return false;
     const urlStr = String(url || "");
     if (capture.filter && !urlStr.includes(capture.filter)) return false;
-    return isSameOriginRequest(capture, urlStr, Number(tabId));
+    return await isSameOriginRequest(urlStr, Number(tabId));
   }
   function removeCapturedRequest(capture, requestId) {
     const index = capture.requests.findIndex((r) => r.id === requestId || r.cdpRequestId === requestId || r.webRequestId === requestId);
@@ -410,7 +423,7 @@
     if (!params?.requestId) return;
     if (method === "Network.requestWillBeSent") {
       const url = params.request?.url || params.documentURL || "";
-      if (!isSameOriginRequest(capture, url, Number(source2.tabId))) return;
+      if (!await isSameOriginRequest(url, Number(source2.tabId))) return;
       upsertCapturedRequest(capture, {
         id: params.requestId,
         cdpRequestId: params.requestId,
@@ -427,7 +440,7 @@
       });
     } else if (method === "Network.responseReceived") {
       const url = params.response?.url || "";
-      if (!shouldCaptureRequest(capture, url, source2.tabId, params.type)) {
+      if (!await shouldCaptureRequest(capture, url, source2.tabId, params.type)) {
         removeCapturedRequest(capture, params.requestId);
         return;
       }
@@ -493,26 +506,13 @@
     const scope = options.scope || (explicitTabId ? "tab" : "session");
     const tabId = explicitTabId || activeTabId;
     let capture = networkCaptures.get(session);
-    if (!capture) capture = { requests: [], filter: null, tabId: null, tabIds: [], scope, auto: false, origins: {} };
+    if (!capture) capture = { requests: [], filter: null, tabId: null, tabIds: [], scope, auto: false };
     capture.filter = options.filter !== void 0 ? options.filter || null : capture.filter || null;
     capture.scope = scope;
     const tracked = scope === "tab" ? tabId ? [tabId] : [] : [.../* @__PURE__ */ new Set([...getTrackedTabIds(session), ...tabId ? [tabId] : [], ...capture.tabIds || []])];
     capture.tabIds = tracked;
     capture.tabId = scope === "tab" ? tabId || capture.tabId || null : capture.tabId || tracked[0] || null;
     capture.auto = Boolean(capture.auto || options.auto);
-    if (!capture.origins) capture.origins = {};
-    if (tabId) {
-      try {
-        const tab = await chrome.tabs.get(tabId);
-        if (tab.url) {
-          try {
-            capture.origins[tabId] = new URL(tab.url).origin;
-          } catch {
-          }
-        }
-      } catch {
-      }
-    }
     networkCaptures.set(session, capture);
     const webRequest = installWebRequestListeners();
     const debuggerTargets = capture.scope === "session" ? capture.tabIds || [] : capture.tabId ? [capture.tabId] : [];
@@ -872,10 +872,10 @@
       };
     }
     const source2 = String(code2 ?? "");
-    const hasExplicitReturn2 = /\breturn\b/.test(source2);
+    const hasExplicitReturn = /\breturn\b/.test(source2);
     const debuggee = lease.debuggee;
     try {
-      if (!hasExplicitReturn2) {
+      if (!hasExplicitReturn) {
         const expressionResult = await evaluateRuntimeExpression(debuggee, buildRuntimeEvaluationExpression(source2, "expression"));
         if (!expressionResult.exceptionDetails) return expressionResult.payload;
         if (!isSyntaxException(expressionResult.exceptionDetails)) return expressionResult.payload;
@@ -1336,9 +1336,13 @@
     return null;
   }
   function networkListener(details) {
+    handleWebRequestBeforeRequest(details).catch(() => {
+    });
+  }
+  async function handleWebRequestBeforeRequest(details) {
     for (const [, capture] of networkCaptures) {
       if (!captureTracksTab(capture, details.tabId)) continue;
-      if (shouldCaptureRequest(capture, details.url, details.tabId, details.type)) {
+      if (await shouldCaptureRequest(capture, details.url, details.tabId, details.type)) {
         upsertCapturedRequest(capture, {
           id: details.requestId,
           webRequestId: details.requestId,
@@ -4092,12 +4096,10 @@
   // src/extension/service-worker/page-runtime/evaluate.ts
   function performEvaluate(code) {
     function runEvaluationSource(source) {
-      const hasExplicitReturn = /\breturn\b/.test(source);
-      if (!hasExplicitReturn) {
-        try {
-          return eval("(async () => (" + source + "))()");
-        } catch (expressionError) {
-        }
+      try {
+        return eval("(async () => (" + source + "))()");
+      } catch (expressionError) {
+        if (!(expressionError instanceof SyntaxError) && expressionError?.name !== "SyntaxError") throw expressionError;
       }
       return eval("(async () => { " + source + " })()");
     }
@@ -4543,8 +4545,9 @@
     if (strategy === "wheel" || strategy === "auto" && (args?.x !== void 0 || args?.y !== void 0 || args?.region)) {
       const cdpResult = await performCdpWheelScroll(tabId, args || {});
       if (!cdpResult.error || strategy === "wheel") return cdpResult;
+      const { x, y, region, ...domArgs } = args || {};
       args = {
-        ...args,
+        ...domArgs,
         strategy: "dom",
         warnings: [
           ...args?.warnings || [],

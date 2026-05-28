@@ -22,13 +22,67 @@ function spawnCli(args, env) {
   });
 }
 
-test('cli exposes production commands in help, including doctor and status', () => {
+test('cli exposes production commands in help, including lifecycle, doctor, and status', () => {
   const result = spawnSync(process.execPath, [cli, '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0);
+  assert.match(result.stdout, /start/);
+  assert.match(result.stdout, /stop/);
+  assert.match(result.stdout, /restart/);
   assert.match(result.stdout, /doctor/);
   assert.match(result.stdout, /status/);
   assert.match(result.stdout, /navigate/);
   assert.match(result.stdout, /snapshot/);
+});
+
+test('cli start and stop manage daemon process via process manager', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-control-cli-lifecycle-'));
+  const daemonEntry = path.join(home, 'fake-daemon.js');
+  const port = 15000 + Math.floor(Math.random() * 1000);
+  fs.writeFileSync(daemonEntry, `
+    'use strict';
+    const fs = require('node:fs');
+    const http = require('node:http');
+    const path = require('node:path');
+    const home = process.env.BROWSER_CONTROL_HOME;
+    const port = Number(process.env.BROWSER_CONTROL_PORT);
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(path.join(home, 'daemon.pid'), String(process.pid));
+    const payload = () => ({ status: 'ok', running: true, version: '1.3.0', port, pid: process.pid, extension_connected: false });
+    const server = http.createServer((req, res) => {
+      if (req.url === '/health' || req.url === '/status') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(payload()));
+        return;
+      }
+      res.writeHead(404);
+      res.end('{}');
+    });
+    process.on('SIGTERM', () => server.close(() => process.exit(0)));
+    server.listen(port, '127.0.0.1');
+  `);
+  const env = {
+    BROWSER_CONTROL_HOME: home,
+    BROWSER_CONTROL_PORT: String(port),
+    BROWSER_CONTROL_DAEMON_ENTRY: daemonEntry,
+  };
+  t.after(async () => {
+    await spawnCli(['stop', '--json'], env);
+  });
+
+  const started = await spawnCli(['start', '--json'], env);
+  assert.equal(started.status, 0, started.stderr || started.stdout);
+  const startedJson = JSON.parse(started.stdout);
+  assert.equal(startedJson.ok, true);
+  assert.equal(startedJson.action, 'started');
+  assert.equal(startedJson.port, port);
+
+  const reused = await spawnCli(['start', '--json'], env);
+  assert.equal(reused.status, 0, reused.stderr || reused.stdout);
+  assert.equal(JSON.parse(reused.stdout).action, 'alreadyRunning');
+
+  const stopped = await spawnCli(['stop', '--json'], env);
+  assert.equal(stopped.status, 0, stopped.stderr || stopped.stdout);
+  assert.match(JSON.parse(stopped.stdout).action, /stopped|notRunning/);
 });
 
 test('status returns error JSON when daemon is stopped or unreachable', () => {

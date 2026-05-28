@@ -11,16 +11,21 @@ fs.mkdirSync(path.dirname(skillOut), { recursive: true });
 
 await build({
   entryPoints: [path.join(root, 'src', 'controller', 'cli.ts')],
-  outfile: binOut,
+  outfile: skillOut,
   bundle: true,
   platform: 'node',
   target: 'node18',
-  format: 'esm',
+  format: 'cjs',
   external: ['node:*'],
   logLevel: 'silent',
 });
 
-fs.chmodSync(binOut, 0o755);
-fs.copyFileSync(binOut, skillOut);
+fs.writeFileSync(skillOut, fs.readFileSync(skillOut, 'utf8').replace(/[ \t]+$/gm, ''));
 fs.chmodSync(skillOut, 0o755);
+fs.writeFileSync(binOut, `#!/usr/bin/env node
+import { createRequire } from 'node:module';
+
+createRequire(import.meta.url)('../skills/browser-control/scripts/browser-control.js');
+`);
+fs.chmodSync(binOut, 0o755);
 console.log(`controller cli build ok: ${path.relative(root, binOut)} and ${path.relative(root, skillOut)}`);

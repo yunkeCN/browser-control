@@ -85,6 +85,7 @@ const OBSERVATION_DEFAULTS = {
 };
 
 const CLICK_SETTLE = {
+  postClickDelayMs: 500,
   initialDelayMs: 80,
   stableWindowMs: 120,
   timeoutMs: 700
@@ -137,10 +138,22 @@ function runtimeMetadata() {
 
 function capabilityWarnings() {
   const warnings = [];
+  if (!extensionConnected) {
+    warnings.push('Chrome extension is not connected. Browser commands require Chrome with the Browser Control extension loaded.');
+  }
   if (extensionConnected && !extensionRuntime) {
     warnings.push('Connected extension has not sent runtime metadata; it may be an older extension. Ordinary commands remain enabled, but reload the source extension for full diagnostics.');
   }
   return warnings;
+}
+
+function extensionConnectionNextSteps() {
+  if (extensionConnected) return [];
+  return [
+    'Run: node skills/browser-control/scripts/open-chrome.js --json',
+    'If it reports an installed extension profile, run: node skills/browser-control/scripts/open-chrome.js',
+    'Then run: browser-control doctor --json'
+  ];
 }
 
 function extensionHasCapabilities(capabilities) {
@@ -725,6 +738,7 @@ async function waitForClickSettle(request, tabId) {
           settled: true,
           elapsedMs: Date.now() - startedAtMs,
           captures,
+          postClickDelayMs: CLICK_SETTLE.postClickDelayMs,
           initialDelayMs: CLICK_SETTLE.initialDelayMs,
           stableWindowMs: CLICK_SETTLE.stableWindowMs,
           timeoutMs: CLICK_SETTLE.timeoutMs
@@ -742,6 +756,7 @@ async function waitForClickSettle(request, tabId) {
       timedOut: true,
       elapsedMs: Date.now() - startedAtMs,
       captures,
+      postClickDelayMs: CLICK_SETTLE.postClickDelayMs,
       initialDelayMs: CLICK_SETTLE.initialDelayMs,
       stableWindowMs: CLICK_SETTLE.stableWindowMs,
       timeoutMs: CLICK_SETTLE.timeoutMs
@@ -818,6 +833,7 @@ async function runClick(request, mapped) {
   });
 
   const result = await sendCommandToExtension(request.session, mapped.command, mapped.args, request.timeoutMs);
+  await delay(CLICK_SETTLE.postClickDelayMs);
 
   // Determine which tab to settle on (new tab if click opened one)
   const settleTargetTabId = result?.newTab?.id
@@ -1037,6 +1053,7 @@ async function handleHealth(req, res) {
     capabilities: DAEMON_CAPABILITIES,
     runtime: runtimeMetadata(),
     warnings: capabilityWarnings(),
+    nextSteps: extensionConnectionNextSteps(),
     extensionConnected,
     extension_connected: extensionConnected,
     artifactDir: CONFIG.artifactDir,
@@ -1057,6 +1074,7 @@ async function handleStatus(req, res) {
     capabilities: DAEMON_CAPABILITIES,
     runtime: runtimeMetadata(),
     warnings: capabilityWarnings(),
+    nextSteps: extensionConnectionNextSteps(),
     extension_connected: extensionConnected,
     uptime_seconds: Math.floor(process.uptime()),
     sessions: [...sessions.entries()].map(([name, s]) => ({

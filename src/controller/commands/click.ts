@@ -51,7 +51,10 @@ export interface ClickInput {
 export interface ClickData {
   clicked: boolean;
   newTabOpened?: boolean;
-  network?: { requests: string[]; count: number };
+  network?: { requests: unknown[]; count: number };
+  settle?: unknown;
+  changes?: unknown;
+  warnings?: string[];
 }
 
 // ─── 辅助函数 ────────────────────────────────────────────────────
@@ -224,13 +227,17 @@ export const clickDef: CommandDefinition<ClickInput, ClickData | ClickProbeData 
     const changes = clickData.changes as Record<string, unknown> | undefined;
     const baselineId = typeof changes?.baselineId === 'string' ? changes.baselineId : undefined;
     const newTabOpened = Boolean(clickData.newTabOpened);
-    const rawNetwork = clickData.network as { requests?: string[]; count?: number } | undefined;
-    const network = rawNetwork?.requests?.length
-      ? { requests: rawNetwork.requests, count: rawNetwork.count || rawNetwork.requests.length }
+    const rawNetwork = clickData.network as { requests?: unknown[]; count?: number } | undefined;
+    const network = rawNetwork
+      ? { requests: Array.isArray(rawNetwork.requests) ? rawNetwork.requests : [], count: rawNetwork.count || rawNetwork.requests?.length || 0 }
       : undefined;
+    const warnings = [
+      ...(Array.isArray(clickData.warnings) ? clickData.warnings.map(String) : []),
+      ...(Array.isArray(changes?.warnings) ? changes.warnings.map(String) : []),
+    ];
 
     const parts: string[] = ['已点击元素'];
-    if (network) {
+    if (network && network.count > 0) {
       parts.push(`触发 ${network.count} 个接口请求`);
     }
     if (baselineId) {
@@ -244,6 +251,9 @@ export const clickDef: CommandDefinition<ClickInput, ClickData | ClickProbeData 
       clicked: true,
       newTabOpened,
       network,
+      settle: clickData.settle,
+      changes,
+      warnings: warnings.length ? warnings : undefined,
     };
   },
 };

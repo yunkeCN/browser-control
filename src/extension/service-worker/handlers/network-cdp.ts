@@ -125,25 +125,40 @@ export function removeNetworkTab(tabId: number): void {
     capture.debuggerAttachedTabIds = debuggerTabIds(capture).filter(id => id !== tabId);
     if (capture.tabId === tabId) capture.tabId = capture.tabIds?.[0] || null;
     if (capture.debuggerAttachedTabId === tabId) capture.debuggerAttachedTabId = capture.debuggerAttachedTabIds?.[0] || null;
-    if (capture.origins) delete capture.origins[tabId];
   }
 }
 
-function isSameOriginRequest(capture: NetworkCapture, url: string, tabId: number): boolean {
-  const origin = capture.origins?.[tabId];
-  if (!origin) return false;
+function originFromUrl(value: unknown): string | null {
+  if (!value) return null;
   try {
-    return new URL(url).origin === origin;
+    const origin = new URL(String(value)).origin;
+    return origin && origin !== 'null' ? origin : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-function shouldCaptureRequest(capture: NetworkCapture, url: unknown, tabId: unknown, type: unknown): boolean {
+async function currentTabOrigin(tabId: number): Promise<string | null> {
+  if (!Number.isFinite(tabId) || tabId < 0) return null;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return originFromUrl(tab.url);
+  } catch {
+    return null;
+  }
+}
+
+async function isSameOriginRequest(url: string, tabId: number): Promise<boolean> {
+  const tabOrigin = await currentTabOrigin(tabId);
+  const requestOrigin = originFromUrl(url);
+  return Boolean(tabOrigin && requestOrigin && tabOrigin === requestOrigin);
+}
+
+async function shouldCaptureRequest(capture: NetworkCapture, url: unknown, tabId: unknown, type: unknown): Promise<boolean> {
   if (!isApiResourceType(type)) return false;
   const urlStr = String(url || '');
   if (capture.filter && !urlStr.includes(capture.filter)) return false;
-  return isSameOriginRequest(capture, urlStr, Number(tabId));
+  return await isSameOriginRequest(urlStr, Number(tabId));
 }
 
 function removeCapturedRequest(capture: NetworkCapture, requestId: string): void {
@@ -205,7 +220,7 @@ async function handleDebuggerNetworkEvent(
     // Some Chrome versions omit params.type here. Keep the early event so we do
     // not lose request body, then drop non-API resources when responseReceived
     // reports the final resource type.
-    if (!isSameOriginRequest(capture, url, Number(source.tabId))) return;
+    if (!(await isSameOriginRequest(url, Number(source.tabId)))) return;
     upsertCapturedRequest(capture, {
       id: params.requestId,
       cdpRequestId: params.requestId,
@@ -222,7 +237,7 @@ async function handleDebuggerNetworkEvent(
     });
   } else if (method === 'Network.responseReceived') {
     const url = params.response?.url || '';
-    if (!shouldCaptureRequest(capture, url, source.tabId, params.type)) {
+    if (!(await shouldCaptureRequest(capture, url, source.tabId, params.type))) {
       removeCapturedRequest(capture, params.requestId);
       return;
     }
@@ -288,7 +303,7 @@ export async function ensureNetworkCapture(session: SessionName, options: any = 
   const scope = options.scope || (explicitTabId ? 'tab' : 'session');
   const tabId = explicitTabId || activeTabId;
   let capture = networkCaptures.get(session);
-  if (!capture) capture = { requests: [], filter: null, tabId: null, tabIds: [], scope, auto: false, origins: {} };
+  if (!capture) capture = { requests: [], filter: null, tabId: null, tabIds: [], scope, auto: false };
 
   capture.filter = options.filter !== undefined ? (options.filter || null) : (capture.filter || null);
   capture.scope = scope;
@@ -296,20 +311,6 @@ export async function ensureNetworkCapture(session: SessionName, options: any = 
   capture.tabIds = tracked;
   capture.tabId = scope === 'tab' ? (tabId || capture.tabId || null) : (capture.tabId || tracked[0] || null);
   capture.auto = Boolean(capture.auto || options.auto);
-  if (!capture.origins) capture.origins = {};
-
-  // Track origin for the tab
-  if (tabId) {
-    try {
-      const tab = await chrome.tabs.get(tabId);
-      if (tab.url) {
-        try {
-          capture.origins[tabId] = new URL(tab.url).origin;
-        } catch { /* invalid URL */ }
-      }
-    } catch { /* tab may not exist yet */ }
-  }
-
   networkCaptures.set(session, capture);
 
   const webRequest = installWebRequestListeners();
@@ -1193,10 +1194,14 @@ function extractRequestBody(details: any): unknown {
 }
 
 function networkListener(details: any): void {
+  handleWebRequestBeforeRequest(details).catch(() => {});
+}
+
+async function handleWebRequestBeforeRequest(details: any): Promise<void> {
   // Store request for all active sessions.
   for (const [, capture] of networkCaptures) {
     if (!captureTracksTab(capture, details.tabId)) continue;
-    if (shouldCaptureRequest(capture, details.url, details.tabId, details.type)) {
+    if (await shouldCaptureRequest(capture, details.url, details.tabId, details.type)) {
       upsertCapturedRequest(capture, {
         id: details.requestId,
         webRequestId: details.requestId,

@@ -133,7 +133,7 @@ node scripts/browser-control.js doctor --json
 node scripts/browser-control.js logs -n 100
 ```
 
-If `extension_connected` is false, browser automation is blocked except for diagnostics; ask the user to load or reload the bundled Chrome extension from this skill's `extension/` directory when you cannot safely do it. If commands fail with `Element not found`, take a fresh `snapshot` and rebuild the locator. Validation errors include stable `error.details`; for example `fill` requires `args.value` (not `args.text`).
+If `extension_connected` is false, browser automation is blocked except for diagnostics. First inspect the installed Chrome profile with `node scripts/open-chrome.js --json`; if a matching profile is found, open it with `node scripts/open-chrome.js`, then rerun `doctor --json`. If commands fail with `Element not found`, take a fresh `snapshot` and rebuild the locator. Validation errors include stable `error.details`; for example `fill` requires `args.value` (not `args.text`).
 
 If `extension_connected` is false after `doctor --json`, guide the user to load the Chrome extension with `references/chrome-extension-setup.md`; it covers both the installed skill's `extension/` directory and the release extension zip.
 

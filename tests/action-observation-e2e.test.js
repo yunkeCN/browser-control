@@ -89,6 +89,7 @@ test('click after attaches changes and fill expectChange warns on no-delta actio
   });
   assert.equal(changed.status, 200);
   assert.equal(changed.json.ok, true);
+  assert.equal(changed.json.data.settle.postClickDelayMs, 500);
   assert.ok(Array.isArray(changed.json.data.changes.textDiff.added), 'textDiff.added should be an array');
   assert.ok(changed.json.data.changes.textDiff.added.some(item => item.text === 'Drawer opened'), 'added should include Drawer opened');
   assert.deepEqual(changed.json.data.changes.warnings, []);

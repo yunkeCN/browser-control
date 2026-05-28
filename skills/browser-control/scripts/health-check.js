@@ -89,7 +89,8 @@ async function main() {
       console.log('All systems healthy.');
     } else {
       console.log('The Chrome Extension is not connected.');
-      console.log('Ensure Chrome is running and the Browser Control extension is installed and enabled.');
+      console.log('Check the installed extension profile with: node open-chrome.js --json');
+      console.log('If a profile is found, open it with: node open-chrome.js');
     }
   }
 

@@ -103,6 +103,41 @@ test('scroll 成功: 带 deltaX 和 deltaY', async (t) => {
   assert.equal(fake.requests[0].args.deltaY, 500);
 });
 
+test('scroll 成功: accepts extension ok/movement shape and passes diagnostics through', async (t) => {
+  const fake = createFakeDaemon({
+    onCommand: (envelope) => ({
+      id: envelope.id,
+      ok: true,
+      command: 'scroll',
+      backend: 'extension',
+      session: envelope.session,
+      tab: 42,
+      data: {
+        ok: true,
+        strategyUsed: 'wheel',
+        before: { scrollX: 0, scrollY: 0 },
+        after: { scrollX: 0, scrollY: 600 },
+        movedX: 0,
+        movedY: 600,
+        warnings: ['measured by wheel'],
+      },
+    }),
+  });
+  await fake.listen();
+  t.after(() => fake.close());
+
+  const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
+  const result = await scroll({ strategy: 'wheel', x: 400, y: 300, deltaY: 600 }, client);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.scrolled, true);
+  assert.equal(result.strategyUsed, 'wheel');
+  assert.equal(result.movedY, 600);
+  assert.deepEqual(result.before, { scrollX: 0, scrollY: 0 });
+  assert.deepEqual(result.after, { scrollX: 0, scrollY: 600 });
+  assert.deepEqual(result.warnings, ['measured by wheel']);
+});
+
 test('scroll 失败: scrolled=false 时返回错误', async (t) => {
   const fake = createFakeDaemon({
     onCommand: (envelope) => ({

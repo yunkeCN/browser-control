@@ -94,8 +94,14 @@ test('click 成功: 带 changes 和 baselineId', async (t) => {
       durationMs: 300,
       data: {
         clicked: true,
+        settle: { settled: true, postClickDelayMs: 500 },
         changes: {
           baselineId: 'click_xxx',
+          warnings: ['no visible text changed'],
+        },
+        network: {
+          requests: [{ method: 'GET', url: '/api/filter' }],
+          count: 1,
         },
       },
       artifacts: [],
@@ -112,6 +118,10 @@ test('click 成功: 带 changes 和 baselineId', async (t) => {
   assert.equal(result.ok, true);
   assert.equal(result.clicked, true);
   assert.equal(result.baselineId, 'click_xxx');
+  assert.deepEqual(result.settle, { settled: true, postClickDelayMs: 500 });
+  assert.deepEqual(result.changes, { baselineId: 'click_xxx', warnings: ['no visible text changed'] });
+  assert.deepEqual(result.network, { requests: [{ method: 'GET', url: '/api/filter' }], count: 1 });
+  assert.deepEqual(result.warnings, ['no visible text changed']);
   assert.match(result.summary, /观察基线/);
 });
 

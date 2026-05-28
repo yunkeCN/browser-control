@@ -37,6 +37,22 @@ If a stale PID is reported, rerun `start`; the CLI cleans stale Browser Control 
 
 ## Extension is not connected
 
+First check whether Browser Control is already installed in a Chrome profile:
+
+```bash
+node skills/browser-control/scripts/open-chrome.js --json
+```
+
+If the JSON output reports a profile that has the extension, open that profile:
+
+```bash
+node skills/browser-control/scripts/open-chrome.js
+```
+
+Then re-run `doctor --json` and confirm `extension_connected` is true. The diagnostic commands do not open Chrome automatically.
+
+If no installed profile is found:
+
 1. Open `chrome://extensions`.
 2. Enable Developer mode.
 3. Load the unpacked extension path printed by `doctor --json`.

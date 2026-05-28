@@ -20,6 +20,7 @@ import { tabs } from './commands/tabs.js';
 import { closeSession } from './commands/session.js';
 import { download } from './commands/download.js';
 import { DaemonClient } from '../mcp/daemon-client.js';
+import { startDaemonProcess, stopDaemonProcess } from '../daemon/process-manager.js';
 
 /** Controller 命令分发表 */
 const DISPATCH: Record<string, (args: Record<string, unknown>, client: DaemonClient) => Promise<unknown>> = {
@@ -34,11 +35,14 @@ const DISPATCH: Record<string, (args: Record<string, unknown>, client: DaemonCli
 function printHelp(): void {
   console.log(`Browser Control CLI
 
-用法: browser-control <command> [--args <json>]
+用法: browser-control <command> [--args <json>] [--json]
 
 命令: ${Object.keys(DISPATCH).join(', ')}
 
 诊断:
+  start     启动 daemon
+  stop      停止 daemon
+  restart   重启 daemon
   status    查看 daemon 状态
   doctor    运行 daemon 诊断
 
@@ -76,6 +80,59 @@ function parseArgs(argv: string[]): { command: string; args: Record<string, unkn
 
 /** 生命周期/诊断命令：直连 daemon 并打印原始 JSON */
 async function runLifecycleCommand(command: string): Promise<void> {
+  if (command === 'start') {
+    const result = await startDaemonProcess();
+    console.log(JSON.stringify({
+      ...result,
+      summary: result.ok
+        ? result.action === 'alreadyRunning'
+          ? `Browser Control daemon already running on port ${result.port}`
+          : `Browser Control daemon started on port ${result.port}`
+        : `Browser Control daemon failed to start: ${result.error || 'unknown error'}`,
+    }, null, 2));
+    if (!result.ok) process.exit(1);
+    return;
+  }
+
+  if (command === 'stop') {
+    const result = await stopDaemonProcess();
+    console.log(JSON.stringify({
+      ...result,
+      summary: result.ok
+        ? result.action === 'notRunning'
+          ? 'Browser Control daemon is not running'
+          : 'Browser Control daemon stopped'
+        : `Browser Control daemon failed to stop: ${result.error || 'unknown error'}`,
+    }, null, 2));
+    if (!result.ok) process.exit(1);
+    return;
+  }
+
+  if (command === 'restart') {
+    const stopped = await stopDaemonProcess();
+    if (!stopped.ok) {
+      console.log(JSON.stringify({
+        ok: false,
+        action: 'failed',
+        port: stopped.port,
+        error: stopped.error,
+        summary: `Browser Control daemon failed to stop before restart: ${stopped.error || 'unknown error'}`,
+      }, null, 2));
+      process.exit(1);
+    }
+    const started = await startDaemonProcess();
+    console.log(JSON.stringify({
+      ...started,
+      action: started.ok ? 'restarted' : 'failed',
+      stopped: stopped.action,
+      summary: started.ok
+        ? `Browser Control daemon restarted on port ${started.port}`
+        : `Browser Control daemon failed to restart: ${started.error || 'unknown error'}`,
+    }, null, 2));
+    if (!started.ok) process.exit(1);
+    return;
+  }
+
   const http = await import('node:http');
   const HOST = process.env.BROWSER_CONTROL_HOST || '127.0.0.1';
   const PORT = Number(process.env.BROWSER_CONTROL_PORT || 10087);
@@ -113,7 +170,7 @@ async function main(): Promise<void> {
   }
 
   // 生命周期命令
-  if (command === 'status' || command === 'doctor') {
+  if (command === 'start' || command === 'stop' || command === 'restart' || command === 'status' || command === 'doctor') {
     return runLifecycleCommand(command);
   }
 

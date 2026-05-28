@@ -37,6 +37,12 @@ export interface ScrollData {
   scrolled: boolean;
   /** 滚动后的位置描述 */
   newPosition?: string;
+  strategyUsed?: string;
+  movedX?: number;
+  movedY?: number;
+  before?: unknown;
+  after?: unknown;
+  warnings?: string[];
 }
 
 // ─── 命令定义 ────────────────────────────────────────────────────
@@ -104,15 +110,32 @@ const def: CommandDefinition<ScrollInput, ScrollData> = {
       };
     }
 
-    const scrolled = Boolean(rawData.scrolled);
+    const movedX = typeof rawData.movedX === 'number' ? rawData.movedX : undefined;
+    const movedY = typeof rawData.movedY === 'number' ? rawData.movedY : undefined;
+    const scrolled = rawData.scrolled !== undefined
+      ? Boolean(rawData.scrolled)
+      : rawData.ok !== undefined
+        ? Boolean(rawData.ok)
+        : Boolean((movedX || 0) !== 0 || (movedY || 0) !== 0);
     const newPosition = rawData.newPosition
       ? String(rawData.newPosition)
+      : rawData.after && typeof rawData.after === 'object'
+        ? `x=${String((rawData.after as Record<string, unknown>).scrollX ?? 0)}, y=${String((rawData.after as Record<string, unknown>).scrollY ?? 0)}`
       : undefined;
+    const warnings = Array.isArray(rawData.warnings) ? rawData.warnings.map(String) : undefined;
 
     if (!scrolled) {
       return {
         ok: false,
-        summary: '滚动未生效: 页面可能已滚动到底部或目标元素不可滚动',
+        summary: warnings?.length
+          ? `滚动未生效: ${warnings.join('; ')}`
+          : '滚动未生效: 页面可能已滚动到底部或目标元素不可滚动',
+        strategyUsed: typeof rawData.strategyUsed === 'string' ? rawData.strategyUsed : undefined,
+        movedX,
+        movedY,
+        before: rawData.before,
+        after: rawData.after,
+        warnings,
         nextSteps: ['请尝试增大 deltaY 或 deltaX 的值', '确认目标元素存在滚动容器'],
       };
     }
@@ -122,6 +145,12 @@ const def: CommandDefinition<ScrollInput, ScrollData> = {
       summary: `已滚动页面${newPosition ? ` | ${newPosition}` : ''}`,
       scrolled: true,
       newPosition,
+      strategyUsed: typeof rawData.strategyUsed === 'string' ? rawData.strategyUsed : undefined,
+      movedX,
+      movedY,
+      before: rawData.before,
+      after: rawData.after,
+      warnings,
     };
   },
 };
