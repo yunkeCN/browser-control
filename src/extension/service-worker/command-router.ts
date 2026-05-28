@@ -1,5 +1,5 @@
 import { sendToDaemon, pendingRequests } from './transport';
-import { handleNavigate, handleSnapshot, handleClick, handleClickProbe, handleFill, handlePress, handleScroll, handleWaitFor, handleFindTab, handleAttachTab, handleEvaluate, handleScreenshot, handleObserveCapture, handleGetText, handleCdpClickAt } from './handlers/navigation-actions';
+import { handleNavigate, handleSnapshot, handleClick, handleFill, handlePress, handleScroll, handleWaitFor, handleFindTab, handleAttachTab, handleEvaluate, handleScreenshot, handleObserveCapture, handleGetText } from './handlers/navigation-actions';
 import { handleNetwork } from './handlers/network-cdp';
 import { handleUpload, handleDownload, handleSaveAsPdf, handleListTabs, handleCloseTab, handleCloseSession } from './handlers/artifacts-tabs';
 import type { CommandAction, CommandArgs, CommandResult, RequestId, SessionName } from '../shared/types';
@@ -54,12 +54,6 @@ export async function executeCommand(
         break;
       case 'click':
         result = await handleClick(args, session);
-        break;
-      case 'click_probe':
-        result = await handleClickProbe(args, session);
-        break;
-      case 'cdp_click_at' as any:
-        result = await handleCdpClickAt(args, session);
         break;
       case 'fill':
         result = await handleFill(args, session);

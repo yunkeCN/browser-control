@@ -34594,8 +34594,7 @@ var DAEMON_CAPABILITIES = [
   "get_text",
   "sessionNetworkCapture",
   "snapshotFilters",
-  "snapshotAriaTree",
-  "clickProbe"
+  "snapshotAriaTree"
 ];
 var COMMANDS = {
   navigate: { required: ["url"], optional: ["newTab", "timeoutMs"] },
@@ -34641,10 +34640,6 @@ var COMMANDS = {
   close_tab: { required: [], optional: ["tabId"] },
   screenshot: { required: [], optional: ["tabId", "format", "quality", "file_name", "fileName"] },
   save_as_pdf: { required: [], optional: ["tabId", "paper_format", "landscape", "scale", "print_background", "file_name"] },
-  click_probe: {
-    required: ["target"],
-    optional: ["tabId", "force", "observeNewTab", "expectNewTab", "waitMs", "filter", "includeHeaders", "includeBody", "redactSensitive", "maxRequests"]
-  },
   observe_start: { required: [], optional: ["tabId", "mode", "baselineId", "includeNetworkMarker", "maxTextChars", "maxTextRuns"] },
   observe_diff: { required: ["baselineId"], optional: ["tabId", "includeCurrent", "includeNetwork", "maxAdded", "maxRemoved", "maxSummaryChars", "allowStaleNavigationDiff"] }
 };
@@ -34715,7 +34710,7 @@ function validateRequest(request) {
     "network"
   ]);
   validateOptionalBooleanArgs(request, ["force", "observeNewTab", "expectNewTab", "includeHeaders", "includeBody", "redactSensitive"]);
-  validateOptionalNumberArgs(request, ["tabId", "clickCount", "waitMs", "maxRequests"]);
+  validateOptionalNumberArgs(request, ["tabId", "x", "y", "clickCount", "waitMs", "maxRequests"]);
   return request;
 }
 function validateKnownArgs(request, spec) {
@@ -34776,10 +34771,10 @@ function nearestArgName(field, candidates) {
   let best = null;
   let bestDistance = Infinity;
   for (const candidate of candidates) {
-    const distance2 = levenshtein(String(field), String(candidate));
-    if (distance2 < bestDistance) {
+    const distance = levenshtein(String(field), String(candidate));
+    if (distance < bestDistance) {
       best = candidate;
-      bestDistance = distance2;
+      bestDistance = distance;
     }
   }
   const maxDistance = Math.max(2, Math.floor(String(field).length / 3));
@@ -35989,335 +35984,6 @@ async function snapshot(args, client) {
   return runCommand(snapshotDef, args, client);
 }
 
-// src/controller/commands/click-probe.ts
-async function executeClickProbe(input, daemon) {
-  const envelope = daemon.buildEnvelope(
-    "click_probe",
-    input
-  );
-  const response = await daemon.command(envelope);
-  const raw = response.data;
-  return { ...raw, _mode: "probe" };
-}
-function toClickProbeResult(raw) {
-  const clickData = raw.data;
-  if (!clickData) {
-    return {
-      ok: false,
-      summary: "\u8BF7\u6C42\u62E6\u622A\u89C2\u5BDF\u5931\u8D25: daemon \u672A\u8FD4\u56DE\u7ED3\u679C",
-      nextSteps: ["\u8BF7\u786E\u8BA4\u76EE\u6807\u5143\u7D20\u5728\u5F53\u524D\u9875\u9762\u4E2D\u5B58\u5728", "\u91CD\u8BD5 click \u547D\u4EE4"]
-    };
-  }
-  const clicked = Boolean(clickData.clicked);
-  if (!clicked) {
-    return {
-      ok: false,
-      summary: "\u70B9\u51FB\u672A\u751F\u6548: \u5143\u7D20\u53EF\u80FD\u4E0D\u53EF\u70B9\u51FB\u6216\u5DF2\u88AB\u79FB\u9664",
-      nextSteps: ["\u8BF7\u4F7F\u7528 snapshot \u5237\u65B0\u9875\u9762\u5143\u7D20\u72B6\u6001\u540E\u91CD\u8BD5"]
-    };
-  }
-  const rawRequests = clickData.networkRequests;
-  const networkRequests = Array.isArray(rawRequests) ? rawRequests.map((r) => {
-    const req = r;
-    return {
-      url: String(req.url || ""),
-      method: String(req.method || ""),
-      statusCode: req.statusCode !== void 0 ? Number(req.statusCode) : void 0
-    };
-  }) : void 0;
-  const requestCount = typeof clickData.requestCount === "number" ? clickData.requestCount : networkRequests ? networkRequests.length : 0;
-  const parts = ["\u5DF2\u70B9\u51FB\u5143\u7D20"];
-  if (requestCount > 0) {
-    parts.push(`\u6355\u83B7\u5230 ${requestCount} \u4E2A\u7F51\u7EDC\u8BF7\u6C42`);
-  } else {
-    parts.push("\u672A\u6355\u83B7\u5230\u7F51\u7EDC\u8BF7\u6C42");
-  }
-  return {
-    ok: true,
-    summary: parts.join(" | "),
-    clicked: true,
-    networkRequests,
-    requestCount
-  };
-}
-
-// src/controller/commands/click-text.ts
-var MAX_REASONABLE_DISTANCE_PX = 300;
-function extractBox(line) {
-  const m = line.match(/\[box=(\d+),(\d+),(\d+),(\d+)\]/);
-  return m ? { x: +m[1], y: +m[2], width: +m[3], height: +m[4] } : null;
-}
-function extractRef(line) {
-  const m = line.match(/\[ref=(@e[a-z0-9]+_[0-9]+)\]/);
-  return m ? m[1] : null;
-}
-function extractRole(line) {
-  const m = line.trim().match(/^- (\w+)/);
-  return m ? m[1] : null;
-}
-function extractText(line) {
-  const start = line.indexOf('"');
-  if (start === -1) return null;
-  const end = line.indexOf('"', start + 1);
-  if (end === -1) return null;
-  return line.slice(start + 1, end);
-}
-function boxCenter(box) {
-  return {
-    cx: Math.round(box.x + box.width / 2),
-    cy: Math.round(box.y + box.height / 2)
-  };
-}
-function distance(x1, y1, x2, y2) {
-  return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
-}
-async function cdpClickAt(x, y, daemon, tabId2) {
-  try {
-    const envelope = daemon.buildEnvelope("cdp_click_at", { x, y, tabId: tabId2 });
-    const response = await daemon.command(envelope);
-    const respData = response.data;
-    if (respData?.ok === false) {
-      const errMsg = respData.error?.message || "CDP click failed";
-      return { clicked: false, error: errMsg };
-    }
-    const clickData = respData?.data;
-    return { clicked: clickData?.clicked === true };
-  } catch (err) {
-    return {
-      clicked: false,
-      error: err instanceof Error ? err.message : String(err)
-    };
-  }
-}
-async function executeClickText(input, daemon) {
-  const snapResp = await daemon.command(daemon.buildEnvelope("snapshot", {
-    viewportOnly: false,
-    boxes: true,
-    tabId: input.tabId
-  }));
-  const envelope = snapResp.data;
-  const snapData = envelope.data;
-  const snapText = snapData?.snapshot;
-  if (!snapText) {
-    return { _status: "snapshot_failed" };
-  }
-  const lines = snapText.split("\n");
-  const visibleCandidates = [];
-  const allMatched = [];
-  for (const line of lines) {
-    const role = extractRole(line);
-    const text = extractText(line);
-    if (!role || !text) continue;
-    if (!text.toLowerCase().includes(input.text.toLowerCase())) continue;
-    if (input.roles && !input.roles.includes(role)) continue;
-    const candidate = {
-      role,
-      text,
-      ref: extractRef(line),
-      box: extractBox(line)
-    };
-    allMatched.push(candidate);
-    if (candidate.box) {
-      visibleCandidates.push(candidate);
-    }
-  }
-  if (allMatched.length === 0) {
-    return { _status: "not_found", _text: input.text };
-  }
-  if (visibleCandidates.length === 0) {
-    return {
-      _status: "text_not_visible",
-      _text: input.text,
-      _count: allMatched.length,
-      _examples: allMatched.slice(0, 3).map((c) => `${c.role}:"${c.text}"`)
-    };
-  }
-  const scored = visibleCandidates.map((c) => ({
-    ...c,
-    center: boxCenter(c.box),
-    dist: distance(input.x, input.y, boxCenter(c.box).cx, boxCenter(c.box).cy)
-  }));
-  scored.sort((a, b) => {
-    if (Math.abs(a.dist - b.dist) < 1) {
-      if (a.ref && !b.ref) return -1;
-      if (!a.ref && b.ref) return 1;
-    }
-    return a.dist - b.dist;
-  });
-  const best = scored[0];
-  const { cx, cy } = best.center;
-  if (best.ref) {
-    const clickResp = await daemon.command(daemon.buildEnvelope("click", {
-      target: best.ref,
-      tabId: input.tabId
-    }));
-    const clickEnv = clickResp.data;
-    const clickData = clickEnv.data;
-    const clicked = clickData?.clicked === true;
-    const newTabOpened = Boolean(clickData?.newTabOpened);
-    const network2 = clickData?.network;
-    const changes = clickData?.changes;
-    const clickBaselineId = typeof changes?.baselineId === "string" ? changes.baselineId : void 0;
-    return {
-      _status: clicked ? "clicked" : "click_failed",
-      _method: "ref",
-      _ref: best.ref,
-      _text: best.text,
-      _role: best.role,
-      _clicked: clicked,
-      _distance: Math.round(best.dist),
-      _candidateCount: visibleCandidates.length,
-      _boxX: cx,
-      _boxY: cy,
-      _newTabOpened: newTabOpened,
-      _network: network2,
-      _baselineId: clickBaselineId
-    };
-  }
-  const result = await cdpClickAt(cx, cy, daemon, input.tabId);
-  return {
-    _status: result.clicked ? "clicked" : "cdp_failed",
-    _method: "cdp",
-    _text: best.text,
-    _role: best.role,
-    _clicked: result.clicked,
-    _distance: Math.round(best.dist),
-    _candidateCount: visibleCandidates.length,
-    _boxX: cx,
-    _boxY: cy,
-    _error: result.error
-  };
-}
-function toClickTextResult(raw) {
-  const status = raw._status;
-  const newTabOpened = raw._newTabOpened;
-  const network2 = raw._network;
-  const baselineId = raw._baselineId;
-  switch (status) {
-    case "clicked": {
-      const method = raw._method;
-      const distancePx = raw._distance;
-      const candidateCount = raw._candidateCount;
-      const parts = [];
-      if (method === "ref") {
-        parts.push(`\u5DF2\u70B9\u51FB\u8DDD\u79BB (${raw._boxX}, ${raw._boxY}) \u6700\u8FD1\u7684 "${raw._text}"\uFF08${raw._role}\uFF09`);
-      } else {
-        parts.push(`\u5DF2\u70B9\u51FB\u5750\u6807 (${raw._boxX}, ${raw._boxY}) \u5904\u7684 "${raw._text}"\uFF08${raw._role}\uFF09`);
-      }
-      parts.push(`\u8DDD\u79BB ${distancePx}px\uFF0C\u5171 ${candidateCount} \u4E2A\u5019\u9009`);
-      if (network2) {
-        parts.push(`\u89E6\u53D1 ${network2.count || network2.requests?.length || 0} \u4E2A\u63A5\u53E3\u8BF7\u6C42`);
-      }
-      if (distancePx > MAX_REASONABLE_DISTANCE_PX) {
-        parts.push(`\u6700\u8FD1\u5339\u914D\u8DDD\u79BB ${distancePx}px\uFF0C\u5750\u6807\u53EF\u80FD\u504F\u5DEE\u8FC7\u5927`);
-      }
-      if (method === "ref") {
-        return {
-          ok: true,
-          summary: parts.join(" | "),
-          baselineId,
-          clicked: true,
-          newTabOpened,
-          network: network2,
-          matchedText: raw._text,
-          matchedRole: raw._role,
-          method: "ref",
-          ref: raw._ref,
-          boxCenterX: raw._boxX,
-          boxCenterY: raw._boxY,
-          distance: distancePx,
-          candidateCount
-        };
-      }
-      return {
-        ok: true,
-        summary: parts.join(" | "),
-        clicked: true,
-        matchedText: raw._text,
-        matchedRole: raw._role,
-        method: "cdp",
-        boxCenterX: raw._boxX,
-        boxCenterY: raw._boxY,
-        distance: distancePx,
-        candidateCount
-      };
-    }
-    case "click_failed":
-      return {
-        ok: false,
-        summary: `\u5DF2\u627E\u5230\u5143\u7D20 "${raw._text}"\uFF08ref=${raw._ref}\uFF09\uFF0C\u4F46\u70B9\u51FB\u672A\u751F\u6548\uFF08\u53EF\u80FD\u88AB\u906E\u6321\u6216\u5DF2\u79FB\u9664\uFF09`,
-        clicked: false,
-        newTabOpened,
-        network: network2,
-        matchedText: raw._text,
-        matchedRole: raw._role,
-        method: "ref",
-        ref: raw._ref,
-        boxCenterX: raw._boxX,
-        boxCenterY: raw._boxY,
-        distance: raw._distance,
-        candidateCount: raw._candidateCount,
-        nextSteps: [
-          "\u4F7F\u7528 snapshot \u786E\u8BA4\u5143\u7D20\u662F\u5426\u4ECD\u5728\u9875\u9762\u4E0A"
-        ]
-      };
-    case "cdp_failed":
-      return {
-        ok: false,
-        summary: `CDP \u5750\u6807\u70B9\u51FB\u5931\u8D25: ${raw._error || "\u672A\u77E5\u9519\u8BEF"}`,
-        clicked: false,
-        matchedText: raw._text,
-        matchedRole: raw._role,
-        method: "cdp",
-        boxCenterX: raw._boxX,
-        boxCenterY: raw._boxY,
-        distance: raw._distance,
-        candidateCount: raw._candidateCount,
-        nextSteps: ["\u786E\u8BA4 daemon \u548C extension \u8FDE\u63A5\u6B63\u5E38\u540E\u91CD\u8BD5"]
-      };
-    case "text_not_visible": {
-      const examples = raw._examples;
-      return {
-        ok: false,
-        summary: `\u627E\u5230 ${raw._count} \u4E2A\u6587\u672C\u5339\u914D "${raw._text}"\uFF0C\u4F46\u5747\u4E0D\u53EF\u89C1\uFF08\u65E0 box\uFF09\uFF0C\u53EF\u80FD\u9700\u8981\u6EDA\u52A8\u9875\u9762`,
-        clicked: false,
-        matchedText: raw._text || "",
-        matchedRole: "",
-        nextSteps: [
-          "\u4F7F\u7528 scroll \u6EDA\u52A8\u9875\u9762\u540E\u91CD\u8BD5",
-          examples?.length ? `\u5339\u914D\u5230\u7684\u4E0D\u53EF\u89C1\u5143\u7D20: ${examples.join(", ")}` : ""
-        ].filter(Boolean)
-      };
-    }
-    case "not_found":
-      return {
-        ok: false,
-        summary: `\u672A\u627E\u5230\u5305\u542B\u300C${raw._text}\u300D\u7684\u9875\u9762\u5143\u7D20`,
-        clicked: false,
-        matchedText: raw._text || "",
-        matchedRole: "",
-        nextSteps: ["\u4F7F\u7528 snapshot \u786E\u8BA4\u9875\u9762\u5185\u5BB9", "\u786E\u8BA4\u6587\u672C\u5728\u5F53\u524D\u9875\u9762\u4E0A\u663E\u793A"]
-      };
-    case "snapshot_failed":
-      return {
-        ok: false,
-        summary: "\u6587\u672C\u5B9A\u4F4D\u70B9\u51FB\u5931\u8D25: \u65E0\u6CD5\u83B7\u53D6\u9875\u9762\u5FEB\u7167",
-        clicked: false,
-        matchedText: "",
-        matchedRole: "",
-        nextSteps: ["\u8BF7\u786E\u8BA4\u9875\u9762\u5DF2\u52A0\u8F7D", "\u91CD\u8BD5 click \u547D\u4EE4"]
-      };
-    default:
-      return {
-        ok: false,
-        summary: `\u6587\u672C\u5B9A\u4F4D\u70B9\u51FB\u5931\u8D25 (${status})`,
-        clicked: false,
-        matchedText: "",
-        matchedRole: ""
-      };
-  }
-}
-
 // src/controller/commands/click.ts
 var ELEMENT_REF_RE = /^@e[^\s_]+_\d+$/;
 var CSS_PREFIX = "css=";
@@ -36402,41 +36068,11 @@ var clickDef = {
     };
   },
   execute: async (input, daemon) => {
-    if (input.text) {
-      return executeClickText({
-        text: input.text,
-        x: input.x,
-        y: input.y,
-        roles: input.roles,
-        tabId: input.tabId
-      }, daemon);
-    }
-    if (input.interceptRequests) {
-      return executeClickProbe({
-        target: input.target,
-        tabId: input.tabId,
-        force: input.force,
-        filter: input.interceptRequests.filter,
-        includeHeaders: input.interceptRequests.includeHeaders,
-        includeBody: input.interceptRequests.includeBody,
-        redactSensitive: input.interceptRequests.redactSensitive,
-        maxRequests: input.interceptRequests.maxRequests
-      }, daemon);
-    }
-    const envelope = daemon.buildEnvelope(
-      "click",
-      { target: input.target, tabId: input.tabId }
-    );
+    const envelope = daemon.buildEnvelope("click", input);
     const response = await daemon.command(envelope);
     return response.data || {};
   },
   toResult: (raw) => {
-    if (raw._status !== void 0) {
-      return toClickTextResult(raw);
-    }
-    if (raw._mode === "probe") {
-      return toClickProbeResult(raw);
-    }
     const clickData = raw.data;
     if (!clickData) {
       return {
@@ -36458,13 +36094,19 @@ var clickDef = {
     const newTabOpened = Boolean(clickData.newTabOpened);
     const rawNetwork = clickData.network;
     const network2 = rawNetwork ? { requests: Array.isArray(rawNetwork.requests) ? rawNetwork.requests : [], count: rawNetwork.count || rawNetwork.requests?.length || 0 } : void 0;
+    const probe = clickData.probe;
+    const textClick = clickData.textClick;
     const warnings = [
       ...Array.isArray(clickData.warnings) ? clickData.warnings.map(String) : [],
       ...Array.isArray(changes?.warnings) ? changes.warnings.map(String) : []
     ];
-    const parts = ["\u5DF2\u70B9\u51FB\u5143\u7D20"];
+    const parts = [textClick ? "\u5DF2\u6309\u6587\u672C\u5B9A\u4F4D\u70B9\u51FB" : "\u5DF2\u70B9\u51FB\u5143\u7D20"];
+    const probeCount = typeof probe?.interceptedCount === "number" ? probe.interceptedCount : 0;
     if (network2 && network2.count > 0) {
       parts.push(`\u89E6\u53D1 ${network2.count} \u4E2A\u63A5\u53E3\u8BF7\u6C42`);
+    }
+    if (probe && probeCount > 0) {
+      parts.push(`\u62E6\u622A ${probeCount} \u4E2A\u63A5\u53E3\u8BF7\u6C42`);
     }
     if (baselineId) {
       parts.push(`\u89C2\u5BDF\u57FA\u7EBF: ${baselineId}`);
@@ -36476,6 +36118,15 @@ var clickDef = {
       clicked: true,
       newTabOpened,
       network: network2,
+      probe,
+      matchedText: typeof textClick?.text === "string" ? textClick.text : void 0,
+      matchedRole: typeof textClick?.role === "string" ? textClick.role : void 0,
+      method: textClick?.method === "cdp" ? "cdp" : textClick?.method === "ref" ? "ref" : void 0,
+      ref: typeof textClick?.ref === "string" ? textClick.ref : void 0,
+      boxCenterX: typeof textClick?.boxCenterX === "number" ? textClick.boxCenterX : void 0,
+      boxCenterY: typeof textClick?.boxCenterY === "number" ? textClick.boxCenterY : void 0,
+      distance: typeof textClick?.distance === "number" ? textClick.distance : void 0,
+      candidateCount: typeof textClick?.candidateCount === "number" ? textClick.candidateCount : void 0,
       settle: clickData.settle,
       changes,
       warnings: warnings.length ? warnings : void 0

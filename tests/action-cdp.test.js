@@ -37,7 +37,7 @@ test('CDP action debugger reuses network capture ownership and only detaches tem
   assert.match(networkCdpSource, /temporary:\s*true/);
 });
 
-test('click_probe is represented as a CDP Fetch-blocking click action', () => {
+test('click request interception is represented as an internal CDP Fetch-blocking click strategy', () => {
   assert.match(networkCdpSource, /export async function runClickProbeCapture/);
   assert.match(networkCdpSource, /Fetch\.enable/);
   assert.match(networkCdpSource, /Fetch\.failRequest/);
@@ -45,10 +45,20 @@ test('click_probe is represented as a CDP Fetch-blocking click action', () => {
   assert.match(networkCdpSource, /Fetch\.disable/);
   assert.match(networkCdpSource, /BlockedByClient/);
   assert.match(networkCdpSource, /SENSITIVE_FIELD_PATTERN/);
-  assert.match(navigationSource, /export async function handleClickProbe/);
+  assert.match(navigationSource, /args\?\.interceptRequests/);
+  assert.match(navigationSource, /runClickProbeCapture\(tabId,\s*args\.interceptRequests/);
   assert.match(navigationSource, /performObservedClick\(args,\s*session,\s*tabId\)/);
-  assert.match(runtimeMetadataSource, /['"]clickProbe['"]/);
-  assert.match(serviceWorker, /click_probe/);
+  assert.doesNotMatch(navigationSource, /export async function handleClickProbe/);
+  assert.doesNotMatch(serviceWorker, /case "click_probe"/);
+  assert.doesNotMatch(serviceWorker, /case "cdp_click_at"/);
+});
+
+test('click text mode is resolved inside handleClick with ref and CDP coordinate fallback', () => {
+  assert.match(navigationSource, /function collectTextClickCandidates/);
+  assert.match(navigationSource, /func:\s*getAccessibilitySnapshot/);
+  assert.match(navigationSource, /performObservedClick\(\{\s*\.\.\.args,\s*target:\s*best\.ref/s);
+  assert.match(navigationSource, /performCdpClickAt\(tabId,\s*best\.boxCenterX,\s*best\.boxCenterY/);
+  assert.match(navigationSource, /textClick:\s*\{/);
 });
 
 test('auto action strategies fall back visibly while explicit CDP strategies return recoverable errors', () => {

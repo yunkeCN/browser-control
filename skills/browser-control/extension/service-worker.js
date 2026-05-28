@@ -87,7 +87,6 @@
         "observe_start",
         "observe_diff",
         "network",
-        "clickProbe",
         "cdpEvaluate",
         "cdpMouse",
         "cdpKeyboard",
@@ -601,13 +600,13 @@
     if (!Number.isFinite(numeric2)) return CLICK_PROBE_DEFAULT_MAX_REQUESTS;
     return Math.max(1, Math.min(500, Math.round(numeric2)));
   }
-  function clickProbeIncludesHeaders(options) {
+  function clickInterceptionIncludesHeaders(options) {
     return options?.includeHeaders !== false;
   }
-  function clickProbeIncludesBody(options) {
+  function clickInterceptionIncludesBody(options) {
     return options?.includeBody !== false;
   }
-  function clickProbeRedactsSensitive(options) {
+  function clickInterceptionRedactsSensitive(options) {
     return options?.redactSensitive !== false;
   }
   function isSensitiveFieldName(name) {
@@ -660,9 +659,9 @@
   }
   function buildProbeRequest(params, options) {
     const request = params?.request || {};
-    const redactSensitive = clickProbeRedactsSensitive(options);
-    const includeBody = clickProbeIncludesBody(options);
-    const includeHeaders = clickProbeIncludesHeaders(options);
+    const redactSensitive = clickInterceptionRedactsSensitive(options);
+    const includeBody = clickInterceptionIncludesBody(options);
+    const includeHeaders = clickInterceptionIncludesHeaders(options);
     const body = typeof request.postData === "string" ? request.postData : null;
     const result = {
       id: String(params?.requestId || ""),
@@ -688,9 +687,9 @@
     let totalIntercepted = 0;
     let fetchEnabled = false;
     let listenerInstalled = false;
-    const lease = await acquireNamedActionDebugger(tabId, "click_probe", ["Reusing debugger session owned by click_probe."]);
+    const lease = await acquireNamedActionDebugger(tabId, "click_intercept", ["Reusing debugger session owned by click request interception."]);
     if (lease.error || !lease.debuggee) {
-      throw new Error(`click_probe could not enable CDP request interception: ${lease.error || "debugger unavailable"}`);
+      throw new Error(`click request interception could not enable CDP request interception: ${lease.error || "debugger unavailable"}`);
     }
     const debuggee = lease.debuggee;
     const listener = (source2, method, params) => {
@@ -720,7 +719,7 @@
       const result = await action();
       await new Promise((resolve) => setTimeout(resolve, waitMs));
       if (totalIntercepted > requests.length) {
-        warnings.push(`click_probe captured ${requests.length} of ${totalIntercepted} intercepted requests; increase maxRequests for more detail.`);
+        warnings.push(`click request interception captured ${requests.length} of ${totalIntercepted} intercepted requests; increase maxRequests for more detail.`);
       }
       return {
         result,
@@ -1827,7 +1826,7 @@
         return false;
       if (tagFilter && !tagFilter.has(node.tag.toLowerCase()))
         return false;
-      const text = nodeSearchText(node);
+      const text = nodeSearchText2(node);
       if (hasVisibleText && !text)
         return false;
       if (textIncludes && !text.includes(textIncludes))
@@ -2008,7 +2007,7 @@
     function refRecord(node) {
       const element = node.element;
       const attributes = safeAttributes(element);
-      const text = singleTextChild(node) || directTextOfElement(element) || nodeSearchText(node);
+      const text = singleTextChild(node) || directTextOfElement(element) || nodeSearchText2(node);
       const parsedRef = node.ref ? agentRefs.parse(node.ref) : null;
       return compactObject({
         ref: node.ref,
@@ -2050,7 +2049,7 @@
     function singleTextChild(node) {
       return node.children.length === 1 && typeof node.children[0] === "string" && !Object.keys(node.props).length ? normalizeText(node.children[0]) : void 0;
     }
-    function nodeSearchText(node) {
+    function nodeSearchText2(node) {
       const parts = [];
       if (node.name)
         parts.push(node.name);
@@ -2058,7 +2057,7 @@
         if (typeof child === "string")
           parts.push(child);
         else
-          parts.push(nodeSearchText(child));
+          parts.push(nodeSearchText2(child));
       }
       return normalizeText(parts.join(" "), 1e3);
     }
@@ -4346,6 +4345,86 @@
     }
     return args?.selector;
   }
+  function normalizeSearchText(value) {
+    return String(value ?? "").replace(/\s+/g, " ").trim();
+  }
+  function nodeSearchText(node) {
+    const parts = [];
+    if (node?.name) parts.push(String(node.name));
+    if (node?.text) parts.push(String(node.text));
+    if (Array.isArray(node?.children)) {
+      for (const child of node.children) {
+        if (child?.text) parts.push(String(child.text));
+        else parts.push(nodeSearchText(child));
+      }
+    }
+    return normalizeSearchText(parts.join(" "));
+  }
+  function boxCenter(box) {
+    return {
+      x: Math.round(box.x + box.width / 2),
+      y: Math.round(box.y + box.height / 2)
+    };
+  }
+  function distanceBetween(x1, y1, x2, y2) {
+    return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+  }
+  function collectTextClickCandidates(snapshot, query, roles, x, y) {
+    const normalizedQuery = normalizeSearchText(query).toLowerCase();
+    const roleFilter = Array.isArray(roles) ? new Set(roles.map((role) => String(role).toLowerCase())) : null;
+    const candidates = [];
+    const seen = /* @__PURE__ */ new Set();
+    const visit = (node) => {
+      if (!node || typeof node !== "object") return;
+      const role = String(node.role || "");
+      const text = nodeSearchText(node);
+      const box = node.box;
+      if (role && text && box && typeof box.x === "number" && typeof box.y === "number" && typeof box.width === "number" && typeof box.height === "number" && text.toLowerCase().includes(normalizedQuery) && (!roleFilter || roleFilter.has(role.toLowerCase()))) {
+        const center = boxCenter(box);
+        const ref = typeof node.ref === "string" ? node.ref : void 0;
+        const key = `${ref || ""}:${role}:${text}:${box.x},${box.y},${box.width},${box.height}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          candidates.push({
+            role,
+            text,
+            ref,
+            box,
+            boxCenterX: center.x,
+            boxCenterY: center.y,
+            distance: distanceBetween(x, y, center.x, center.y)
+          });
+        }
+      }
+      if (Array.isArray(node.children)) node.children.forEach(visit);
+    };
+    if (Array.isArray(snapshot?.tree)) snapshot.tree.forEach(visit);
+    if (!candidates.length && Array.isArray(snapshot?.refs)) {
+      for (const refRecord of snapshot.refs) visit(refRecord);
+    }
+    return candidates.sort((a, b) => {
+      if (Math.abs(a.distance - b.distance) < 1) {
+        if (a.ref && !b.ref) return -1;
+        if (!a.ref && b.ref) return 1;
+      }
+      return a.distance - b.distance;
+    });
+  }
+  function withTextClickMetadata(result, candidate, method) {
+    return {
+      ...result,
+      textClick: {
+        method,
+        text: candidate.text,
+        role: candidate.role,
+        ref: candidate.ref,
+        boxCenterX: candidate.boxCenterX,
+        boxCenterY: candidate.boxCenterY,
+        distance: Math.round(candidate.distance),
+        candidateCount: candidate.candidateCount
+      }
+    };
+  }
   async function focusTargetForCdpKeyboard(tabId, selector) {
     const targetSelector3 = typeof selector === "string" && selector ? selector : null;
     const results = await chrome.scripting.executeScript({
@@ -4427,33 +4506,71 @@
   async function handleClick(args = {}, session) {
     const { tabId: argTabId } = args || {};
     const selector = targetSelector(args);
-    if (!selector) throw new Error("target is required for click");
+    const hasTextTarget = typeof args?.text === "string" && args.text.trim();
+    if (!selector && !hasTextTarget) throw new Error("target or text is required for click");
     const tabId = argTabId || getActiveTabId(session);
     if (!tabId) throw new Error("No active tab in session");
-    return performObservedClick(args, session, tabId);
-  }
-  async function handleClickProbe(args = {}, session) {
-    const { tabId: argTabId } = args || {};
-    const selector = targetSelector(args);
-    if (!selector) throw new Error("target is required for click_probe");
-    const tabId = argTabId || getActiveTabId(session);
-    if (!tabId) throw new Error("No active tab in session");
-    const { result, probe } = await runClickProbeCapture(tabId, args, () => performObservedClick(args, session, tabId));
-    const warnings = [
-      ...result?.warnings || [],
-      ...probe.warnings || []
-    ];
-    if (result?.newTab || result?.newTabs && result.newTabs.length) {
-      warnings.push("click_probe does not guarantee blocking first requests from newly opened tabs.");
-    }
-    return {
-      ...result,
-      warnings,
-      probe: {
-        ...probe,
-        warnings: probe.warnings || []
+    if (hasTextTarget) {
+      if (typeof args.x !== "number" || typeof args.y !== "number") {
+        throw new Error("x and y coordinates are required for click text mode");
       }
-    };
+      const snapshotResults = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: getAccessibilitySnapshot,
+        args: [{ viewportOnly: false, boxes: true, tabId }],
+        world: "MAIN"
+      });
+      const snapshot = snapshotResults[0]?.result || {};
+      const candidates = collectTextClickCandidates(snapshot, args.text, args.roles, args.x, args.y);
+      const best = candidates[0];
+      if (!best) {
+        return {
+          clicked: false,
+          error: `No visible text match found for click text "${args.text}"`,
+          recoverable: true,
+          textClick: {
+            text: args.text,
+            candidateCount: 0
+          }
+        };
+      }
+      best.candidateCount = candidates.length;
+      if (best.ref) {
+        const result = await performObservedClick({
+          ...args,
+          target: best.ref,
+          selector: best.ref,
+          text: void 0,
+          x: void 0,
+          y: void 0,
+          roles: void 0
+        }, session, tabId);
+        return withTextClickMetadata(result, best, "ref");
+      }
+      const beforeIds = await beginNewTabWatch();
+      const cdpResult = await performCdpClickAt(tabId, best.boxCenterX, best.boxCenterY, {});
+      const observed = await attachNewTabsIfAny(session, tabId, beforeIds, args || {});
+      return withTextClickMetadata(mergeNewTabObservation(cdpResult, observed), best, "cdp");
+    }
+    if (args?.interceptRequests && typeof args.interceptRequests === "object") {
+      const { result, probe } = await runClickProbeCapture(tabId, args.interceptRequests, () => performObservedClick(args, session, tabId));
+      const warnings = [
+        ...result?.warnings || [],
+        ...probe.warnings || []
+      ];
+      if (result?.newTab || result?.newTabs && result.newTabs.length) {
+        warnings.push("click request interception does not guarantee blocking first requests from newly opened tabs.");
+      }
+      return {
+        ...result,
+        warnings,
+        probe: {
+          ...probe,
+          warnings: probe.warnings || []
+        }
+      };
+    }
+    return performObservedClick(args, session, tabId);
   }
   async function performObservedClick(args = {}, session, tabId) {
     const selector = targetSelector(args);
@@ -4717,15 +4834,6 @@
       activatedTabForCapture,
       restoredActiveTabId
     };
-  }
-  async function handleCdpClickAt(args = {}, session) {
-    const tabId = args?.tabId || getActiveTabId(session);
-    if (!tabId) throw new Error("No active tab in session");
-    const { x, y, button, clickCount, modifiers } = args || {};
-    if (typeof x !== "number" || typeof y !== "number") {
-      throw new Error("x and y coordinates are required for cdp_click_at");
-    }
-    return performCdpClickAt(tabId, x, y, { button, clickCount, modifiers });
   }
   async function handleObserveCapture(args = {}, session) {
     const tabId = args?.tabId || getActiveTabId(session);
@@ -5009,12 +5117,6 @@
           break;
         case "click":
           result = await handleClick(args, session);
-          break;
-        case "click_probe":
-          result = await handleClickProbe(args, session);
-          break;
-        case "cdp_click_at":
-          result = await handleCdpClickAt(args, session);
           break;
         case "fill":
           result = await handleFill(args, session);

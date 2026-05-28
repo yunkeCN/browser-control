@@ -208,14 +208,14 @@ async function main() {
     }
 
     if (probeRef) {
-      info('Test 5b: Probe click captures and blocks API request');
-      const probe = await apiCall('click_probe', { target: probeRef, filter: '/probe-write', waitMs: 500 });
-      check('click_probe ok', true, probe?.ok === true);
-      check('click_probe intercepted one request', 1, probe?.data?.probe?.interceptedCount || 0);
-      check('click_probe method', 'POST', probe?.data?.probe?.requests?.[0]?.method || '');
+      info('Test 5b: Click request interception captures and blocks API request');
+      const probe = await apiCall('click', { target: probeRef, interceptRequests: { filter: '/probe-write' } });
+      check('click intercept ok', true, probe?.ok === true);
+      check('click intercept intercepted one request', 1, probe?.data?.probe?.interceptedCount || 0);
+      check('click intercept method', 'POST', probe?.data?.probe?.requests?.[0]?.method || '');
       const headers = probe?.data?.probe?.requests?.[0]?.requestHeaders || {};
-      check('click_probe redacts authorization', '[REDACTED]', headers.Authorization || headers.authorization || '');
-      check('click_probe redacts body token', '[REDACTED]', probe?.data?.probe?.requests?.[0]?.requestBody?.token || '');
+      check('click intercept redacts authorization', '[REDACTED]', headers.Authorization || headers.authorization || '');
+      check('click intercept redacts body token', '[REDACTED]', probe?.data?.probe?.requests?.[0]?.requestBody?.token || '');
     }
 
     info('Test 6: Interact with form controls');

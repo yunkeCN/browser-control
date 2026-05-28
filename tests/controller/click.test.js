@@ -131,8 +131,6 @@ test('click 成功: 带 changes 和 baselineId', async (t) => {
 test('click 成功: 请求拦截和观察模式捕获网络请求', async (t) => {
   const fake = createFakeDaemon({
     onCommand: (envelope) => {
-      // 请求拦截和观察模式: click 发第一个请求，然后内部可能发多个
-      // 但统一 click 入口的 executeClickProbe 最终返回 data
       return {
         id: envelope.id,
         ok: true,
@@ -145,10 +143,13 @@ test('click 成功: 请求拦截和观察模式捕获网络请求', async (t) =>
         durationMs: 400,
         data: {
           clicked: true,
-          networkRequests: [
-            { url: '/api/submit', method: 'POST', statusCode: 200 },
-          ],
-          requestCount: 1,
+          probe: {
+            interceptedCount: 1,
+            requests: [
+              { url: '/api/submit', method: 'POST', statusCode: 200 },
+            ],
+            warnings: [],
+          },
         },
         artifacts: [],
         error: null,
@@ -169,13 +170,13 @@ test('click 成功: 请求拦截和观察模式捕获网络请求', async (t) =>
 
   assert.equal(result.ok, true);
   assert.equal(result.clicked, true);
-  assert.match(result.summary, /捕获到 1 个网络请求/);
-  assert.equal(result.requestCount, 1);
-  assert.ok(Array.isArray(result.networkRequests));
-  assert.equal(result.networkRequests[0].url, '/api/submit');
-  assert.equal(result.networkRequests[0].method, 'POST');
-  assert.equal(fake.requests[0].command, 'click_probe');
+  assert.match(result.summary, /拦截 1 个接口请求/);
+  assert.equal(result.probe.interceptedCount, 1);
+  assert.equal(result.probe.requests[0].url, '/api/submit');
+  assert.equal(result.probe.requests[0].method, 'POST');
+  assert.equal(fake.requests[0].command, 'click');
   assert.equal(fake.requests[0].session, 'mcp-active-session');
+  assert.deepEqual(fake.requests[0].args.interceptRequests, { filter: '/api/', includeBody: true });
 });
 
 test('click 成功: 请求拦截和观察模式无网络请求', async (t) => {
@@ -192,8 +193,11 @@ test('click 成功: 请求拦截和观察模式无网络请求', async (t) => {
       durationMs: 200,
       data: {
         clicked: true,
-        networkRequests: [],
-        requestCount: 0,
+        probe: {
+          interceptedCount: 0,
+          requests: [],
+          warnings: [],
+        },
       },
       artifacts: [],
       error: null,
@@ -212,52 +216,36 @@ test('click 成功: 请求拦截和观察模式无网络请求', async (t) => {
 
   assert.equal(result.ok, true);
   assert.equal(result.clicked, true);
-  assert.match(result.summary, /未捕获到网络请求/);
-  assert.equal(result.requestCount, 0);
+  assert.equal(result.probe.interceptedCount, 0);
+  assert.equal(fake.requests[0].command, 'click');
+  assert.deepEqual(fake.requests[0].args.interceptRequests, { filter: '/api/' });
 });
 
 // ─── text 模式 ──────────────────────────────────────────────────
 
 test('click 成功: text 模式', async (t) => {
-  // text 模式的 execute 调用 executeClickText，它内部会先 snapshot 再 click
-  // 这里需要 fake daemon 处理多个请求
   const fake = createFakeDaemon({
-    onCommand: (envelope) => {
-      if (envelope.command === 'snapshot') {
-        // daemon returns full response; DaemonClient wraps as { data: <response> }
-        // executeClickText reads: snapResp.data = <response>, then .data = response.data
-        return {
-          id: envelope.id,
-          ok: true,
-          command: 'snapshot',
-          backend: 'extension',
-          session: envelope.session,
-          tab: 108,
-          data: {
-            snapshot: '- button "Submit" [ref=@eabc_1] [box=195,295,80,30]',
-            refs: {
-              '@eabc_1': {
-                role: 'button',
-                name: 'Submit',
-                text: 'Submit',
-                box: { x: 195, y: 295, width: 80, height: 30 },
-              },
-            },
-            stats: { totalNodes: 1, emitted: 1, refs: 1 },
-          },
-        };
-      }
-      // click command
-      return {
-        id: envelope.id,
-        ok: true,
-        command: 'click',
-        backend: 'extension',
-        session: envelope.session,
-        tab: 108,
-        data: { clicked: true },
-      };
-    },
+    onCommand: (envelope) => ({
+      id: envelope.id,
+      ok: true,
+      command: 'click',
+      backend: 'extension',
+      session: envelope.session,
+      tab: 108,
+      data: {
+        clicked: true,
+        textClick: {
+          method: 'ref',
+          ref: '@eabc_1',
+          text: 'Submit',
+          role: 'button',
+          boxCenterX: 235,
+          boxCenterY: 310,
+          distance: 38,
+          candidateCount: 1,
+        },
+      },
+    }),
   });
   await fake.listen();
   t.after(() => fake.close());
@@ -268,10 +256,57 @@ test('click 成功: text 模式', async (t) => {
 
   assert.equal(result.ok, true);
   assert.equal(result.clicked, true);
-  assert.equal(fake.requests[0].command, 'snapshot');
+  assert.equal(result.method, 'ref');
+  assert.equal(result.ref, '@eabc_1');
+  assert.equal(result.matchedText, 'Submit');
+  assert.equal(fake.requests.length, 1);
+  assert.equal(fake.requests[0].command, 'click');
   assert.equal(fake.requests[0].session, 'mcp-active-session');
-  assert.equal(fake.requests[1].command, 'click');
-  assert.equal(fake.requests[1].session, 'mcp-active-session');
+  assert.equal(fake.requests[0].args.text, 'Submit');
+  assert.equal(fake.requests[0].args.x, 200);
+  assert.equal(fake.requests[0].args.y, 300);
+});
+
+test('click 成功: text 模式无 ref 时保留坐标参数给 click', async (t) => {
+  const fake = createFakeDaemon({
+    onCommand: (envelope) => ({
+      id: envelope.id,
+      ok: true,
+      command: 'click',
+      backend: 'extension',
+      session: envelope.session,
+      tab: 108,
+      data: {
+        clicked: true,
+        textClick: {
+          method: 'cdp',
+          text: 'Submit',
+          role: 'generic',
+          boxCenterX: 220,
+          boxCenterY: 300,
+          distance: 20,
+          candidateCount: 1,
+        },
+      },
+    }),
+  });
+  await fake.listen();
+  t.after(() => fake.close());
+
+  const client = new DaemonClient({ port: fake.port(), host: '127.0.0.1' });
+
+  const result = await click({ text: 'Submit', x: 200, y: 300, session: 'mcp-active-session' }, client);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.clicked, true);
+  assert.equal(result.method, 'cdp');
+  assert.equal(result.boxCenterX, 220);
+  assert.equal(result.boxCenterY, 300);
+  assert.equal(fake.requests.length, 1);
+  assert.equal(fake.requests[0].command, 'click');
+  assert.equal(fake.requests[0].session, 'mcp-active-session');
+  assert.equal(fake.requests[0].args.x, 200);
+  assert.equal(fake.requests[0].args.y, 300);
 });
 
 // ─── 失败用例 ───────────────────────────────────────────────────

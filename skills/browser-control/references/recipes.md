@@ -7,7 +7,7 @@ Use a unique session per task and close it when done.
 ## Shared command template
 
 ```bash
-node scripts/browser-control.js command snapshot --session demo --args '{}'
+node scripts/browser-control.js snapshot --args '{"session":"demo"}'
 ```
 
 Equivalent raw HTTP template:
@@ -29,26 +29,26 @@ Use when the user asks you to inspect, summarize, or extract visible content fro
    ```
 2. Navigate or find an existing tab:
    ```bash
-   node scripts/browser-control.js command navigate --session read-page --args '{"url":"https://example.com","newTab":true}'
+   node scripts/browser-control.js navigate --args '{"session":"read-page","url":"https://example.com","newTab":true}'
    ```
 3. Capture compact page structure for targets and layout context:
    ```bash
-   node scripts/browser-control.js command snapshot --session read-page --args '{}'
+   node scripts/browser-control.js snapshot --args '{"session":"read-page"}'
    ```
    For noisy pages, prefer snapshot filters before reading a broad structure snapshot:
    ```bash
-   node scripts/browser-control.js command snapshot --session read-page --args '{"hasVisibleText":true,"viewportOnly":true}'
+   node scripts/browser-control.js snapshot --args '{"session":"read-page","hasVisibleText":true,"viewportOnly":true}'
    ```
    Snapshot avoids repeating most parent container descendant text and redacts likely sensitive input values. It is still meant for interaction, not prose extraction.
 4. If you only need visible text, use `get_text` instead of custom JavaScript or a broad snapshot:
    ```bash
-   node scripts/browser-control.js command get_text --session read-page --args '{"scope":"viewport","maxChars":4000}'
+   node scripts/browser-control.js get_text --args '{"session":"read-page","scope":"viewport","maxChars":4000}'
    ```
 5. For below-fold content or scrollable result regions, use first-class `scroll` rather than keyboard keys or an `evaluate` workaround, then read text again:
    ```bash
-   node scripts/browser-control.js command scroll --session read-page --args '{"deltaY":800,"strategy":"dom"}'
-   node scripts/browser-control.js command scroll --session read-page --args '{"strategy":"wheel","x":400,"y":500,"deltaY":800}'
-   node scripts/browser-control.js command get_text --session read-page --args '{"scope":"full","maxChars":12000,"includeRuns":true}'
+   node scripts/browser-control.js scroll --args '{"session":"read-page","deltaY":800,"strategy":"dom"}'
+   node scripts/browser-control.js scroll --args '{"session":"read-page","strategy":"wheel","x":400,"y":500,"deltaY":800}'
+   node scripts/browser-control.js get_text --args '{"session":"read-page","scope":"full","maxChars":12000,"includeRuns":true}'
    ```
 6. Report content with the source URL/session context. Close with `close_session` unless the user wants the tab left open.
 
@@ -64,7 +64,7 @@ Use when clicking controls, opening menus, choosing options, or manipulating vis
 2. Identify the target by role/name/text and use its `@e` reference.
 3. Perform the action:
    ```bash
-   node scripts/browser-control.js command click --session ui-task --args '{"target":"@e1jm0sbb_1"}'
+   node scripts/browser-control.js click --args '{"session":"ui-task","target":"@e1jm0sbb_1"}'
    ```
 4. Inspect returned `changes` / `postSnapshot`, or verify with `wait_for` or screenshot.
 5. If the UI changed, do not reuse old `@e` references; snapshot again.
@@ -80,11 +80,11 @@ Use when preparing form fields but not sending the form yet.
 1. Snapshot and identify each input/select/checkbox by `@e`.
 2. Fill fields:
    ```bash
-   node scripts/browser-control.js command fill --session form-draft --args '{"target":"@e0field_1","value":"example text"}'
-   node scripts/browser-control.js command click --session form-draft --args '{"target":"@e0select_1"}'
-   node scripts/browser-control.js command press --session form-draft --args '{"key":"ArrowDown"}'
-   node scripts/browser-control.js command press --session form-draft --args '{"key":"Enter"}'
-   node scripts/browser-control.js command click --session form-draft --args '{"target":"@e1jm0sbb_1"}'
+   node scripts/browser-control.js fill --args '{"session":"form-draft","target":"@e0field_1","value":"example text"}'
+   node scripts/browser-control.js click --args '{"session":"form-draft","target":"@e0select_1"}'
+   node scripts/browser-control.js press --args '{"session":"form-draft","key":"ArrowDown"}'
+   node scripts/browser-control.js press --args '{"session":"form-draft","key":"Enter"}'
+   node scripts/browser-control.js click --args '{"session":"form-draft","target":"@e1jm0sbb_1"}'
    ```
 3. Verify values with a fresh snapshot or targeted evaluate.
 4. Stop before clicking Submit/Send/Confirm unless the user explicitly approved submission.
@@ -102,8 +102,8 @@ Use only when the user asked for a submission or final action.
 3. Ask for confirmation unless the current user instruction already explicitly authorizes this exact final action.
 4. Snapshot, click the final control by `@e`, and verify result:
    ```bash
-   node scripts/browser-control.js command click --session submit-task --args '{"target":"@e0submit_1"}'
-   node scripts/browser-control.js command wait_for --session submit-task --args '{"text":"Success","timeoutMs":10000}'
+   node scripts/browser-control.js click --args '{"session":"submit-task","target":"@e0submit_1"}'
+   node scripts/browser-control.js wait_for --args '{"session":"submit-task","text":"Success","timeoutMs":10000}'
    ```
 
 Verification evidence: confirmation page, success message, resulting record, or error message.
@@ -132,7 +132,7 @@ Use when the user asks for an archival page export.
 1. Navigate and wait until the page is ready.
 2. Call `capture` with `format: "pdf"`:
    ```bash
-   node scripts/browser-control.js command capture --session pdf-task --args '{"format":"pdf","fileName":"page.pdf","paperFormat":"A4","printBackground":true}'
+   node scripts/browser-control.js capture --args '{"session":"pdf-task","format":"pdf","fileName":"page.pdf","paperFormat":"A4","printBackground":true}'
    ```
 3. Report the artifact path returned by the response.
 
@@ -148,15 +148,15 @@ Network monitoring starts automatically on `navigate` (same-origin XHR/fetch onl
 
 1. Navigate or perform the triggering UI action:
    ```bash
-   node scripts/browser-control.js command navigate --session net-task --args '{"url":"https://example.com","newTab":true}'
+   node scripts/browser-control.js navigate --args '{"session":"net-task","url":"https://example.com","newTab":true}'
    ```
 2. List captured requests:
    ```bash
-   node scripts/browser-control.js command network --session net-task --args '{"action":"list"}'
+   node scripts/browser-control.js network --args '{"session":"net-task","action":"list"}'
    ```
 3. Fetch details for relevant `requestId` values:
    ```bash
-   node scripts/browser-control.js command network --session net-task --args '{"action":"detail","requestId":"<id>"}'
+   node scripts/browser-control.js network --args '{"session":"net-task","action":"detail","requestId":"<id>"}'
    ```
 
 Verification evidence: request URL, method, status, response metadata/body or artifact path.
@@ -169,7 +169,7 @@ Use when the user asks to retrieve a browser-accessible file.
 
 1. Navigate or directly call download when a URL is known:
    ```bash
-   node scripts/browser-control.js command download --session dl-task --args '{"url":"https://example.com/file.csv","filename":"file.csv"}'
+   node scripts/browser-control.js download --args '{"session":"dl-task","url":"https://example.com/file.csv","filename":"file.csv"}'
    ```
 2. If download is triggered by a button, snapshot, click the `@e` target, then verify artifact/download metadata.
 3. Report the local path or artifact metadata.
@@ -183,7 +183,7 @@ Stop/ask conditions: downloading sensitive/private files, malware-risk content, 
 Always clean task-specific state unless the user asks to keep tabs open.
 
 ```bash
-node scripts/browser-control.js command close_session --session demo --args '{}'
+node scripts/browser-control.js close_session --args '{"session":"demo"}'
 node scripts/session-cleanup.js --dry-run
 ```
 
@@ -192,14 +192,14 @@ Verification evidence: `close_session` response or `tabs` with `action: "list"` 
 
 ## Run multiline JavaScript safely
 
-Avoid shell-escaping large snippets. Put the code in a UTF-8 file and use `--code-file` for `evaluate`:
+Keep custom JavaScript short enough to pass as `args.code`, or prefer first-class commands when they fit:
 
 ```bash
-node scripts/browser-control.js command evaluate --session js-task --code-file ./snippet.js
+node scripts/browser-control.js evaluate --args '{"session":"js-task","code":"return document.title"}'
 ```
 
 `evaluate` is intended to work on pages with strict script policies such as
 Trusted Types. Prefer `get_text`, `wait_for`, and first-class commands when they
 fit the task; reserve custom JavaScript for targeted inspection or extraction.
 
-Use `--args-file` for large JSON command arguments. Browser Control intentionally does not support a `codeBase64` argument.
+Browser Control intentionally does not support a `codeBase64` argument.

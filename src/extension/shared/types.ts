@@ -11,7 +11,6 @@ export type CommandAction =
   | 'navigate'
   | 'snapshot'
   | 'click'
-  | 'click_probe'
   | 'fill'
   | 'press'
   | 'scroll'

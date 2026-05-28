@@ -49,8 +49,7 @@ var CLI_CAPABILITIES = [
   "navigateFinalMetadata",
   "argsFile",
   "codeFile",
-  "scroll",
-  "clickProbe"
+  "scroll"
 ];
 var DAEMON_CAPABILITIES = [
   "healthStatusRuntimeMetadata",
@@ -63,8 +62,7 @@ var DAEMON_CAPABILITIES = [
   "get_text",
   "sessionNetworkCapture",
   "snapshotFilters",
-  "snapshotAriaTree",
-  "clickProbe"
+  "snapshotAriaTree"
 ];
 var EXTENSION_CAPABILITY_HINTS = [
   "navigateFinalMetadata",
@@ -72,7 +70,6 @@ var EXTENSION_CAPABILITY_HINTS = [
   "observe_start",
   "observe_diff",
   "network",
-  "clickProbe",
   "cdpMouse",
   "cdpKeyboard",
   "cdpWheelScroll",
@@ -127,10 +124,6 @@ var COMMANDS = {
   close_tab: { required: [], optional: ["tabId"] },
   screenshot: { required: [], optional: ["tabId", "format", "quality", "file_name", "fileName"] },
   save_as_pdf: { required: [], optional: ["tabId", "paper_format", "landscape", "scale", "print_background", "file_name"] },
-  click_probe: {
-    required: ["target"],
-    optional: ["tabId", "force", "observeNewTab", "expectNewTab", "waitMs", "filter", "includeHeaders", "includeBody", "redactSensitive", "maxRequests"]
-  },
   observe_start: { required: [], optional: ["tabId", "mode", "baselineId", "includeNetworkMarker", "maxTextChars", "maxTextRuns"] },
   observe_diff: { required: ["baselineId"], optional: ["tabId", "includeCurrent", "includeNetwork", "maxAdded", "maxRemoved", "maxSummaryChars", "allowStaleNavigationDiff"] }
 };
@@ -201,7 +194,7 @@ function validateRequest(request) {
     "network"
   ]);
   validateOptionalBooleanArgs(request, ["force", "observeNewTab", "expectNewTab", "includeHeaders", "includeBody", "redactSensitive"]);
-  validateOptionalNumberArgs(request, ["tabId", "clickCount", "waitMs", "maxRequests"]);
+  validateOptionalNumberArgs(request, ["tabId", "x", "y", "clickCount", "waitMs", "maxRequests"]);
   return request;
 }
 function validateKnownArgs(request, spec) {

@@ -115,7 +115,7 @@ test('target is a strict element action target with explicit CSS fallback', () =
   );
 });
 
-test('click request interception is exposed via click command parameter and click_probe daemon-internal command', () => {
+test('click request interception and text coordinates are exposed only through click command parameters', () => {
   // click with request interception/observation parameter (MCP-exposed)
   const clickWithRequestInterception = validateRequest(normalizeRequest({
     command: 'click',
@@ -139,33 +139,37 @@ test('click request interception is exposed via click command parameter and clic
       /interceptRequests/.test((err.details?.hints || []).join(' '))
   );
 
-  // click_probe daemon-internal command
-  const probe = validateRequest(normalizeRequest({
-    command: 'click_probe',
+  const textClick = validateRequest(normalizeRequest({
+    command: 'click',
     args: {
-      target: '@e1abc_1',
-      force: true,
-      observeNewTab: false,
-      expectNewTab: false,
-      waitMs: 1000,
-      filter: '/api/',
-      includeHeaders: true,
-      includeBody: true,
-      redactSensitive: true,
-      maxRequests: 10
+      text: 'Submit',
+      x: 120,
+      y: 240,
+      roles: ['button']
     }
   }));
-  assert.equal(probe.command, 'click_probe');
-  assert.equal(probe.args.filter, '/api/');
-  assert.equal(COMMANDS.click_probe.strategies, undefined);
-  assert.equal(COMMANDS.click_probe.optional.includes('expectChange'), false);
-  assert.equal(COMMANDS.click_probe.optional.includes('observe'), false);
+  assert.equal(textClick.command, 'click');
+  assert.equal(textClick.args.text, 'Submit');
+  assert.equal(textClick.args.x, 120);
+  assert.equal(textClick.args.y, 240);
+  assert.deepEqual(textClick.args.roles, ['button']);
 
   assert.throws(
-    () => validateRequest(normalizeRequest({ command: 'click_probe', args: { target: '@e1abc_1', includeBody: 'yes' } })),
+    () => validateRequest(normalizeRequest({ command: 'click', args: { text: 'Submit', x: '120', y: 240 } })),
     err => err instanceof ProtocolError &&
       err.code === 'VALIDATION_ERROR' &&
-      err.details?.field === 'includeBody'
+      err.details?.field === 'x'
+  );
+
+  assert.throws(
+    () => validateRequest(normalizeRequest({ command: 'click_probe', args: { target: '@e1abc_1' } })),
+    err => err instanceof ProtocolError &&
+      err.code === 'UNKNOWN_COMMAND'
+  );
+  assert.throws(
+    () => validateRequest(normalizeRequest({ command: 'cdp_click_at', args: { x: 120, y: 240 } })),
+    err => err instanceof ProtocolError &&
+      err.code === 'UNKNOWN_COMMAND'
   );
 });
 
@@ -183,7 +187,7 @@ test('protocol docs and TypeScript contracts expose action observe options and n
   for (const option of ['filter', 'includeHeaders', 'includeBody', 'redactSensitive', 'maxRequests']) {
     assert.match(contracts, new RegExp(`ClickRequestInterceptionOptions[\\s\\S]*?${option}\\??:\\s*`));
   }
-  // click_probe is NOT in MCP-exposed CommandArgs (daemon-internal only)
+  // click_probe is not part of the public or daemon protocol.
   assert.doesNotMatch(contracts, /click_probe:/);
   // fill has required target
   assert.match(contracts, /fill:\s*\{\s*target:\s*ElementTarget/s);
@@ -201,7 +205,7 @@ test('protocol docs and TypeScript contracts expose action observe options and n
   assert.match(contracts, /export interface NavigateResult/);
   assert.match(contracts, /navigationComplete:\s*boolean/);
   assert.match(api, /Stable response fields:/);
-  // request interception is documented inline in the click section, not as standalone click_probe
+  // request interception is documented inline in the click section, not as a standalone command.
   assert.match(api, /interceptRequests.*not a full dry run/s);
   assert.match(api, /Arguments: `target` or `text` required/);
   assert.match(api, /postSnapshot/);
@@ -318,8 +322,9 @@ test('public docs and contracts stay aligned with current command argument surfa
   const recipes = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'references', 'recipes.md'), 'utf8');
   const screenshotHelper = fs.readFileSync(path.join(root, 'skills', 'browser-control', 'scripts', 'screenshot.js'), 'utf8');
 
-  assert.match(api, /--args-file <path>/);
-  assert.match(api, /--code-file <path>/);
+  assert.doesNotMatch(api, /command <name>/);
+  assert.doesNotMatch(api, /--args-file <path>/);
+  assert.doesNotMatch(api, /--code-file <path>/);
   assert.match(api, /codeBase64/);
   assert.match(api, /download`: args `url` required/);
   assert.match(contracts, /download:\s*\{\s*url:\s*string;[^}]*saveAs\?:\s*boolean/s);
@@ -331,7 +336,7 @@ test('public docs and contracts stay aligned with current command argument surfa
   assert.match(contracts, /network:\s*\{[^}]*action:\s*NetworkAction;[^}]*filter\?:\s*string;[^}]*limit\?:\s*number/s);
   assert.doesNotMatch(api, /includeResources/);
   assert.doesNotMatch(contracts, /includeResources/);
-  assert.match(recipes, /snapshot --session read-page --args '\{"hasVisibleText":true,"viewportOnly":true\}'/);
+  assert.match(recipes, /snapshot --args '\{"session":"read-page","hasVisibleText":true,"viewportOnly":true\}'/);
   assert.match(api, /### `scroll`/);
   assert.match(api, /strategy.*wheel.*x.*y.*deltaY/s);
   assert.match(api, /backward-compatible `document`/);

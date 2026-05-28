@@ -37,22 +37,22 @@ Commands:
 - `doctor [--json]`: run daemon, Chrome, and extension diagnostics with next steps. If the daemon is running but the extension is disconnected, use `node skills/browser-control/scripts/open-chrome.js --json` to inspect the installed extension profile, then `node skills/browser-control/scripts/open-chrome.js` to open it. Diagnostics do not open Chrome automatically.
 - `diagnose daemon|chrome|extension [--json]`: show a focused diagnostic subset.
 - `logs [-n N] [-f]`: print or follow daemon logs.
-- `command <name> [--session <name>] [--args <json>] [--args-file <path>] [--code-file <path>] [--timeout-ms <ms>] [--id <id>] [--version <version>]`: send a browser command envelope to `POST /command`.
+- `<browser-command> [--args <json>]`: send a browser command envelope to `POST /command`. Browser commands are `navigate`, `snapshot`, `click`, `fill`, `press`, `scroll`, `upload`, `get_text`, `capture`, `evaluate`, `wait_for`, `network`, `tabs`, `close_session`, and `download`.
 - `e2e --help`: print live end-to-end test handoff instructions.
 
 Browser command helper examples:
 
 ```bash
-node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{}'
-node skills/browser-control/scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1"}'
-node skills/browser-control/scripts/browser-control.js command click --session demo --args '{"target":"@e1jm0sbb_1","interceptRequests":{"filter":"/api/"}}'
-node skills/browser-control/scripts/browser-control.js command scroll --session demo --args '{"deltaY":800,"strategy":"dom"}'
-node skills/browser-control/scripts/browser-control.js command evaluate --session demo --code-file ./snippet.js
-node skills/browser-control/scripts/browser-control.js command tabs --session demo --args '{"action":"list"}'
-node skills/browser-control/scripts/browser-control.js command capture --session demo --args '{"format":"png"}'
+node skills/browser-control/scripts/browser-control.js snapshot --args '{"session":"demo"}'
+node skills/browser-control/scripts/browser-control.js click --args '{"session":"demo","target":"@e1jm0sbb_1"}'
+node skills/browser-control/scripts/browser-control.js click --args '{"session":"demo","target":"@e1jm0sbb_1","interceptRequests":{"filter":"/api/"}}'
+node skills/browser-control/scripts/browser-control.js scroll --args '{"session":"demo","deltaY":800,"strategy":"dom"}'
+node skills/browser-control/scripts/browser-control.js evaluate --args '{"session":"demo","code":"return document.title"}'
+node skills/browser-control/scripts/browser-control.js tabs --args '{"session":"demo","action":"list"}'
+node skills/browser-control/scripts/browser-control.js capture --args '{"session":"demo","format":"png"}'
 ```
 
-Use `--args-file` for large JSON argument objects. Use `--code-file` only with `evaluate`; it reads UTF-8 JavaScript into `args.code` and avoids shell/JSON escaping. Browser Control intentionally does not support `codeBase64`.
+Pass envelope fields such as `session`, `timeoutMs`, and `id` inside the `--args` JSON object. Browser Control intentionally does not support `codeBase64`.
 
 ## Command envelope
 
@@ -162,10 +162,10 @@ Response semantics:
 Examples:
 
 ```bash
-node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"viewportOnly":true,"hasVisibleText":true}'
-node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"roles":["button","link","textbox","combobox"],"viewportOnly":true}'
-node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"diff_to":"page-1"}'   # first call stores baseline
-node skills/browser-control/scripts/browser-control.js command snapshot --session demo --args '{"diff_to":"page-1"}'   # second call returns diff
+node skills/browser-control/scripts/browser-control.js snapshot --args '{"session":"demo","viewportOnly":true,"hasVisibleText":true}'
+node skills/browser-control/scripts/browser-control.js snapshot --args '{"session":"demo","roles":["button","link","textbox","combobox"],"viewportOnly":true}'
+node skills/browser-control/scripts/browser-control.js snapshot --args '{"session":"demo","diff_to":"page-1"}'   # first call stores baseline
+node skills/browser-control/scripts/browser-control.js snapshot --args '{"session":"demo","diff_to":"page-1"}'   # second call returns diff
 ```
 
 ### `click`

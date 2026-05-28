@@ -57,7 +57,7 @@ test('fixture E2E: daemon validates commands and dispatches through extension We
       version: 'fixture-extension',
       protocolVersion: '2026-05-19',
       build: { channel: 'source' },
-      capabilities: ['navigateFinalMetadata', 'observe_start', 'observe_diff', 'network', 'clickProbe']
+      capabilities: ['navigateFinalMetadata', 'observe_start', 'observe_diff', 'network']
     }
   }));
   await new Promise(resolve => setTimeout(resolve, 25));
@@ -71,7 +71,7 @@ test('fixture E2E: daemon validates commands and dispatches through extension We
     const base = { session: msg.session, tabId: 101 };
     const dataByAction = {
       navigate: { ...base, url: msg.args.url, title: 'Fixture', navigationComplete: true, warnings: [] },
-      click_probe: { ...base, clicked: true, selector: msg.args.selector, strategyUsed: msg.args.strategy || 'auto', probe: { blocked: true, mode: 'cdp-fetch-request', waitMs: msg.args.waitMs || 1000, filter: msg.args.filter || null, interceptedCount: 1, requests: [{ id: 'probe-1', url: 'http://fixture.local/api/create', method: 'POST', type: 'Fetch', requestBody: { name: 'draft' }, blockedReason: 'probe', redacted: true }], warnings: [] }, warnings: [] },
+      click: { ...base, clicked: true, selector: msg.args.selector, strategyUsed: msg.args.strategy || 'auto', probe: msg.args.interceptRequests ? { blocked: true, mode: 'cdp-fetch-request', waitMs: 1000, filter: msg.args.interceptRequests.filter || null, interceptedCount: 1, requests: [{ id: 'probe-1', url: 'http://fixture.local/api/create', method: 'POST', type: 'Fetch', requestBody: { name: 'draft' }, blockedReason: 'probe', redacted: true }], warnings: [] } : undefined, warnings: [] },
       snapshot: { ...base, totalElements: 2, elements: [{ id: '@e1', tag: 'input', attributes: { type: 'text' } }] },
       press: { ...base, pressed: true, key: msg.args.key },
       scroll: { ...base, ok: true, target: 'document', strategyUsed: msg.args.strategy || 'dom', before: { scrollX: 0, scrollY: 0, scrollWidth: 800, scrollHeight: 2000, clientWidth: 800, clientHeight: 600 }, after: { scrollX: 0, scrollY: msg.args.deltaY || 0, scrollWidth: 800, scrollHeight: 2000, clientWidth: 800, clientHeight: 600 }, movedX: 0, movedY: msg.args.deltaY || 0, atBoundary: false },
@@ -79,6 +79,8 @@ test('fixture E2E: daemon validates commands and dispatches through extension We
       screenshot: { ...base, format: 'png', data: Buffer.from('fake-png').toString('base64'), dataLength: 12 },
       save_as_pdf: { ...base, format: 'pdf', data: Buffer.from('fake-pdf').toString('base64'), dataLength: 12 },
       get_text: { ...base, text: 'Fixture text', truncated: false, caps: { maxChars: 12000 }, url: 'http://fixture.local', title: 'Fixture' },
+      observe_capture: { ...base, visibleText: 'Fixture text', textRuns: [], truncated: false, caps: { maxTextChars: 12000, maxTextRuns: 300 }, url: 'http://fixture.local', title: 'Fixture' },
+      network: { ...base, requests: [], count: 0 },
       find_tab: { session: msg.session, tab: { id: 101, title: 'Fixture', url: 'http://fixture.local' }, tabs: [{ id: 101, title: 'Fixture' }] },
       list_tabs: { session: msg.session, tabs: [{ id: 101, title: 'Fixture' }] },
       close_session: { closed: msg.session, tabCount: 1 }
@@ -103,7 +105,7 @@ test('fixture E2E: daemon validates commands and dispatches through extension We
 
   for (const [command, args] of [
     ['snapshot', {}],
-    ['click_probe', { target: '@e1abc_1', filter: '/api/', waitMs: 10 }],
+    ['click', { target: '@e1abc_1', interceptRequests: { filter: '/api/' } }],
     ['press', { key: 'Enter' }],
     ['scroll', { strategy: 'dom', deltaY: 600 }],
     ['wait_for', { selector: '#done' }],
@@ -113,12 +115,12 @@ test('fixture E2E: daemon validates commands and dispatches through extension We
     ['list_tabs', {}]
   ]) {
     const res = await request('POST', '/command', { command, args, session: 'fixture' });
-    assert.equal(res.status, 200, command);
+    assert.equal(res.status, 200, `${command} ${JSON.stringify(res.json)}`);
     assert.equal(res.json.ok, true, command);
     assert.equal(res.json.command, command);
   }
 
-  for (const command of [['select', 'option'].join('_'), ['set', 'checked'].join('_')]) {
+  for (const command of [['select', 'option'].join('_'), ['set', 'checked'].join('_'), 'click_probe', 'cdp_click_at']) {
     const res = await request('POST', '/command', { command, args: {}, session: 'fixture' });
     assert.equal(res.status, 400, command);
     assert.equal(res.json.error.code, 'UNKNOWN_COMMAND', command);

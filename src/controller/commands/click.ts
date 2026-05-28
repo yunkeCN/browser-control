@@ -12,8 +12,6 @@
 import type { DaemonClient } from '../../mcp/daemon-client';
 import type { CommandResult } from '../types';
 import { runCommand, type CommandDefinition } from '../runner';
-import { executeClickProbe, type ClickProbeData, toClickProbeResult } from './click-probe';
-import { executeClickText, type ClickTextData, toClickTextResult } from './click-text';
 
 // ─── 类型定义 ────────────────────────────────────────────────────
 
@@ -52,6 +50,15 @@ export interface ClickData {
   clicked: boolean;
   newTabOpened?: boolean;
   network?: { requests: unknown[]; count: number };
+  probe?: unknown;
+  matchedText?: string;
+  matchedRole?: string;
+  method?: 'ref' | 'cdp';
+  ref?: string;
+  boxCenterX?: number;
+  boxCenterY?: number;
+  distance?: number;
+  candidateCount?: number;
   settle?: unknown;
   changes?: unknown;
   warnings?: string[];
@@ -69,7 +76,7 @@ function isValidTarget(target: unknown): target is string {
 
 // ─── 命令定义 ────────────────────────────────────────────────────
 
-export const clickDef: CommandDefinition<ClickInput, ClickData | ClickProbeData | ClickTextData> = {
+export const clickDef: CommandDefinition<ClickInput, ClickData> = {
   name: 'click',
   requiredArgs: [],
 
@@ -159,52 +166,12 @@ export const clickDef: CommandDefinition<ClickInput, ClickData | ClickProbeData 
     input: ClickInput,
     daemon: DaemonClient,
   ): Promise<Record<string, unknown>> => {
-    // 模式 3: 文本定位点击
-    if (input.text) {
-      return executeClickText({
-        text: input.text,
-        x: input.x!,
-        y: input.y!,
-        roles: input.roles,
-        tabId: input.tabId,
-      }, daemon);
-    }
-
-    // 模式 2: 请求拦截点击
-    if (input.interceptRequests) {
-      return executeClickProbe({
-        target: input.target!,
-        tabId: input.tabId,
-        force: input.force,
-        filter: input.interceptRequests.filter,
-        includeHeaders: input.interceptRequests.includeHeaders,
-        includeBody: input.interceptRequests.includeBody,
-        redactSensitive: input.interceptRequests.redactSensitive,
-        maxRequests: input.interceptRequests.maxRequests,
-      }, daemon);
-    }
-
-    // 模式 1: 基础点击
-    const envelope = daemon.buildEnvelope(
-      'click',
-      { target: input.target, tabId: input.tabId } as unknown as Record<string, unknown>,
-    );
+    const envelope = daemon.buildEnvelope('click', input as unknown as Record<string, unknown>);
     const response = await daemon.command(envelope);
     return response.data as Record<string, unknown> || {};
   },
 
-  toResult: (raw: Record<string, unknown>): CommandResult<ClickData | ClickProbeData | ClickTextData> => {
-    // 文本定位模式结果
-    if (raw._status !== undefined) {
-      return toClickTextResult(raw);
-    }
-
-    // 请求拦截模式结果
-    if (raw._mode === 'probe') {
-      return toClickProbeResult(raw);
-    }
-
-    // 基础点击结果
+  toResult: (raw: Record<string, unknown>): CommandResult<ClickData> => {
     const clickData = raw.data as Record<string, unknown> | undefined;
 
     if (!clickData) {
@@ -231,14 +198,20 @@ export const clickDef: CommandDefinition<ClickInput, ClickData | ClickProbeData 
     const network = rawNetwork
       ? { requests: Array.isArray(rawNetwork.requests) ? rawNetwork.requests : [], count: rawNetwork.count || rawNetwork.requests?.length || 0 }
       : undefined;
+    const probe = clickData.probe as Record<string, unknown> | undefined;
+    const textClick = clickData.textClick as Record<string, unknown> | undefined;
     const warnings = [
       ...(Array.isArray(clickData.warnings) ? clickData.warnings.map(String) : []),
       ...(Array.isArray(changes?.warnings) ? changes.warnings.map(String) : []),
     ];
 
-    const parts: string[] = ['已点击元素'];
+    const parts: string[] = [textClick ? '已按文本定位点击' : '已点击元素'];
+    const probeCount = typeof probe?.interceptedCount === 'number' ? probe.interceptedCount : 0;
     if (network && network.count > 0) {
       parts.push(`触发 ${network.count} 个接口请求`);
+    }
+    if (probe && probeCount > 0) {
+      parts.push(`拦截 ${probeCount} 个接口请求`);
     }
     if (baselineId) {
       parts.push(`观察基线: ${baselineId}`);
@@ -251,6 +224,15 @@ export const clickDef: CommandDefinition<ClickInput, ClickData | ClickProbeData 
       clicked: true,
       newTabOpened,
       network,
+      probe,
+      matchedText: typeof textClick?.text === 'string' ? textClick.text : undefined,
+      matchedRole: typeof textClick?.role === 'string' ? textClick.role : undefined,
+      method: textClick?.method === 'cdp' ? 'cdp' : textClick?.method === 'ref' ? 'ref' : undefined,
+      ref: typeof textClick?.ref === 'string' ? textClick.ref : undefined,
+      boxCenterX: typeof textClick?.boxCenterX === 'number' ? textClick.boxCenterX : undefined,
+      boxCenterY: typeof textClick?.boxCenterY === 'number' ? textClick.boxCenterY : undefined,
+      distance: typeof textClick?.distance === 'number' ? textClick.distance : undefined,
+      candidateCount: typeof textClick?.candidateCount === 'number' ? textClick.candidateCount : undefined,
       settle: clickData.settle,
       changes,
       warnings: warnings.length ? warnings : undefined,
@@ -264,6 +246,6 @@ export const clickDef: CommandDefinition<ClickInput, ClickData | ClickProbeData 
 export async function click(
   args: Record<string, unknown>,
   client: DaemonClient,
-): Promise<CommandResult<ClickData | ClickProbeData | ClickTextData>> {
+): Promise<CommandResult<ClickData>> {
   return runCommand(clickDef, args, client);
 }

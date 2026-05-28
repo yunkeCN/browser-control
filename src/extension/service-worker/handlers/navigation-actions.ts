@@ -99,6 +99,116 @@ function targetSelector(args: CommandArgs = {}): string | undefined {
   return args?.selector;
 }
 
+type TextClickCandidate = {
+  role: string;
+  text: string;
+  ref?: string;
+  box: { x: number; y: number; width: number; height: number };
+  boxCenterX: number;
+  boxCenterY: number;
+  distance: number;
+  candidateCount?: number;
+};
+
+function normalizeSearchText(value: unknown): string {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function nodeSearchText(node: any): string {
+  const parts: string[] = [];
+  if (node?.name) parts.push(String(node.name));
+  if (node?.text) parts.push(String(node.text));
+  if (Array.isArray(node?.children)) {
+    for (const child of node.children) {
+      if (child?.text) parts.push(String(child.text));
+      else parts.push(nodeSearchText(child));
+    }
+  }
+  return normalizeSearchText(parts.join(' '));
+}
+
+function boxCenter(box: { x: number; y: number; width: number; height: number }): { x: number; y: number } {
+  return {
+    x: Math.round(box.x + box.width / 2),
+    y: Math.round(box.y + box.height / 2)
+  };
+}
+
+function distanceBetween(x1: number, y1: number, x2: number, y2: number): number {
+  return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+}
+
+function collectTextClickCandidates(snapshot: any, query: string, roles: unknown, x: number, y: number): TextClickCandidate[] {
+  const normalizedQuery = normalizeSearchText(query).toLowerCase();
+  const roleFilter = Array.isArray(roles) ? new Set(roles.map(role => String(role).toLowerCase())) : null;
+  const candidates: TextClickCandidate[] = [];
+  const seen = new Set<string>();
+
+  const visit = (node: any) => {
+    if (!node || typeof node !== 'object') return;
+    const role = String(node.role || '');
+    const text = nodeSearchText(node);
+    const box = node.box;
+    if (
+      role &&
+      text &&
+      box &&
+      typeof box.x === 'number' &&
+      typeof box.y === 'number' &&
+      typeof box.width === 'number' &&
+      typeof box.height === 'number' &&
+      text.toLowerCase().includes(normalizedQuery) &&
+      (!roleFilter || roleFilter.has(role.toLowerCase()))
+    ) {
+      const center = boxCenter(box);
+      const ref = typeof node.ref === 'string' ? node.ref : undefined;
+      const key = `${ref || ''}:${role}:${text}:${box.x},${box.y},${box.width},${box.height}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        candidates.push({
+          role,
+          text,
+          ref,
+          box,
+          boxCenterX: center.x,
+          boxCenterY: center.y,
+          distance: distanceBetween(x, y, center.x, center.y)
+        });
+      }
+    }
+    if (Array.isArray(node.children)) node.children.forEach(visit);
+  };
+
+  if (Array.isArray(snapshot?.tree)) snapshot.tree.forEach(visit);
+  if (!candidates.length && Array.isArray(snapshot?.refs)) {
+    for (const refRecord of snapshot.refs) visit(refRecord);
+  }
+
+  return candidates.sort((a, b) => {
+    if (Math.abs(a.distance - b.distance) < 1) {
+      if (a.ref && !b.ref) return -1;
+      if (!a.ref && b.ref) return 1;
+    }
+    return a.distance - b.distance;
+  });
+}
+
+function withTextClickMetadata(result: any, candidate: TextClickCandidate, method: 'ref' | 'cdp'): any {
+  return {
+    ...result,
+    textClick: {
+      method,
+      text: candidate.text,
+      role: candidate.role,
+      ref: candidate.ref,
+      boxCenterX: candidate.boxCenterX,
+      boxCenterY: candidate.boxCenterY,
+      distance: Math.round(candidate.distance),
+      candidateCount: candidate.candidateCount
+    }
+  };
+}
+
 async function focusTargetForCdpKeyboard(tabId: number, selector: unknown): Promise<any> {
   const targetSelector = typeof selector === 'string' && selector ? selector : null;
   const results = await chrome.scripting.executeScript({
@@ -193,37 +303,78 @@ export async function handleSnapshot(args: CommandArgs = {}, session: SessionNam
 export async function handleClick(args: CommandArgs = {}, session: SessionName): Promise<any> {
   const { tabId: argTabId } = args || {};
   const selector = targetSelector(args);
-  if (!selector) throw new Error('target is required for click');
-
-  const tabId = argTabId || getActiveTabId(session);
-  if (!tabId) throw new Error('No active tab in session');
-  return performObservedClick(args, session, tabId);
-}
-
-export async function handleClickProbe(args: CommandArgs = {}, session: SessionName): Promise<any> {
-  const { tabId: argTabId } = args || {};
-  const selector = targetSelector(args);
-  if (!selector) throw new Error('target is required for click_probe');
+  const hasTextTarget = typeof args?.text === 'string' && args.text.trim();
+  if (!selector && !hasTextTarget) throw new Error('target or text is required for click');
 
   const tabId = argTabId || getActiveTabId(session);
   if (!tabId) throw new Error('No active tab in session');
 
-  const { result, probe } = await runClickProbeCapture(tabId, args, () => performObservedClick(args, session, tabId));
-  const warnings = [
-    ...((result as any)?.warnings || []),
-    ...(probe.warnings || [])
-  ];
-  if ((result as any)?.newTab || ((result as any)?.newTabs && (result as any).newTabs.length)) {
-    warnings.push('click_probe does not guarantee blocking first requests from newly opened tabs.');
-  }
-  return {
-    ...(result as any),
-    warnings,
-    probe: {
-      ...probe,
-      warnings: probe.warnings || []
+  if (hasTextTarget) {
+    if (typeof args.x !== 'number' || typeof args.y !== 'number') {
+      throw new Error('x and y coordinates are required for click text mode');
     }
-  };
+
+    const snapshotResults = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: getAccessibilitySnapshot,
+      args: [{ viewportOnly: false, boxes: true, tabId }],
+      world: 'MAIN'
+    });
+    const snapshot = snapshotResults[0]?.result || {};
+    const candidates = collectTextClickCandidates(snapshot, args.text, args.roles, args.x, args.y);
+    const best = candidates[0];
+    if (!best) {
+      return {
+        clicked: false,
+        error: `No visible text match found for click text "${args.text}"`,
+        recoverable: true,
+        textClick: {
+          text: args.text,
+          candidateCount: 0
+        }
+      };
+    }
+    best.candidateCount = candidates.length;
+
+    if (best.ref) {
+      const result = await performObservedClick({
+        ...args,
+        target: best.ref,
+        selector: best.ref,
+        text: undefined,
+        x: undefined,
+        y: undefined,
+        roles: undefined
+      }, session, tabId);
+      return withTextClickMetadata(result, best, 'ref');
+    }
+
+    const beforeIds = await beginNewTabWatch();
+    const cdpResult = await performCdpClickAt(tabId, best.boxCenterX, best.boxCenterY, {});
+    const observed = await attachNewTabsIfAny(session, tabId, beforeIds, args || {});
+    return withTextClickMetadata(mergeNewTabObservation(cdpResult, observed), best, 'cdp');
+  }
+
+  if (args?.interceptRequests && typeof args.interceptRequests === 'object') {
+    const { result, probe } = await runClickProbeCapture(tabId, args.interceptRequests, () => performObservedClick(args, session, tabId));
+    const warnings = [
+      ...((result as any)?.warnings || []),
+      ...(probe.warnings || [])
+    ];
+    if ((result as any)?.newTab || ((result as any)?.newTabs && (result as any).newTabs.length)) {
+      warnings.push('click request interception does not guarantee blocking first requests from newly opened tabs.');
+    }
+    return {
+      ...(result as any),
+      warnings,
+      probe: {
+        ...probe,
+        warnings: probe.warnings || []
+      }
+    };
+  }
+
+  return performObservedClick(args, session, tabId);
 }
 
 async function performObservedClick(args: CommandArgs = {}, session: SessionName, tabId: number): Promise<any> {
@@ -537,18 +688,6 @@ export async function handleScreenshot(args: CommandArgs = {}, session: SessionN
     activatedTabForCapture,
     restoredActiveTabId
   };
-}
-
-export async function handleCdpClickAt(args: CommandArgs = {}, session: SessionName): Promise<any> {
-  const tabId = args?.tabId || getActiveTabId(session);
-  if (!tabId) throw new Error('No active tab in session');
-
-  const { x, y, button, clickCount, modifiers } = args || {};
-  if (typeof x !== 'number' || typeof y !== 'number') {
-    throw new Error('x and y coordinates are required for cdp_click_at');
-  }
-
-  return performCdpClickAt(tabId, x, y, { button, clickCount, modifiers });
 }
 
 export async function handleObserveCapture(args: CommandArgs = {}, session: SessionName): Promise<any> {

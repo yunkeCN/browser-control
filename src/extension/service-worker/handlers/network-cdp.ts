@@ -412,15 +412,15 @@ function normalizeClickProbeMaxRequests(value: unknown): number {
   return Math.max(1, Math.min(500, Math.round(numeric)));
 }
 
-function clickProbeIncludesHeaders(options: any): boolean {
+function clickInterceptionIncludesHeaders(options: any): boolean {
   return options?.includeHeaders !== false;
 }
 
-function clickProbeIncludesBody(options: any): boolean {
+function clickInterceptionIncludesBody(options: any): boolean {
   return options?.includeBody !== false;
 }
 
-function clickProbeRedactsSensitive(options: any): boolean {
+function clickInterceptionRedactsSensitive(options: any): boolean {
   return options?.redactSensitive !== false;
 }
 
@@ -480,9 +480,9 @@ function shouldBlockProbeRequest(params: any, filter: string | null): boolean {
 
 function buildProbeRequest(params: any, options: any): any {
   const request = params?.request || {};
-  const redactSensitive = clickProbeRedactsSensitive(options);
-  const includeBody = clickProbeIncludesBody(options);
-  const includeHeaders = clickProbeIncludesHeaders(options);
+  const redactSensitive = clickInterceptionRedactsSensitive(options);
+  const includeBody = clickInterceptionIncludesBody(options);
+  const includeHeaders = clickInterceptionIncludesHeaders(options);
   const body = typeof request.postData === 'string' ? request.postData : null;
   const result: any = {
     id: String(params?.requestId || ''),
@@ -514,9 +514,9 @@ export async function runClickProbeCapture<T>(
   let fetchEnabled = false;
   let listenerInstalled = false;
 
-  const lease = await acquireNamedActionDebugger(tabId, 'click_probe', ['Reusing debugger session owned by click_probe.']);
+  const lease = await acquireNamedActionDebugger(tabId, 'click_intercept', ['Reusing debugger session owned by click request interception.']);
   if (lease.error || !lease.debuggee) {
-    throw new Error(`click_probe could not enable CDP request interception: ${lease.error || 'debugger unavailable'}`);
+    throw new Error(`click request interception could not enable CDP request interception: ${lease.error || 'debugger unavailable'}`);
   }
 
   const debuggee = lease.debuggee as any;
@@ -549,7 +549,7 @@ export async function runClickProbeCapture<T>(
     const result = await action();
     await new Promise(resolve => setTimeout(resolve, waitMs));
     if (totalIntercepted > requests.length) {
-      warnings.push(`click_probe captured ${requests.length} of ${totalIntercepted} intercepted requests; increase maxRequests for more detail.`);
+      warnings.push(`click request interception captured ${requests.length} of ${totalIntercepted} intercepted requests; increase maxRequests for more detail.`);
     }
 
     return {
