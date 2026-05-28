@@ -120,10 +120,8 @@ const def: CommandDefinition<ScrollInput, ScrollData> = {
     return {
       ok: true,
       summary: `已滚动页面${newPosition ? ` | ${newPosition}` : ''}`,
-      data: {
-        scrolled: true,
-        newPosition,
-      },
+      scrolled: true,
+      newPosition,
     };
   },
 };

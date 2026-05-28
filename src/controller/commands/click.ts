@@ -241,11 +241,9 @@ export const clickDef: CommandDefinition<ClickInput, ClickData | ClickProbeData 
       ok: true,
       summary: parts.join(' | '),
       baselineId,
-      data: {
-        clicked: true,
-        newTabOpened,
-        network,
-      },
+      clicked: true,
+      newTabOpened,
+      network,
     };
   },
 };

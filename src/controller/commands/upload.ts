@@ -136,10 +136,8 @@ const def: CommandDefinition<UploadInput, UploadData> = {
     return {
       ok: true,
       summary: `已上传 ${fileCount} 个文件到元素 ${target}`,
-      data: {
-        uploaded: true,
-        fileCount,
-      },
+      uploaded: true,
+      fileCount,
     };
   },
 };

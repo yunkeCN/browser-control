@@ -1,13 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { COMMANDS } from './protocol.js';
-import { riskNoteFor } from './risk-notes.js';
-
-/** MCP-exposed command names (exclude daemon-internal commands) */
-const MCP_COMMANDS = [
-  'navigate', 'tabs', 'snapshot', 'get_text', 'click', 'fill', 'press',
-  'scroll', 'wait_for', 'capture', 'evaluate', 'network', 'upload',
-  'download', 'close_session',
-];
 
 function textPrompt(description: string, text: string) {
   return {
@@ -136,16 +128,12 @@ export function registerBrowserControlPrompts(server: McpServer): void {
 
   server.registerPrompt('browser_control_safety', {
     title: 'Browser Control safety',
-    description: 'Confirmation boundaries and risk notes for Browser Control MCP tools.'
+    description: 'Confirmation boundaries for Browser Control MCP tools.'
   }, () => {
-    const risks = MCP_COMMANDS
-      .map(command => riskNoteFor(command))
-      .filter((note): note is string => Boolean(note));
     return textPrompt('Browser Control safety', [
-      'The MCP server validates schemas and returns risk notes, but it does not ask the user for confirmation or block sensitive actions.',
-      'Ask the user before submit/send/post/publish, purchases/payments, destructive actions, account/security/privacy changes, uploads, credentials, MFA, CAPTCHA, permission prompts, or irreversible operations.',
-      'Risk notes:',
-      ...risks.map(note => `- ${note}`)
+      'The MCP server does not ask the user for confirmation or block sensitive actions.',
+      'Tools marked destructiveHint (browser_click, browser_fill, browser_press, browser_evaluate, browser_upload) may cause irreversible changes.',
+      'Ask the user before: submit/send/post/publish, purchases/payments, destructive actions, account/security/privacy changes, uploads, credentials, MFA, CAPTCHA, permission prompts, or irreversible operations.',
     ].join('\n'));
   });
 }

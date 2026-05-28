@@ -124,7 +124,7 @@ const captureDef: CommandDefinition<CaptureInput, CaptureData> = {
       return {
         ok: true,
         summary: `PDF 已保存到 ${filePath}`,
-        data: { filePath, format: 'pdf', fileName },
+        filePath, format: 'pdf' as CaptureFormat, fileName,
       };
     }
 
@@ -147,7 +147,7 @@ const captureDef: CommandDefinition<CaptureInput, CaptureData> = {
     return {
       ok: true,
       summary: `截图已保存到 ${filePath}`,
-      data: { filePath, format: format as CaptureFormat },
+      filePath, format: format as CaptureFormat,
     };
   },
 };

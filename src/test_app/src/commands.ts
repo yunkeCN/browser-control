@@ -1,7 +1,6 @@
 import type { CommandResult } from '@controller/types';
 import { clickDef } from '@controller/commands/click';
 import { snapshotDef } from '@controller/commands/snapshot';
-import { riskNoteFor } from '@mcp/risk-notes';
 
 // ─── Command metadata ──────────────────────────────────────────────
 
@@ -19,8 +18,8 @@ function fail(summary: string, nextSteps?: string[]): CommandResult {
   return { ok: false, summary, nextSteps };
 }
 
-function ok<T>(summary: string, data?: T): CommandResult<T> {
-  return { ok: true, summary, data };
+function ok<T extends Record<string, unknown>>(summary: string, data?: T): CommandResult<T> {
+  return { ok: true, summary, ...data };
 }
 
 // ─── Per-command toResult implementations ──────────────────────────
@@ -162,18 +161,6 @@ function uploadResult(raw: Record<string, unknown>, command: string): CommandRes
 
 type ToResultFn = (raw: Record<string, unknown>, command: string) => CommandResult;
 
-function withRisk(
-  fn: (raw: Record<string, unknown>, command: string) => CommandResult
-): ToResultFn {
-  return (raw, command) => {
-    const result = fn(raw, command);
-    const note = riskNoteFor(command);
-    if (note && result.ok) {
-      result.riskNotes = [note];
-    }
-    return result;
-  };
-}
 
 export const COMMAND_META: Record<string, CommandMeta> = {
   navigate: {
@@ -198,19 +185,19 @@ export const COMMAND_META: Record<string, CommandMeta> = {
     name: 'click',
     required: ['target'],
     example: { target: '@e1abc_1', after: 'auto' },
-    toResult: withRisk(clickResult),
+    toResult: clickResult,
   },
   fill: {
     name: 'fill',
     required: ['target', 'value'],
     example: { target: '@e1input_2', value: 'sample text', clear: true },
-    toResult: withRisk(fillResult),
+    toResult: fillResult,
   },
   press: {
     name: 'press',
     required: ['key'],
     example: { key: 'Enter' },
-    toResult: withRisk(pressResult),
+    toResult: pressResult,
   },
   scroll: {
     name: 'scroll',
@@ -228,31 +215,31 @@ export const COMMAND_META: Record<string, CommandMeta> = {
     name: 'evaluate',
     required: ['code'],
     example: { code: 'return { title: document.title, url: location.href }' },
-    toResult: withRisk(evaluateResult),
+    toResult: evaluateResult,
   },
   capture: {
     name: 'capture',
     required: [],
     example: { format: 'png' },
-    toResult: withRisk(screenshotResult),
+    toResult: screenshotResult,
   },
   network: {
     name: 'network',
     required: ['action'],
     example: { action: 'start', filter: '/api/' },
-    toResult: withRisk(networkListResult),
+    toResult: networkListResult,
   },
   upload: {
     name: 'upload',
     required: ['target', 'files'],
     example: { target: '@e1file_4', files: ['/tmp/example.png'] },
-    toResult: withRisk(uploadResult),
+    toResult: uploadResult,
   },
   download: {
     name: 'download',
     required: ['url'],
     example: { url: 'https://example.com/file.zip', filename: 'file.zip' },
-    toResult: withRisk(downloadResult),
+    toResult: downloadResult,
   },
   get_text: {
     name: 'get_text',

@@ -132,7 +132,7 @@ const networkDef: CommandDefinition<NetworkInput, NetworkData> = {
         return {
           ok: started,
           summary: started ? `网络监控已启动${filterText}` : '网络监控启动失败',
-          data: { started, filter },
+          started, filter,
         };
       }
 
@@ -160,7 +160,7 @@ const networkDef: CommandDefinition<NetworkInput, NetworkData> = {
         return {
           ok: true,
           summary: `网络请求: 捕获到 ${count} 个请求`,
-          data: { count, requests },
+          count, requests,
         };
       }
 
@@ -188,7 +188,7 @@ const networkDef: CommandDefinition<NetworkInput, NetworkData> = {
         return {
           ok: true,
           summary: `请求详情: ${method} ${url} → ${statusCode}`,
-          data: { request: { method, url, statusCode }, response },
+          request: { method, url, statusCode }, response,
         };
       }
 
@@ -204,7 +204,7 @@ const networkDef: CommandDefinition<NetworkInput, NetworkData> = {
         return {
           ok: stopped,
           summary: stopped ? '网络监控已停止' : '网络监控停止失败',
-          data: { stopped },
+          stopped,
         };
       }
 

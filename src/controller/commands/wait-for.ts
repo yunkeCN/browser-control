@@ -120,10 +120,8 @@ const def: CommandDefinition<WaitForInput, WaitForData> = {
     return {
       ok: true,
       summary: `等待成功: ${target}已变为 ${state}`,
-      data: {
-        found,
-        state,
-      },
+      found,
+      state,
     };
   },
 };

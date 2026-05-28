@@ -90,9 +90,7 @@ const def: CommandDefinition<PressInput, PressData> = {
     return {
       ok: true,
       summary: `已按键: ${key}`,
-      data: {
-        pressed: true,
-      },
+      pressed: true,
     };
   },
 };

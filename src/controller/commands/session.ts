@@ -83,10 +83,8 @@ const closeSessionDef: CommandDefinition<CloseSessionInput, CloseSessionData> = 
     return {
       ok: true,
       summary: `会话已关闭 | 当前活跃会话: ${activeSession || '无'}`,
-      data: {
-        closed: true,
-        activeSession,
-      },
+      closed: true,
+      activeSession,
     };
   },
 };

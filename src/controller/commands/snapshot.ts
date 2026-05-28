@@ -187,13 +187,11 @@ export const snapshotDef: CommandDefinition<SnapshotInput, SnapshotData> = {
       ok: true,
       summary: parts.join(' | '),
       baselineId,
-      data: {
-        title,
-        url,
-        tree,
-        elementCount,
-        diff,
-      },
+      title,
+      url,
+      tree,
+      elementCount,
+      diff,
     };
   },
 };

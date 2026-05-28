@@ -83,10 +83,8 @@ const def: CommandDefinition<EvaluateInput, EvaluateData> = {
     return {
       ok: true,
       summary: `JS 执行完成 | 返回类型: ${type}`,
-      data: {
-        result,
-        type,
-      },
+      result,
+      type,
     };
   },
 };

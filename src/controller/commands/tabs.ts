@@ -127,15 +127,13 @@ const tabsDef: CommandDefinition<TabsInput, TabsData> = {
         return {
           ok: true,
           summary: `标签页列表: ${count} 个标签页（${activeCount} 个活跃）`,
-          data: {
-            tabs: tabs.map((t) => ({
-              tabId: Number(t.tabId) || 0,
-              title: String(t.title || ''),
-              url: String(t.url || ''),
-              active: Boolean(t.active),
-            })),
-            count,
-          },
+          tabs: tabs.map((t) => ({
+            tabId: Number(t.tabId) || 0,
+            title: String(t.title || ''),
+            url: String(t.url || ''),
+            active: Boolean(t.active),
+          })),
+          count,
         };
       }
 
@@ -161,7 +159,7 @@ const tabsDef: CommandDefinition<TabsInput, TabsData> = {
         return {
           ok: true,
           summary: `已切换到标签页: "${title}"（tabId=${tabId}）`,
-          data: { tabId, title, url, found: true },
+          tabId, title, url, found: true as const,
         };
       }
 
@@ -185,7 +183,7 @@ const tabsDef: CommandDefinition<TabsInput, TabsData> = {
         return {
           ok: true,
           summary: `已关闭标签页 tabId=${tabId}`,
-          data: { closed: true, tabId },
+          closed: true as const, tabId,
         };
       }
 

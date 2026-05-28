@@ -253,11 +253,7 @@ export function renderResult(
   }
   outputEl.textContent = text;
 
-  // Risk notes / next steps below JSON
   const extra: string[] = [];
-  if (result.riskNotes?.length) {
-    extra.push(...result.riskNotes.map((n) => '⚠ ' + n));
-  }
   if (result.nextSteps?.length) {
     extra.push(...result.nextSteps.map((s) => '→ ' + s));
   }

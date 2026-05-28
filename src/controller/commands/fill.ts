@@ -107,10 +107,8 @@ const def: CommandDefinition<FillInput, FillData> = {
     return {
       ok: true,
       summary: `已填写元素 ${target} | 输入内容: ${value}`,
-      data: {
-        filled: true,
-        changeSummary,
-      },
+      filled: true,
+      changeSummary,
     };
   },
 };

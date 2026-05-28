@@ -113,11 +113,9 @@ const def: CommandDefinition<DownloadInput, DownloadData> = {
     return {
       ok: true,
       summary: `已下载来自 ${url} 的文件`,
-      data: {
-        downloaded: true,
-        url,
-        filename,
-      },
+      downloaded: true,
+      url,
+      filename,
     };
   },
 };

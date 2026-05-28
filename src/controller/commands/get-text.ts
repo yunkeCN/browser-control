@@ -102,11 +102,9 @@ const def: CommandDefinition<GetTextInput, GetTextData> = {
       summary: truncated
         ? `页面文本: 获取到 ${length}+ 个字符（已截断）`
         : `页面文本: 获取到 ${length} 个字符（完整文本）`,
-      data: {
-        text,
-        length,
-        truncated,
-      },
+      text,
+      length,
+      truncated,
     };
   },
 };

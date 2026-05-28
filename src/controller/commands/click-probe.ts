@@ -94,10 +94,8 @@ export function toClickProbeResult(raw: Record<string, unknown>): CommandResult<
   return {
     ok: true,
     summary: parts.join(' | '),
-    data: {
-      clicked: true,
-      networkRequests,
-      requestCount,
-    },
+    clicked: true,
+    networkRequests,
+    requestCount,
   };
 }

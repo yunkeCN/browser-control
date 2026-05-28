@@ -90,11 +90,9 @@ const def: CommandDefinition<NavigateInput, NavigateData> = {
     return {
       ok: true,
       summary: `已导航到 ${rawData.url}`,
-      data: {
-        finalUrl: String(rawData.url),
-        title: String(rawData.title || ''),
-        tabId: Number(rawData.tabId) || 0,
-      },
+      finalUrl: String(rawData.url),
+      title: String(rawData.title || ''),
+      tabId: Number(rawData.tabId) || 0,
     };
   },
 };

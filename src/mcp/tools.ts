@@ -19,7 +19,6 @@ import {
 } from './schema.js';
 import { ensureDaemon } from './daemon-lifecycle.js';
 import { McpSessionManager } from './session-manager.js';
-import { riskNoteFor } from './risk-notes.js';
 
 // Controller imports
 import { navigate } from '../controller/commands/navigate.js';
@@ -294,21 +293,12 @@ async function runTool(
 
   const result = await controller(controllerArgs, client);
 
-  // Attach risk notes
-  const riskNote = riskNoteFor(command);
-  if (riskNote && result.ok && !result.riskNotes?.length) {
-    result.riskNotes = [riskNote];
-  }
-
   // Handle close_session rotation
   if (command === 'close_session' && result.ok) {
     const nextSession = sessions.rotateSession();
     return toCommandToolResult({
       ...result,
-      data: {
-        ...(result.data as Record<string, unknown>),
-        activeSession: nextSession,
-      },
+      activeSession: nextSession,
       summary: `${result.summary} | 当前活跃会话: ${nextSession}`,
     });
   }
