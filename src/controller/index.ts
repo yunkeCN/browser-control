@@ -40,8 +40,8 @@ export type { UploadInput, UploadData } from './commands/upload';
 export { getText } from './commands/get-text';
 export type { GetTextInput, GetTextData } from './commands/get-text';
 
-export { screenshot } from './commands/screenshot';
-export type { ScreenshotInput, ScreenshotData } from './commands/screenshot';
+export { capture } from './commands/capture';
+export type { CaptureInput, CaptureData } from './commands/capture';
 
 export { evaluate } from './commands/evaluate';
 export type { EvaluateInput, EvaluateData } from './commands/evaluate';
@@ -49,32 +49,20 @@ export type { EvaluateInput, EvaluateData } from './commands/evaluate';
 export { waitFor } from './commands/wait-for';
 export type { WaitForInput, WaitForData } from './commands/wait-for';
 
-// 观察
-export { observeStart, observeDiff } from './commands/observe';
-export type { ObserveStartInput, ObserveStartData, ObserveDiffInput, ObserveDiffData } from './commands/observe';
 
 // 网络
-export { networkStart, networkList, networkDetail, networkStop } from './commands/network';
-export type { NetworkStartInput, NetworkStartData, NetworkListInput, NetworkListData, NetworkDetailInput, NetworkDetailData, NetworkStopData } from './commands/network';
+export { network } from './commands/network';
+export type { NetworkInput, NetworkData, NetworkStartData, NetworkListData, NetworkDetailData, NetworkStopData } from './commands/network';
 
 // 标签页
-export { listTabs, findTab, closeTab } from './commands/tabs';
-export type { ListTabsInput, ListTabsData, FindTabInput, FindTabData, CloseTabInput, CloseTabData } from './commands/tabs';
+export { tabs } from './commands/tabs';
+export type { TabsInput, TabsData, ListTabsData, SwitchTabData, CloseTabData } from './commands/tabs';
 
 // 会话
 export { closeSession } from './commands/session';
 export type { CloseSessionInput, CloseSessionData } from './commands/session';
 
-// 高级点击
-export { clickProbe } from './commands/click-probe';
-export type { ClickProbeInput, ClickProbeData } from './commands/click-probe';
 
-export { clickText } from './commands/click-text';
-export type { ClickTextInput, ClickTextData } from './commands/click-text';
-
-// PDF 和下载
-export { saveAsPdf } from './commands/save-as-pdf';
-export type { SaveAsPdfInput, SaveAsPdfData } from './commands/save-as-pdf';
-
+// 下载
 export { download } from './commands/download';
 export type { DownloadInput, DownloadData } from './commands/download';

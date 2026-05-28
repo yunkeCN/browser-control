@@ -50,7 +50,7 @@ export function assessCompatibility(status: Record<string, unknown>): { compatib
 
   if (status.extension_connected !== true) {
     warnings.push('Chrome extension is not connected. Browser commands will return BACKEND_UNAVAILABLE until the extension is loaded.');
-    nextSteps.push('Load or reload the Browser Control Chrome extension, then run browser_control_status or browser_control_doctor.');
+    nextSteps.push('Load or reload the Browser Control Chrome extension, then run browser_status or browser_doctor.');
   }
   const extension = (runtime?.extension || null) as Record<string, unknown> | null;
   if (extension?.version && expectedVersion && extension.version !== expectedVersion) {

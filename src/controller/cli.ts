@@ -7,34 +7,28 @@
 import { navigate } from './commands/navigate.js';
 import { snapshot } from './commands/snapshot.js';
 import { click } from './commands/click.js';
-import { clickText } from './commands/click-text.js';
 import { fill } from './commands/fill.js';
 import { press } from './commands/press.js';
 import { scroll } from './commands/scroll.js';
 import { upload } from './commands/upload.js';
 import { getText } from './commands/get-text.js';
-import { screenshot } from './commands/screenshot.js';
+import { capture } from './commands/capture.js';
 import { evaluate } from './commands/evaluate.js';
 import { waitFor } from './commands/wait-for.js';
-import { observeStart, observeDiff } from './commands/observe.js';
-import { networkStart, networkList, networkDetail, networkStop } from './commands/network.js';
-import { listTabs, findTab, closeTab } from './commands/tabs.js';
+import { network } from './commands/network.js';
+import { tabs } from './commands/tabs.js';
 import { closeSession } from './commands/session.js';
-import { clickProbe } from './commands/click-probe.js';
-import { saveAsPdf } from './commands/save-as-pdf.js';
 import { download } from './commands/download.js';
 import { DaemonClient } from '../mcp/daemon-client.js';
 
 /** Controller 命令分发表 */
 const DISPATCH: Record<string, (args: Record<string, unknown>, client: DaemonClient) => Promise<unknown>> = {
-  navigate, snapshot, click, click_text: clickText, fill, press, scroll, upload,
-  get_text: getText, screenshot, evaluate, wait_for: waitFor,
-  observe_start: observeStart, observe_diff: observeDiff,
-  network_start: networkStart, network_list: networkList,
-  network_detail: networkDetail, network_stop: networkStop,
-  list_tabs: listTabs, find_tab: findTab, close_tab: closeTab,
+  navigate, snapshot, click, fill, press, scroll, upload,
+  get_text: getText, capture, evaluate, wait_for: waitFor,
+  network,
+  tabs,
   close_session: closeSession,
-  click_probe: clickProbe, save_as_pdf: saveAsPdf, download,
+  download,
 };
 
 function printHelp(): void {
@@ -51,7 +45,7 @@ function printHelp(): void {
 示例:
   browser-control navigate --args '{"url":"https://example.com"}'
   browser-control click --args '{"target":"@eyws8mg_1"}'
-  browser-control click_text --args '{"text":"新增分支","x":200,"y":300}'
+  browser-control click --args '{"text":"新增分支","x":200,"y":300}'
   browser-control status
 `);
 }

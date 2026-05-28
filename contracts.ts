@@ -7,7 +7,9 @@ export type ScrollBehavior = 'auto' | 'instant' | 'smooth';
 export type ElementRef = `@e${string}_${number}`;
 export type ElementTarget = ElementRef | `css=${string}`;
 export type ClickTarget = ElementTarget;
-export type ClickAfter = 'auto' | 'none' | 'snapshot';
+export type CaptureFormat = 'png' | 'jpeg' | 'pdf';
+export type TabsAction = 'list' | 'switch' | 'close';
+export type NetworkAction = 'start' | 'list' | 'detail' | 'stop';
 export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'UNKNOWN_COMMAND'
@@ -34,30 +36,31 @@ export interface ProtocolErrorShape {
   details?: unknown;
 }
 
+/** Click probe options for CDP network interception */
+export interface ClickProbeOptions {
+  filter?: string;
+  includeHeaders?: boolean;
+  includeBody?: boolean;
+  redactSensitive?: boolean;
+  maxRequests?: number;
+}
+
+/** MCP-exposed command arguments (unified commands) */
 export interface CommandArgs {
   navigate: { url: string; newTab?: boolean; timeoutMs?: number };
-  find_tab: { urlIncludes?: string; titleIncludes?: string; active?: boolean; attach?: boolean; tabId?: number };
-  snapshot: { tabId?: number; roles?: string[]; tags?: string[]; hasVisibleText?: boolean; textIncludes?: string; viewportOnly?: boolean; boxes?: boolean; baseline?: string };
-  click: { target: ClickTarget; tabId?: number; after?: ClickAfter; baseline?: string };
-  click_probe: { target: ElementTarget; tabId?: number; strategy?: 'auto' | 'cdp_mouse' | 'dom_pointer' | 'element_click'; force?: boolean; button?: 'left' | 'middle' | 'right'; clickCount?: number; modifiers?: string[]; observeNewTab?: boolean; expectNewTab?: boolean; waitMs?: number; filter?: string; includeHeaders?: boolean; includeBody?: boolean; redactSensitive?: boolean; maxRequests?: number };
+  tabs: { action?: TabsAction; urlIncludes?: string; titleIncludes?: string; active?: boolean; tabId?: number };
+  snapshot: { tabId?: number; roles?: string[]; tags?: string[]; hasVisibleText?: boolean; textIncludes?: string; viewportOnly?: boolean; boxes?: boolean; diff_to?: string };
+  click: { target?: ClickTarget; text?: string; x?: number; y?: number; roles?: string[]; tabId?: number; force?: boolean; probe?: ClickProbeOptions };
   fill: { target: ElementTarget; value: string; tabId?: number; strategy?: 'native_setter' | 'text_input' | 'paste_like'; clear?: boolean; commit?: 'change' | 'blur' | 'enter' | 'none'; expectChange?: boolean; observe?: ObserveOptions };
   press: { key: string; target?: ElementTarget; tabId?: number; strategy?: 'auto' | 'cdp_keyboard' | 'dom_keyboard'; modifiers?: string[]; expectChange?: boolean; observe?: ObserveOptions; observeNewTab?: boolean; expectNewTab?: boolean };
   scroll: { target?: ElementTarget; tabId?: number; strategy?: 'auto' | 'dom' | 'wheel'; deltaX?: number; deltaY?: number; x?: number; y?: number; region?: { x: number; y: number; width: number; height: number }; steps?: number; block?: ScrollLogicalPosition; behavior?: ScrollBehavior; waitMs?: number };
   wait_for: { selector?: string; text?: string; state?: 'visible' | 'attached' | 'hidden' | 'detached'; timeoutMs?: number; tabId?: number; expression?: string };
   evaluate: { code: string; tabId?: number };
-  screenshot: { tabId?: number; format?: 'png' | 'jpeg'; quality?: number; fullPage?: boolean; file_name?: string; fileName?: string };
-  save_as_pdf: { tabId?: number; paper_format?: 'A4' | 'Letter'; landscape?: boolean; scale?: number; print_background?: boolean; file_name?: string };
-  observe_start: { tabId?: number; mode?: 'viewport_text'; baselineId?: string; includeNetworkMarker?: boolean; maxTextChars?: number; maxTextRuns?: number };
-  observe_diff: { baselineId: string; tabId?: number; includeCurrent?: boolean; includeNetwork?: boolean; maxAdded?: number; maxRemoved?: number; maxSummaryChars?: number; allowStaleNavigationDiff?: boolean };
-  network_start: { filter?: string; tabId?: number; scope?: 'session' | 'tab' };
-  network_list: { filter?: string; sinceTimestampMs?: number; limit?: number; tabId?: number; method?: string; statusCode?: number; type?: string };
-  network_detail: { requestId: string };
-  network_stop: Record<string, never>;
+  capture: { format?: CaptureFormat; tabId?: number; fileName?: string; quality?: number; paperFormat?: 'A4' | 'Letter'; landscape?: boolean; scale?: number; printBackground?: boolean };
+  network: { action: NetworkAction; filter?: string; tabId?: number; scope?: 'session' | 'tab'; limit?: number; method?: string; statusCode?: number; type?: string; sinceTimestampMs?: number; requestId?: string };
   upload: { target: ElementTarget; files: string[]; tabId?: number };
   download: { url: string; filename?: string; saveAs?: boolean };
   get_text: { tabId?: number; scope?: 'viewport' | 'document' | 'full'; maxChars?: number; includeRuns?: boolean; selector?: string };
-  list_tabs: Record<string, never>;
-  close_tab: { tabId?: number };
   close_session: Record<string, never>;
 }
 
@@ -204,9 +207,7 @@ export interface ResultEnvelope<TData = unknown> {
   diagnostics: Record<string, unknown> | null;
 }
 
-
 export const COMMAND_NAMES: readonly CommandName[] = [
-  'navigate', 'find_tab', 'snapshot', 'click', 'click_probe', 'fill', 'press', 'scroll', 'wait_for',
-  'evaluate', 'screenshot', 'save_as_pdf', 'observe_start', 'observe_diff', 'network_start', 'network_list', 'network_detail',
-  'network_stop', 'upload', 'download', 'get_text', 'list_tabs', 'close_tab', 'close_session'
+  'navigate', 'tabs', 'snapshot', 'click', 'fill', 'press', 'scroll', 'wait_for',
+  'evaluate', 'capture', 'network', 'upload', 'download', 'get_text', 'close_session'
 ] as const;

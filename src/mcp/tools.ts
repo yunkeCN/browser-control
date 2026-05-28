@@ -1,22 +1,27 @@
 /**
- * MCP 工具定义
+ * MCP 工具定义 — 每个命令独立注册为 MCP 工具
  *
- * 所有命令通过 Controller 层执行，确保统一的 CommandResult 输出格式。
+ * 每个工具拥有：
+ * - 完整的 typed inputSchema（对 LLM 可见）
+ * - MCP annotations（readOnlyHint / destructiveHint / openWorldHint）
+ * - 针对性的 description
  */
 
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { DaemonClient } from './daemon-client.js';
 import {
   assertSchemaRegistryMatchesProtocol,
-  closeSessionInputSchema,
+  toolInputSchemas,
   diagnosticInputSchema,
-  unifiedCommandInputSchema,
+  closeSessionInputSchema,
 } from './schema.js';
 import { ensureDaemon } from './daemon-lifecycle.js';
 import { McpSessionManager } from './session-manager.js';
+import { riskNoteFor } from './risk-notes.js';
 
-// Controller 层导入
+// Controller imports
 import { navigate } from '../controller/commands/navigate.js';
 import { snapshot } from '../controller/commands/snapshot.js';
 import { click } from '../controller/commands/click.js';
@@ -25,56 +30,177 @@ import { press } from '../controller/commands/press.js';
 import { scroll } from '../controller/commands/scroll.js';
 import { upload } from '../controller/commands/upload.js';
 import { getText } from '../controller/commands/get-text.js';
-import { screenshot } from '../controller/commands/screenshot.js';
+import { capture } from '../controller/commands/capture.js';
 import { evaluate } from '../controller/commands/evaluate.js';
 import { waitFor } from '../controller/commands/wait-for.js';
-import { observeStart, observeDiff } from '../controller/commands/observe.js';
-import { networkStart, networkList, networkDetail, networkStop } from '../controller/commands/network.js';
-import { listTabs, findTab, closeTab } from '../controller/commands/tabs.js';
+import { network } from '../controller/commands/network.js';
+import { tabs } from '../controller/commands/tabs.js';
 import { closeSession as controllerCloseSession } from '../controller/commands/session.js';
-import { clickProbe } from '../controller/commands/click-probe.js';
-import { saveAsPdf } from '../controller/commands/save-as-pdf.js';
 import { download } from '../controller/commands/download.js';
 import type { CommandResult } from '../controller/types.js';
 
-/** 所有已实现 Controller 的命令名 */
-export function implementedCommandNames(): string[] {
-  return Object.keys(CONTROLLER_DISPATCH);
+// ─── Types ───────────────────────────────────────────────────────
+
+type ControllerFn = (args: Record<string, unknown>, client: DaemonClient) => Promise<CommandResult<unknown>>;
+
+interface ToolDef {
+  command: string;
+  title: string;
+  description: string;
+  annotations?: ToolAnnotations;
+  controller: ControllerFn;
 }
 
-/**
- * Controller 命令分发表
- * 命令名 → Controller 处理函数
- */
-const CONTROLLER_DISPATCH: Record<
-  string,
-  (args: Record<string, unknown>, client: DaemonClient) => Promise<CommandResult<unknown>>
-> = {
-  navigate: (args, client) => navigate(args, client),
-  snapshot: (args, client) => snapshot(args, client),
-  click: (args, client) => click(args, client),
-  fill: (args, client) => fill(args, client),
-  press: (args, client) => press(args, client),
-  scroll: (args, client) => scroll(args, client),
-  upload: (args, client) => upload(args, client),
-  get_text: (args, client) => getText(args, client),
-  screenshot: (args, client) => screenshot(args, client),
-  evaluate: (args, client) => evaluate(args, client),
-  wait_for: (args, client) => waitFor(args, client),
-  observe_start: (args, client) => observeStart(args, client),
-  observe_diff: (args, client) => observeDiff(args, client),
-  network_start: (args, client) => networkStart(args, client),
-  network_list: (args, client) => networkList(args, client),
-  network_detail: (args, client) => networkDetail(args, client),
-  network_stop: (args, client) => networkStop(args, client),
-  list_tabs: (args, client) => listTabs(args, client),
-  find_tab: (args, client) => findTab(args, client),
-  close_tab: (args, client) => closeTab(args, client),
-  close_session: (args, client) => controllerCloseSession(args, client),
-  click_probe: (args, client) => clickProbe(args, client),
-  save_as_pdf: (args, client) => saveAsPdf(args, client),
-  download: (args, client) => download(args, client),
-};
+// ─── Tool definitions ────────────────────────────────────────────
+
+const TOOL_DEFS: ToolDef[] = [
+  {
+    command: 'navigate',
+    title: 'Navigate to URL',
+    description:
+      'Navigate the browser to a URL.\n'
+      + 'Returns the final URL, page title, and tab ID after navigation completes.',
+    annotations: { openWorldHint: true },
+    controller: navigate,
+  },
+  {
+    command: 'tabs',
+    title: 'Manage browser tabs',
+    description:
+      'List, switch, or close browser tabs.\n'
+      + 'action: "list" (default) returns all tabs. "switch" finds and activates a tab by URL/title. "close" closes a tab.',
+    controller: tabs,
+  },
+  {
+    command: 'snapshot',
+    title: 'Capture page snapshot',
+    description:
+      'Capture the page accessibility tree with @e element references.\n'
+      + 'Use @e refs as target for browser_click/browser_fill/browser_press/browser_scroll.\n'
+      + 'Filter with roles, tags, textIncludes, hasVisibleText, viewportOnly to narrow results.\n'
+      + 'Pass diff_to with a previous baselineId to detect page changes (added/removed/changed elements).\n'
+      + '@e refs become stale after page changes — always re-snapshot before the next interaction.',
+    annotations: { readOnlyHint: true },
+    controller: snapshot,
+  },
+  {
+    command: 'get_text',
+    title: 'Get page text',
+    description:
+      'Extract text content from the page.\n'
+      + 'scope: "viewport" (default, visible text), "full" (all rendered text excluding hidden), "document" (raw innerText).',
+    annotations: { readOnlyHint: true },
+    controller: getText,
+  },
+  {
+    command: 'click',
+    title: 'Click element',
+    description:
+      'Click a page element. Three modes:\n'
+      + '1. By @e ref: { target: "@eabc_1" } — use refs from browser_snapshot.\n'
+      + '2. With network interception: { target: "@eabc_1", probe: { filter: "/api/", includeBody: true } } — captures matching requests via CDP.\n'
+      + '3. By text + position: { text: "Submit", x: 200, y: 300 } — finds nearest visible text match.\n'
+      + 'target and text are mutually exclusive; provide one.',
+    annotations: { destructiveHint: true },
+    controller: click,
+  },
+  {
+    command: 'fill',
+    title: 'Fill form field',
+    description:
+      'Type a value into a form field.\n'
+      + 'strategy: "native_setter" (default), "text_input" (character-by-character), "paste_like" (clipboard simulation).\n'
+      + 'commit: "change" (default, triggers change event), "blur", "enter" (submits), "none" (value only).\n'
+      + 'If value not applied, try strategy "text_input" or "paste_like" as fallback.',
+    annotations: { destructiveHint: true },
+    controller: fill,
+  },
+  {
+    command: 'press',
+    title: 'Press keyboard key',
+    description:
+      'Press a keyboard key, optionally on a specific element.\n'
+      + 'Common keys: Enter, Tab, Escape, ArrowDown, Backspace.\n'
+      + 'modifiers: ["Control", "Shift", "Alt", "Meta"] for shortcuts.',
+    annotations: { destructiveHint: true },
+    controller: press,
+  },
+  {
+    command: 'scroll',
+    title: 'Scroll page',
+    description:
+      'Scroll the page or a specific element.\n'
+      + 'deltaY: positive scrolls down, negative scrolls up. deltaX for horizontal.\n'
+      + 'strategy: "auto" (default), "dom" (element.scrollBy), "wheel" (wheel events).',
+    controller: scroll,
+  },
+  {
+    command: 'wait_for',
+    title: 'Wait for condition',
+    description:
+      'Wait for an element or text to appear/disappear on the page.\n'
+      + 'Provide selector, text, and/or expression. state: "visible" (default), "attached", "hidden", "detached".',
+    annotations: { readOnlyHint: true },
+    controller: waitFor,
+  },
+  {
+    command: 'capture',
+    title: 'Capture page visually',
+    description:
+      'Take a screenshot or save page as PDF.\n'
+      + 'format: "png" (default), "jpeg", "pdf".\n'
+      + 'For jpeg: quality (0-100). For pdf: paperFormat, landscape, scale, printBackground.',
+    controller: capture,
+  },
+  {
+    command: 'evaluate',
+    title: 'Execute JavaScript',
+    description:
+      'Execute JavaScript code in the page context.\n'
+      + 'Returns the evaluation result. Can access DOM, cookies, localStorage.',
+    annotations: { destructiveHint: true },
+    controller: evaluate,
+  },
+  {
+    command: 'network',
+    title: 'Network monitoring',
+    description:
+      'Monitor network requests.\n'
+      + 'action: "start" (begin capture), "list" (show captured requests), "detail" (inspect one request by requestId), "stop" (end capture).\n'
+      + 'scope: "tab" (default) or "session" (all tabs). filter: URL substring match.',
+    controller: network,
+  },
+  {
+    command: 'upload',
+    title: 'Upload files',
+    description:
+      'Upload local files to a file input element.\n'
+      + 'target: @e ref or css= selector for the file input. files: array of absolute file paths.',
+    annotations: { destructiveHint: true },
+    controller: upload,
+  },
+  {
+    command: 'download',
+    title: 'Download file',
+    description:
+      'Download a file from a URL through Chrome.\n'
+      + 'Returns the local file path after download completes.',
+    controller: download,
+  },
+  {
+    command: 'close_session',
+    title: 'Close browser session',
+    description:
+      'Close the active Browser Control session and rotate to a new active session.',
+    controller: controllerCloseSession,
+  },
+];
+
+// ─── Registration ────────────────────────────────────────────────
+
+export function implementedCommandNames(): string[] {
+  return TOOL_DEFS.map(d => d.command);
+}
 
 export function registerBrowserControlTools(
   server: McpServer,
@@ -82,83 +208,31 @@ export function registerBrowserControlTools(
   sessions = new McpSessionManager(),
 ): void {
   assertSchemaRegistryMatchesProtocol();
-  registerControllerTools(server, client, sessions);
-  registerDiagnosticTools(server, client, sessions);
-}
 
-function registerControllerTools(
-  server: McpServer,
-  client: DaemonClient,
-  sessions: McpSessionManager,
-): void {
-  server.registerTool(
-    'browser_control_command',
-    {
-      title: 'Browser Control command',
-      description: [
-        'Run any Browser Control protocol command.',
-        'Input: command, optional args object, optional session, timeoutMs, and id.',
-        'Output: CommandResult format with ok, summary, data, optional nextSteps.',
-        'Session is managed automatically by this MCP server process.',
-        'Before acting, call snapshot with filters (textIncludes, roles, viewportOnly) to get focused @e references.',
-        'Use browser_control_close_session at the end of a task.',
-      ].join('\n\n'),
-      inputSchema: unifiedCommandInputSchema,
-    },
-    async (input) => {
-      return runControllerCommand(
-        input as Record<string, unknown>,
-        client,
-        sessions,
-      );
-    },
-  );
+  // Register each command as an independent tool
+  for (const def of TOOL_DEFS) {
+    const schema = toolInputSchemas[def.command as keyof typeof toolInputSchemas];
+    server.registerTool(
+      `browser_${def.command}`,
+      {
+        title: def.title,
+        description: def.description,
+        annotations: def.annotations,
+        inputSchema: schema,
+      },
+      async (input) => {
+        return runTool(def.command, input as Record<string, unknown>, def.controller, client, sessions);
+      },
+    );
+  }
 
+  // Diagnostic tools
   server.registerTool(
-    'browser_control_close_session',
-    {
-      title: 'Browser Control close current session',
-      description: [
-        'Close the active Browser Control session and rotate to a new active session.',
-        'Session is optional. Omit it to close the current MCP-managed active session.',
-      ].join('\n\n'),
-      inputSchema: closeSessionInputSchema,
-    },
-    async (input) => {
-      const record = input as Record<string, unknown>;
-      const session = sessions.resolveSession(record.session);
-      const result = await controllerCloseSession(
-        { session },
-        client,
-      );
-      if (!result.ok) {
-        return toCommandToolResult(result);
-      }
-      const nextActiveSession = sessions.rotateSession();
-      return toCommandToolResult({
-        ...result,
-        data: {
-          closed: true,
-          activeSession: nextActiveSession,
-          closedSession: session,
-        },
-        summary: `会话已关闭 | 当前活跃会话: ${nextActiveSession}`,
-      });
-    },
-  );
-}
-
-function registerDiagnosticTools(
-  server: McpServer,
-  client: DaemonClient,
-  sessions: McpSessionManager,
-): void {
-  server.registerTool(
-    'browser_control_status',
+    'browser_status',
     {
       title: 'Browser Control status',
-      description:
-        'Return Browser Control daemon status, compatibility diagnostics, and the current MCP-managed active session.',
+      description: 'Return Browser Control daemon status, compatibility diagnostics, and the current MCP-managed active session.',
+      annotations: { readOnlyHint: true },
       inputSchema: diagnosticInputSchema,
     },
     async () => {
@@ -171,20 +245,17 @@ function registerDiagnosticTools(
   );
 
   server.registerTool(
-    'browser_control_doctor',
+    'browser_doctor',
     {
       title: 'Browser Control doctor',
-      description:
-        'Return daemon health/status diagnostics for MCP setup troubleshooting.',
+      description: 'Return daemon health/status diagnostics for MCP setup troubleshooting.',
+      annotations: { readOnlyHint: true },
       inputSchema: diagnosticInputSchema,
     },
     async () => {
       const lifecycle = await ensureDaemon(client);
       const health = lifecycle.ok
-        ? await client
-            .health()
-            .then((r) => r.data)
-            .catch((error) => ({ error: (error as Error).message }))
+        ? await client.health().then(r => r.data).catch(error => ({ error: (error as Error).message }))
         : null;
       return toRawToolResult(
         { lifecycle, health, activeSession: sessions.getActiveSession() },
@@ -194,68 +265,59 @@ function registerDiagnosticTools(
   );
 }
 
-/**
- * 通过 Controller 层执行命令
- * 如果命令有 Controller 实现则使用 Controller，否则回落直连 daemon
- */
-async function runControllerCommand(
+// ─── Execution ───────────────────────────────────────────────────
+
+async function runTool(
+  command: string,
   input: Record<string, unknown>,
+  controller: ControllerFn,
   client: DaemonClient,
   sessions: McpSessionManager,
 ): Promise<CallToolResult> {
-  const command = typeof input.command === 'string' ? input.command : '';
-  const args = input.args === undefined ? {} : input.args;
   const session = sessions.resolveSession(input.session);
 
-  if (!command) {
+  // Inject session and timeoutMs into args for controller's buildEnvelope
+  const args = {
+    ...input,
+    session,
+    timeoutMs: typeof input.timeoutMs === 'number' ? input.timeoutMs : undefined,
+  };
+  // Remove envelope fields from args so they don't leak into command validation
+  delete args.session;
+  delete args.timeoutMs;
+
+  const controllerArgs = {
+    ...args,
+    session,
+    timeoutMs: typeof input.timeoutMs === 'number' ? input.timeoutMs : undefined,
+  };
+
+  const result = await controller(controllerArgs, client);
+
+  // Attach risk notes
+  const riskNote = riskNoteFor(command);
+  if (riskNote && result.ok && !result.riskNotes?.length) {
+    result.riskNotes = [riskNote];
+  }
+
+  // Handle close_session rotation
+  if (command === 'close_session' && result.ok) {
+    const nextSession = sessions.rotateSession();
     return toCommandToolResult({
-      ok: false,
-      summary: '命令名不能为空',
+      ...result,
+      data: {
+        ...(result.data as Record<string, unknown>),
+        activeSession: nextSession,
+      },
+      summary: `${result.summary} | 当前活跃会话: ${nextSession}`,
     });
   }
 
-  const controller = CONTROLLER_DISPATCH[command];
-  if (controller) {
-    // 注入 session 和 timeoutMs 到 args（Controller 的 buildEnvelope 会提取）
-    const controllerArgs = {
-      ...(args as Record<string, unknown>),
-      session,
-      timeoutMs:
-        typeof input.timeoutMs === 'number' ? input.timeoutMs : undefined,
-      id: typeof input.id === 'string' ? input.id : undefined,
-    };
-    const result = await controller(controllerArgs, client);
-
-    // 如果是 close_session，需要轮换 session
-    if (command === 'close_session' && result.ok) {
-      const nextSession = sessions.rotateSession();
-      return toCommandToolResult({
-        ...result,
-        data: {
-          ...(result.data as Record<string, unknown>),
-          activeSession: nextSession,
-        },
-        summary: `${result.summary} | 当前活跃会话: ${nextSession}`,
-      });
-    }
-
-    return toCommandToolResult(result);
-  }
-
-  // 未知命令
-  return toCommandToolResult({
-    ok: false,
-    summary: command ? `未知命令: "${command}"` : '命令名不能为空',
-    nextSteps: [`可用命令: ${Object.keys(CONTROLLER_DISPATCH).join(', ')}`],
-  });
+  return toCommandToolResult(result);
 }
 
-/**
- * 将 CommandResult 转换为 MCP CallToolResult
- * content[0].text: summary（LLM 直接可读）
- * structuredContent: 完整结果
- */
-/** 将原始值转换为 MCP CallToolResult（用于诊断工具等非 Controller 命令） */
+// ─── Result conversion ───────────────────────────────────────────
+
 function toRawToolResult(value: unknown, isError = false): CallToolResult {
   const sc = value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -277,4 +339,3 @@ function toCommandToolResult<T>(result: CommandResult<T>): CallToolResult {
     isError: !result.ok,
   };
 }
-

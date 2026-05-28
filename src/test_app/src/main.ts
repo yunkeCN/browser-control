@@ -194,7 +194,7 @@ async function executeCommand(): Promise<void> {
       ok: false,
       summary: 'daemon 执行失败: ' + message,
       nextSteps: [
-        '请运行 browser_control_status 或 browser_control_doctor 检查 daemon 状态',
+        '请运行 browser_status 或 browser_doctor 检查 daemon 状态',
         '如果 daemon 未运行，请等待自动启动或手动启动 daemon',
       ],
     };

@@ -1,10 +1,9 @@
 import { z } from 'zod/v4';
 import { COMMANDS } from './protocol.js';
 
-const envelopeSchema = {
+const envelopeFields = {
   session: z.string().min(1).optional().describe('Optional Browser Control logical session name. Omit to use the MCP-managed active session.'),
   timeoutMs: z.number().positive().optional().describe('Overall command timeout in milliseconds. Defaults to 30000.'),
-  id: z.string().min(1).optional().describe('Optional caller-provided request id.')
 };
 
 const tabId = z.number().int().positive().optional();
@@ -21,18 +20,19 @@ const observeOptions = z.object({
   maxSummaryChars: z.number().int().positive().optional()
 }).strict();
 
+/** Per-command argument schemas (without envelope fields) */
 export const commandArgSchemas = {
   navigate: z.object({
     url: z.string().min(1),
     newTab: z.boolean().optional(),
     timeoutMs: z.number().positive().optional()
   }).strict(),
-  find_tab: z.object({
-    urlIncludes: z.string().optional(),
-    titleIncludes: z.string().optional(),
-    active: z.boolean().optional(),
+  tabs: z.object({
+    action: z.enum(['list', 'switch', 'close']).optional().describe('Tab operation. Defaults to "list".'),
+    urlIncludes: z.string().optional().describe('URL substring filter for switch.'),
+    titleIncludes: z.string().optional().describe('Title substring filter for switch.'),
+    active: z.boolean().optional().describe('Filter by active state for switch.'),
     tabId,
-    attach: z.boolean().optional()
   }).strict(),
   snapshot: z.object({
     tabId,
@@ -45,29 +45,20 @@ export const commandArgSchemas = {
     diff_to: z.string().optional().describe('Compare current snapshot against a previous snapshot baseline ID. Returns structured added/removed/changed diff.')
   }).strict(),
   click: z.object({
-    target: elementTarget,
-    tabId
-  }).strict(),
-  click_probe: z.object({
-    target: elementTarget,
+    target: elementTarget.optional().describe('Element reference (@e ref or css= selector). Mutually exclusive with text.'),
+    text: z.string().min(1).optional().describe('Text to match on page. Mutually exclusive with target. Requires x and y.'),
+    x: z.number().optional().describe('Approximate x coordinate for text mode disambiguation.'),
+    y: z.number().optional().describe('Approximate y coordinate for text mode disambiguation.'),
+    roles: z.array(z.string()).optional().describe('ARIA roles filter for text mode.'),
     tabId,
-    force: z.boolean().optional(),
-    observeNewTab: z.boolean().optional(),
-    expectNewTab: z.boolean().optional(),
-    waitMs: z.number().nonnegative().optional(),
-    filter: z.string().optional(),
-    includeHeaders: z.boolean().optional(),
-    includeBody: z.boolean().optional(),
-    redactSensitive: z.boolean().optional(),
-    maxRequests: z.number().int().positive().optional()
-  }).strict(),
-  cdp_click_at: z.object({
-    x: z.number(),
-    y: z.number(),
-    tabId,
-    button: z.enum(['left', 'middle', 'right']).optional(),
-    clickCount: z.number().int().positive().optional(),
-    modifiers: z.array(z.string()).optional(),
+    force: z.boolean().optional().describe('Skip visibility checks.'),
+    probe: z.object({
+      filter: z.string().optional().describe('URL substring to capture matching network requests.'),
+      includeHeaders: z.boolean().optional().describe('Include response headers in captured requests.'),
+      includeBody: z.boolean().optional().describe('Include response body in captured requests.'),
+      redactSensitive: z.boolean().optional().describe('Redact sensitive data in captured requests.'),
+      maxRequests: z.number().int().positive().optional().describe('Maximum number of requests to capture.'),
+    }).strict().optional().describe('Enable CDP network interception during click. Captures matching requests with headers/body.'),
   }).strict(),
   fill: z.object({
     target: elementTarget,
@@ -113,51 +104,28 @@ export const commandArgSchemas = {
     expression: z.string().optional()
   }).strict(),
   evaluate: z.object({ code: z.string().min(1), tabId }).strict(),
-  screenshot: z.object({
+  capture: z.object({
+    format: z.enum(['png', 'jpeg', 'pdf']).optional().describe('Output format. Defaults to "png".'),
     tabId,
-    format: z.enum(['png', 'jpeg']).optional(),
-    quality: z.number().min(0).max(100).optional(),
-    file_name: z.string().optional(),
-    fileName: z.string().optional()
+    fileName: z.string().optional().describe('Custom output file name.'),
+    quality: z.number().min(0).max(100).optional().describe('JPEG quality 0-100. Only for jpeg format.'),
+    paperFormat: z.enum(['A4', 'Letter']).optional().describe('Paper format for PDF.'),
+    landscape: z.boolean().optional().describe('Landscape orientation for PDF.'),
+    scale: z.number().positive().optional().describe('Scale factor for PDF.'),
+    printBackground: z.boolean().optional().describe('Print background for PDF.'),
   }).strict(),
-  save_as_pdf: z.object({
+  network: z.object({
+    action: z.enum(['start', 'list', 'detail', 'stop']).describe('Network operation.'),
+    filter: z.string().optional().describe('URL substring filter for start/list.'),
     tabId,
-    paper_format: z.enum(['A4', 'Letter']).optional(),
-    landscape: z.boolean().optional(),
-    scale: z.number().positive().optional(),
-    print_background: z.boolean().optional(),
-    file_name: z.string().optional()
+    scope: z.enum(['session', 'tab']).optional().describe('Capture scope for start.'),
+    limit: z.number().int().positive().optional().describe('Max requests for list.'),
+    method: z.string().optional().describe('HTTP method filter for list.'),
+    statusCode: z.number().int().optional().describe('Status code filter for list.'),
+    type: z.string().optional().describe('Resource type filter for list.'),
+    sinceTimestampMs: z.number().nonnegative().optional().describe('Timestamp filter for list.'),
+    requestId: z.string().min(1).optional().describe('Request ID for detail (required for detail action).'),
   }).strict(),
-  observe_start: z.object({
-    tabId,
-    mode: z.enum(['viewport_text']).optional(),
-    baselineId: z.string().optional(),
-    includeNetworkMarker: z.boolean().optional(),
-    maxTextChars: z.number().int().positive().optional(),
-    maxTextRuns: z.number().int().positive().optional()
-  }).strict(),
-  observe_diff: z.object({
-    baselineId: z.string().min(1),
-    tabId,
-    includeCurrent: z.boolean().optional(),
-    includeNetwork: z.boolean().optional(),
-    maxAdded: z.number().int().positive().optional(),
-    maxRemoved: z.number().int().positive().optional(),
-    maxSummaryChars: z.number().int().positive().optional(),
-    allowStaleNavigationDiff: z.boolean().optional()
-  }).strict(),
-  network_start: z.object({ filter: z.string().optional(), tabId, scope: z.enum(['session', 'tab']).optional() }).strict(),
-  network_list: z.object({
-    filter: z.string().optional(),
-    sinceTimestampMs: z.number().nonnegative().optional(),
-    limit: z.number().int().positive().optional(),
-    tabId,
-    method: z.string().optional(),
-    statusCode: z.number().int().optional(),
-    type: z.string().optional()
-  }).strict(),
-  network_detail: z.object({ requestId: z.string().min(1) }).strict(),
-  network_stop: z.object({}).strict(),
   upload: z.object({ target: elementTarget, files: z.array(z.string().min(1)), tabId }).strict(),
   download: z.object({ url: z.string().min(1), filename: z.string().optional(), saveAs: z.boolean().optional() }).strict(),
   get_text: z.object({
@@ -167,35 +135,43 @@ export const commandArgSchemas = {
     includeRuns: z.boolean().optional(),
     selector: selector.optional()
   }).strict(),
-  list_tabs: z.object({}).strict(),
-  close_tab: z.object({ tabId }).strict(),
   close_session: z.object({}).strict()
 } as const;
 
 export type CommandName = keyof typeof commandArgSchemas;
 
+/**
+ * Per-tool input schemas: command args + envelope fields (session, timeoutMs).
+ * Each tool gets its own fully-typed schema visible to LLM.
+ */
+export const toolInputSchemas = Object.fromEntries(
+  Object.entries(commandArgSchemas).map(([cmd, argSchema]) => [
+    cmd,
+    argSchema.extend(envelopeFields),
+  ])
+) as { [K in CommandName]: ReturnType<(typeof commandArgSchemas)[K]['extend']> };
+
 export const diagnosticInputSchema = z.object({}).strict();
 
-export const unifiedCommandInputSchema = z.object({
-  command: z.string().min(1).describe('Browser Control protocol command name, for example "snapshot", "click", or "get_text".'),
-  args: z.record(z.string(), z.unknown()).optional().describe('Command-specific arguments. Defaults to {}.'),
-  ...envelopeSchema
-}).strict();
-
-export const closeSessionInputSchema = z.object(envelopeSchema).strict();
+export const closeSessionInputSchema = z.object(envelopeFields).strict();
 
 export function assertSchemaRegistryMatchesProtocol(): void {
-  const schemaCommands = Object.keys(commandArgSchemas).sort();
-  const protocolCommands = Object.keys(COMMANDS).sort();
-  if (schemaCommands.join('\n') !== protocolCommands.join('\n')) {
-    throw new Error(`MCP schema registry drift: schema=${schemaCommands.join(',')} protocol=${protocolCommands.join(',')}`);
+  const schemaCommands = new Set(Object.keys(commandArgSchemas));
+  const protocolCommands = new Set(Object.keys(COMMANDS));
+  // Every MCP schema command must exist in the protocol
+  for (const cmd of schemaCommands) {
+    if (!protocolCommands.has(cmd)) {
+      throw new Error(`MCP schema has command "${cmd}" not found in protocol`);
+    }
   }
-  for (const command of protocolCommands) {
+  // Validate field-level consistency for MCP-exposed commands
+  for (const command of schemaCommands) {
     const schema = commandArgSchemas[command as CommandName];
     const shape = schema.shape;
-    const required = new Set(COMMANDS[command].required || []);
-    const optional = new Set(COMMANDS[command].optional || []);
-    const requiredOneOf = new Set(COMMANDS[command].requiredOneOf || []);
+    const spec = COMMANDS[command];
+    const required = new Set(spec.required || []);
+    const optional = new Set(spec.optional || []);
+    const requiredOneOf = new Set(spec.requiredOneOf || []);
     const schemaFields = new Set(Object.keys(shape));
     for (const field of required) {
       if (!schemaFields.has(field)) throw new Error(`MCP schema for ${command} missing required field ${field}`);

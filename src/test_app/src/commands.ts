@@ -1,7 +1,6 @@
 import type { CommandResult } from '@controller/types';
 import { clickDef } from '@controller/commands/click';
 import { snapshotDef } from '@controller/commands/snapshot';
-import { observeDiffDef } from '@controller/commands/observe';
 import { riskNoteFor } from '@mcp/risk-notes';
 
 // ─── Command metadata ──────────────────────────────────────────────
@@ -91,13 +90,6 @@ function waitForResult(raw: Record<string, unknown>): CommandResult {
   return ok(`等待成功: ${d.target || d.selector || d.text || '条件'}已变为 ${d.state || 'visible'}`);
 }
 
-function observeStartResult(raw: Record<string, unknown>): CommandResult {
-  const d = raw.data as RawData;
-  const id = d?.baselineId || d?.id || 'obs';
-  return ok(`观察基线已建立: ${id}`);
-}
-
-const observeDiffResult = observeDiffDef.toResult;
 
 function networkStartResult(raw: Record<string, unknown>): CommandResult {
   const d = raw.data as RawData;
@@ -145,18 +137,6 @@ function closeSessionResult(raw: Record<string, unknown>): CommandResult {
   return ok(`会话已关闭 | 当前活跃会话: ${d?.activeSession || 'default'}`);
 }
 
-function clickProbeResult(raw: Record<string, unknown>): CommandResult {
-  const d = raw.data as RawData;
-  const reqs = d?.requests || d?.entries;
-  const count = Array.isArray(reqs) ? reqs.length : 0;
-  return ok(`已点击元素 | 捕获到 ${count} 个网络请求`, { requests: reqs, count });
-}
-
-function clickTextResult(raw: Record<string, unknown>): CommandResult {
-  const d = raw.data as RawData;
-  if (!d) return fail('点击文本失败: daemon 未返回结果');
-  return ok(`已点击元素 "${d.text || d.name}"（${d.role || 'element'}）`);
-}
 
 function saveAsPdfResult(raw: Record<string, unknown>): CommandResult {
   const d = raw.data as RawData;
@@ -202,11 +182,11 @@ export const COMMAND_META: Record<string, CommandMeta> = {
     example: { url: 'https://example.com', newTab: true },
     toResult: navigateResult,
   },
-  find_tab: {
-    name: 'find_tab',
+  tabs: {
+    name: 'tabs',
     required: [],
-    example: { titleIncludes: 'Example', attach: true },
-    toResult: findTabResult,
+    example: { action: 'list' },
+    toResult: listTabsResult,
   },
   snapshot: {
     name: 'snapshot',
@@ -219,12 +199,6 @@ export const COMMAND_META: Record<string, CommandMeta> = {
     required: ['target'],
     example: { target: '@e1abc_1', after: 'auto' },
     toResult: withRisk(clickResult),
-  },
-  click_probe: {
-    name: 'click_probe',
-    required: ['target'],
-    example: { target: '@e1abc_1', strategy: 'auto', filter: '/api/' },
-    toResult: withRisk(clickProbeResult),
   },
   fill: {
     name: 'fill',
@@ -256,53 +230,17 @@ export const COMMAND_META: Record<string, CommandMeta> = {
     example: { code: 'return { title: document.title, url: location.href }' },
     toResult: withRisk(evaluateResult),
   },
-  screenshot: {
-    name: 'screenshot',
+  capture: {
+    name: 'capture',
     required: [],
-    example: { fullPage: true, format: 'png' },
-    toResult: screenshotResult,
+    example: { format: 'png' },
+    toResult: withRisk(screenshotResult),
   },
-  save_as_pdf: {
-    name: 'save_as_pdf',
-    required: [],
-    example: { print_background: true, paper_format: 'A4' },
-    toResult: withRisk(saveAsPdfResult),
-  },
-  observe_start: {
-    name: 'observe_start',
-    required: [],
-    example: { includeNetworkMarker: true },
-    toResult: observeStartResult,
-  },
-  observe_diff: {
-    name: 'observe_diff',
-    required: ['baselineId'],
-    example: { baselineId: 'obs_...', includeNetwork: true },
-    toResult: observeDiffResult,
-  },
-  network_start: {
-    name: 'network_start',
-    required: [],
-    example: { scope: 'session', filter: '/api/' },
-    toResult: networkStartResult,
-  },
-  network_list: {
-    name: 'network_list',
-    required: [],
-    example: { limit: 100, filter: '' },
-    toResult: networkListResult,
-  },
-  network_detail: {
-    name: 'network_detail',
-    required: ['requestId'],
-    example: { requestId: 'request-id-from-network-list' },
-    toResult: withRisk(networkDetailResult),
-  },
-  network_stop: {
-    name: 'network_stop',
-    required: [],
-    example: {},
-    toResult: networkStopResult,
+  network: {
+    name: 'network',
+    required: ['action'],
+    example: { action: 'start', filter: '/api/' },
+    toResult: withRisk(networkListResult),
   },
   upload: {
     name: 'upload',
@@ -322,28 +260,10 @@ export const COMMAND_META: Record<string, CommandMeta> = {
     example: { scope: 'full', maxChars: 4000, includeRuns: true },
     toResult: getTextResult,
   },
-  list_tabs: {
-    name: 'list_tabs',
-    required: [],
-    example: {},
-    toResult: listTabsResult,
-  },
-  close_tab: {
-    name: 'close_tab',
-    required: [],
-    example: { tabId: 123 },
-    toResult: closeTabResult,
-  },
   close_session: {
     name: 'close_session',
     required: [],
     example: {},
     toResult: closeSessionResult,
-  },
-  click_text: {
-    name: 'click_text',
-    required: ['text', 'x', 'y'],
-    example: { text: 'Submit', x: 200, y: 300 },
-    toResult: withRisk(clickTextResult),
   },
 };

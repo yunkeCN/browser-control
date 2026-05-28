@@ -65,18 +65,14 @@ export const EXTENSION_CAPABILITY_HINTS = [
 
 export const COMMANDS: Record<string, CommandSpec> = {
   navigate: { required: ['url'], optional: ['newTab', 'timeoutMs'] },
-  find_tab: { required: [], optional: ['urlIncludes', 'titleIncludes', 'active', 'tabId', 'attach'] },
+  tabs: { required: [], optional: ['action', 'urlIncludes', 'titleIncludes', 'active', 'tabId'] },
   snapshot: { required: [], optional: ['tabId', 'roles', 'tags', 'hasVisibleText', 'textIncludes', 'viewportOnly', 'boxes', 'diff_to'], example: { tabId: 123, roles: ['button', 'link'], hasVisibleText: true, viewportOnly: true } },
   click: {
-    required: ['target'],
-    optional: ['tabId'],
+    required: [],
+    requiredOneOf: ['target', 'text'],
+    optional: ['target', 'text', 'x', 'y', 'roles', 'tabId', 'force', 'probe'],
     example: { target: '@e1abc23_1' }
   },
-  click_probe: {
-    required: ['target'],
-    optional: ['tabId', 'force', 'observeNewTab', 'expectNewTab', 'waitMs', 'filter', 'includeHeaders', 'includeBody', 'redactSensitive', 'maxRequests']
-  },
-  cdp_click_at: { required: ['x', 'y'], optional: ['tabId', 'button', 'clickCount', 'modifiers'] },
   fill: {
     required: ['target', 'value'],
     optional: ['tabId', 'strategy', 'clear', 'commit', 'expectChange', 'observe'],
@@ -95,36 +91,39 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   wait_for: { required: [], optional: ['selector', 'text', 'state', 'timeoutMs', 'tabId', 'expression'] },
   evaluate: { required: ['code'], optional: ['tabId'], example: { code: 'return { title: document.title }' } },
-  screenshot: { required: [], optional: ['tabId', 'format', 'quality', 'file_name', 'fileName'] },
-  save_as_pdf: { required: [], optional: ['tabId', 'paper_format', 'landscape', 'scale', 'print_background', 'file_name'] },
-  observe_start: { required: [], optional: ['tabId', 'mode', 'baselineId', 'includeNetworkMarker', 'maxTextChars', 'maxTextRuns'], example: { includeNetworkMarker: true } },
-  observe_diff: { required: ['baselineId'], optional: ['tabId', 'includeCurrent', 'includeNetwork', 'maxAdded', 'maxRemoved', 'maxSummaryChars', 'allowStaleNavigationDiff'], example: { baselineId: 'obs_...', includeNetwork: true } },
-  network_start: { required: [], optional: ['filter', 'tabId', 'scope'], example: { scope: 'session' } },
-  network_list: { required: [], optional: ['filter', 'sinceTimestampMs', 'limit', 'tabId', 'method', 'statusCode', 'type'], example: { filter: '/api/' } },
-  network_detail: { required: ['requestId'], optional: [], example: { requestId: '<id from network_list>' } },
+  capture: { required: [], optional: ['format', 'tabId', 'fileName', 'quality', 'paperFormat', 'landscape', 'scale', 'printBackground'] },
+  network: { required: ['action'], optional: ['filter', 'tabId', 'scope', 'limit', 'method', 'statusCode', 'type', 'sinceTimestampMs', 'requestId'] },
+  // daemon-internal commands (not exposed via MCP, but needed for daemon protocol validation)
+  network_start: { required: [], optional: ['filter', 'tabId', 'scope'] },
+  network_list: { required: [], optional: ['filter', 'sinceTimestampMs', 'limit', 'tabId', 'method', 'statusCode', 'type'] },
+  network_detail: { required: ['requestId'] },
   network_stop: { required: [] },
   upload: { required: ['target', 'files'], optional: ['tabId'] },
   download: { required: ['url'], optional: ['filename', 'saveAs'] },
   get_text: { required: [], optional: ['tabId', 'scope', 'maxChars', 'includeRuns', 'selector'], example: { scope: 'full', maxChars: 4000, includeRuns: true } },
+  close_session: { required: [] },
+  // Daemon-internal commands: used by controller → daemon communication, not exposed via MCP schema.
+  // The daemon validates these via COMMANDS, so they must stay here.
   list_tabs: { required: [] },
+  find_tab: { required: [], optional: ['urlIncludes', 'titleIncludes', 'active', 'tabId', 'attach'] },
   close_tab: { required: [], optional: ['tabId'] },
-  close_session: { required: [] }
+  screenshot: { required: [], optional: ['tabId', 'format', 'quality', 'file_name', 'fileName'] },
+  save_as_pdf: { required: [], optional: ['tabId', 'paper_format', 'landscape', 'scale', 'print_background', 'file_name'] },
+  click_probe: {
+    required: ['target'],
+    optional: ['tabId', 'force', 'observeNewTab', 'expectNewTab', 'waitMs', 'filter', 'includeHeaders', 'includeBody', 'redactSensitive', 'maxRequests']
+  },
+  observe_start: { required: [], optional: ['tabId', 'mode', 'baselineId', 'includeNetworkMarker', 'maxTextChars', 'maxTextRuns'] },
+  observe_diff: { required: ['baselineId'], optional: ['tabId', 'includeCurrent', 'includeNetwork', 'maxAdded', 'maxRemoved', 'maxSummaryChars', 'allowStaleNavigationDiff'] },
 };
 
 const ELEMENT_REF_PATTERN = /^@e[^\s_]+_\d+$/;
-const TARGET_COMMANDS = new Set(['click', 'click_probe', 'fill', 'press', 'scroll', 'upload']);
+const TARGET_COMMANDS = new Set(['click', 'fill', 'press', 'scroll', 'upload']);
 const LEGACY_TARGET_ARGS = ['elementRef', 'selector'];
 
 export const LEGACY_ACTION_ALIASES: Record<string, string> = {
-  saveAsPdf: 'save_as_pdf',
   waitFor: 'wait_for',
-  findTab: 'find_tab',
   getText: 'get_text',
-  clickProbe: 'click_probe',
-  networkStart: 'network_start',
-  networkList: 'network_list',
-  networkDetail: 'network_detail',
-  networkStop: 'network_stop'
 };
 
 export class ProtocolError extends Error {
@@ -188,9 +187,7 @@ export function validateRequest(request: any) {
     throw new ProtocolError('VALIDATION_ERROR', 'files must be an array for command \'upload\'', { field: 'files' });
   }
   validateOptionalStringArg(request, spec, 'filter', [
-    'click_probe',
-    'network_start',
-    'network_list'
+    'network'
   ]);
   validateOptionalBooleanArgs(request, ['force', 'observeNewTab', 'expectNewTab', 'includeHeaders', 'includeBody', 'redactSensitive']);
   validateOptionalNumberArgs(request, ['tabId', 'clickCount', 'waitMs', 'maxRequests']);
@@ -213,17 +210,14 @@ function validateKnownArgs(request: any, spec: CommandSpec) {
   if (request.command === 'fill' && field === 'text') {
     hints.unshift('Use args.value for fill. args.text is not part of the fill command protocol.');
   }
-  if (request.command === 'network_detail' && field === 'index') {
-    hints.unshift('Use args.requestId from network_list; numeric index is not part of the network_detail protocol.');
-  }
-  if (request.command === 'click' && field === 'text') {
-    hints.unshift('click uses args.target for snapshot @e references. To click visible text, call snapshot with args.textIncludes plus hasVisibleText and viewportOnly, then click the returned @e id as target.');
+  if (request.command === 'network' && field === 'index') {
+    hints.unshift('Use args.requestId from network { action: "list" }; numeric index is not supported.');
   }
   if (TARGET_COMMANDS.has(request.command) && LEGACY_TARGET_ARGS.includes(field)) {
     hints.unshift(`${request.command} now accepts args.target for element targeting. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.`);
   }
-  if (request.command === 'click' && ['strategy', 'force', 'button', 'clickCount', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab'].includes(field)) {
-    hints.unshift('click now accepts only args.target and optional args.tabId. Use {"target":"@e..."} for snapshot refs or {"target":"css=..."} for an explicit CSS fallback.');
+  if (request.command === 'click' && ['strategy', 'button', 'clickCount', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab'].includes(field)) {
+    hints.unshift('click accepts target (or text+x+y), optional tabId, force, and probe. For network interception use probe: { filter, includeBody, includeHeaders }.');
   }
   if (request.command === 'get_text' && field === 'selectors') {
     hints.unshift('get_text accepts one optional args.selector for the text extraction scope. To find clickable targets by text, use snapshot with args.textIncludes.');
@@ -341,20 +335,11 @@ function validationDetails(request: any, spec: CommandSpec, field: string): any 
     details.receivedAlias = 'text';
     details.expectedAlias = 'value';
   }
-  if (request.command === 'network_detail' && Object.prototype.hasOwnProperty.call(request.args || {}, 'index')) {
-    hints.push('Use args.requestId from network_list; numeric index is not part of the network_detail protocol.');
-  }
-  if (request.command === 'observe_diff' && field === 'baselineId') {
-    hints.push('Run observe_start first, then pass the returned baselineId to observe_diff.');
-  }
-  if (request.command === 'click' && Object.prototype.hasOwnProperty.call(request.args || {}, 'text')) {
-    hints.push('click uses args.target for snapshot @e references. Run snapshot and click a returned element id; semantic click_text is deferred.');
+  if (request.command === 'network' && Object.prototype.hasOwnProperty.call(request.args || {}, 'index')) {
+    hints.push('Use args.requestId from network { action: "list" }; numeric index is not supported.');
   }
   if (TARGET_COMMANDS.has(request.command) && LEGACY_TARGET_ARGS.some(arg => Object.prototype.hasOwnProperty.call(request.args || {}, arg))) {
     hints.push(`${request.command} now accepts args.target for element targeting. Use {"target":"@e..."} or {"target":"css=..."} instead.`);
-  }
-  if (request.command === 'click' && ['strategy', 'force', 'button', 'clickCount', 'modifiers', 'expectChange', 'observe', 'observeNewTab', 'expectNewTab'].some(arg => Object.prototype.hasOwnProperty.call(request.args || {}, arg))) {
-    hints.push('click now accepts args.target and optional args.tabId. Use {"target":"@e..."} or {"target":"css=..."} instead.');
   }
   if (hints.length) {
     details.hints = hints;
@@ -369,8 +354,8 @@ export function protocolErrorFrom(err: any, fallbackCode = 'BACKEND_ERROR') {
   if (/observation baseline not found|baseline not found/i.test(message)) {
     return new ProtocolError('NOT_FOUND', message, {
       nextSteps: [
-        'Run observe_start again for the active session tab.',
-        'If navigation occurred, create a new baseline before retrying observe_diff.'
+        'Run snapshot again to create a new baseline.',
+        'If navigation occurred, create a new baseline before retrying diff_to.'
       ]
     }, true);
   }
@@ -427,7 +412,6 @@ export function createResultEnvelope(request: any, { ok, backend = 'extension', 
 export function mapNetworkCommand(command: string, args: any) {
   switch (command) {
     case 'click':
-    case 'click_probe':
     case 'fill':
     case 'press':
     case 'scroll':

@@ -1,17 +1,11 @@
 /**
- * 网络命令 — network
+ * 统一网络监控命令 — network
  *
- * 功能: 管理网络请求监控
- * 使用场景:
- *   - network_start: 启动网络请求监控
- *   - network_list: 列出已捕获的网络请求
- *   - network_detail: 获取某个请求的详细信息
- *   - network_stop: 停止网络监控
- *
- * 设计要点:
- * - 参数验证使用简单的手动检查（不使用 Zod schema）
- * - 成功返回 LLM-friendly 的 summary + 结构化 data
- * - daemon 错误时提供 nextSteps 建议
+ * 通过 action 参数区分操作:
+ * - action: 'start' — 启动网络请求监控
+ * - action: 'list' — 列出已捕获的网络请求
+ * - action: 'detail' — 获取某个请求的详细信息
+ * - action: 'stop' — 停止网络监控
  */
 
 import type { DaemonClient } from '../../mcp/daemon-client';
@@ -20,39 +14,32 @@ import { runCommand, type CommandDefinition } from '../runner';
 
 // ─── 类型定义 ────────────────────────────────────────────────────
 
-/** network_start 命令的输入参数 */
-export interface NetworkStartInput {
-  /** 请求 URL 过滤模式（可选，如 "/api/"） */
+export type NetworkAction = 'start' | 'list' | 'detail' | 'stop';
+
+export interface NetworkInput {
+  action: NetworkAction;
+  // start 参数
   filter?: string;
-  /** 标签页 ID（可选，默认使用当前活跃标签页） */
-  tabId?: number;
-  /** 监控范围（可选，session 或 tab） */
   scope?: 'session' | 'tab';
-}
-
-/** network_start 命令的输出数据 */
-export interface NetworkStartData {
-  /** 是否已成功启动 */
-  started: boolean;
-  /** 应用的过滤条件 */
-  filter?: string;
-}
-
-/** network_list 命令的输入参数 */
-export interface NetworkListInput {
-  /** 请求 URL 过滤模式（可选） */
-  filter?: string;
-  /** 返回的最大请求数（可选） */
+  // list 参数
   limit?: number;
-  /** 标签页 ID（可选） */
+  method?: string;
+  statusCode?: number;
+  type?: string;
+  sinceTimestampMs?: number;
+  // detail 参数
+  requestId?: string;
+  // 通用
   tabId?: number;
 }
 
-/** network_list 命令的输出数据 */
+export interface NetworkStartData {
+  started: boolean;
+  filter?: string;
+}
+
 export interface NetworkListData {
-  /** 请求总数 */
   count: number;
-  /** 请求列表 */
   requests: Array<{
     id: string;
     method: string;
@@ -61,116 +48,33 @@ export interface NetworkListData {
   }>;
 }
 
-/** network_detail 命令的输入参数 */
-export interface NetworkDetailInput {
-  /** 请求 ID（必填） */
-  requestId: string;
-}
-
-/** network_detail 命令的输出数据 */
 export interface NetworkDetailData {
-  /** 请求基本信息 */
-  request: {
-    method: string;
-    url: string;
-    statusCode: number;
-  };
-  /** 响应信息 */
-  response?: {
-    statusCode: number;
-  };
+  request: { method: string; url: string; statusCode: number };
+  response?: { statusCode: number };
 }
 
-/** network_stop 命令的输入参数 */
-export interface NetworkStopInput {
-  // 无参数
-}
-
-/** network_stop 命令的输出数据 */
 export interface NetworkStopData {
-  /** 是否已成功停止 */
   stopped: boolean;
 }
 
-// ─── network_start 命令定义 ──────────────────────────────────────
+export type NetworkData = NetworkStartData | NetworkListData | NetworkDetailData | NetworkStopData;
 
-const startDef: CommandDefinition<NetworkStartInput, NetworkStartData> = {
-  name: 'network_start',
-  requiredArgs: [],
+// ─── 命令定义 ────────────────────────────────────────────────────
 
-  validate: (args: Record<string, unknown>): NetworkStartInput => {
-    const validKeys = ['filter', 'tabId', 'scope'];
-    const unknownKeys = Object.keys(args).filter((k) => !validKeys.includes(k));
-    if (unknownKeys.length > 0) {
-      throw new Error(
-        `未知参数: ${unknownKeys.join(', ')}; 支持的参数: ${validKeys.join(', ')}`,
-      );
+const networkDef: CommandDefinition<NetworkInput, NetworkData> = {
+  name: 'network',
+  requiredArgs: ['action'],
+
+  validate: (args: Record<string, unknown>): NetworkInput => {
+    const action = args.action as string;
+    if (!['start', 'list', 'detail', 'stop'].includes(action)) {
+      throw new Error('action 必须是 "start"、"list"、"detail" 或 "stop"');
     }
-    if (args.filter !== undefined && typeof args.filter !== 'string') {
-      throw new Error('filter 必须是字符串');
+    if (action === 'detail' && (!args.requestId || typeof args.requestId !== 'string')) {
+      throw new Error('detail 操作需要提供 requestId 字符串参数');
     }
     if (args.tabId !== undefined && typeof args.tabId !== 'number') {
       throw new Error('tabId 必须是数字');
-    }
-    if (args.scope !== undefined && args.scope !== 'session' && args.scope !== 'tab') {
-      throw new Error('scope 必须是 "session" 或 "tab"');
-    }
-    return args as unknown as NetworkStartInput;
-  },
-
-  execute: async (
-    input: NetworkStartInput,
-    daemon: DaemonClient,
-  ): Promise<Record<string, unknown>> => {
-    const envelope = daemon.buildEnvelope(
-      'network_start',
-      input as unknown as Record<string, unknown>,
-    );
-    const response = await daemon.command(envelope);
-    return response.data as Record<string, unknown>;
-  },
-
-  toResult: (raw: Record<string, unknown>): CommandResult<NetworkStartData> => {
-    const rawData = raw.data as Record<string, unknown> | undefined;
-
-    if (!rawData) {
-      return {
-        ok: false,
-        summary: '网络监控启动失败: daemon 未返回结果',
-        nextSteps: ['请确认 daemon 运行正常', '重试 network_start 命令'],
-      };
-    }
-
-    const started = rawData.started === true || rawData.started === undefined;
-    const filter = rawData.filter ? String(rawData.filter) : undefined;
-    const filterText = filter ? `（filter: ${filter}）` : '';
-
-    return {
-      ok: started,
-      summary: started
-        ? `网络监控已启动${filterText}`
-        : '网络监控启动失败',
-      data: {
-        started,
-        filter,
-      },
-    };
-  },
-};
-
-// ─── network_list 命令定义 ───────────────────────────────────────
-
-const listDef: CommandDefinition<NetworkListInput, NetworkListData> = {
-  name: 'network_list',
-  requiredArgs: [],
-
-  validate: (args: Record<string, unknown>): NetworkListInput => {
-    const validKeys = ['filter', 'limit', 'tabId'];
-    const unknownKeys = Object.keys(args).filter((k) => !validKeys.includes(k));
-    if (unknownKeys.length > 0) {
-      throw new Error(
-        `未知参数: ${unknownKeys.join(', ')}; 支持的参数: ${validKeys.join(', ')}`,
-      );
     }
     if (args.filter !== undefined && typeof args.filter !== 'string') {
       throw new Error('filter 必须是字符串');
@@ -178,227 +82,141 @@ const listDef: CommandDefinition<NetworkListInput, NetworkListData> = {
     if (args.limit !== undefined && typeof args.limit !== 'number') {
       throw new Error('limit 必须是数字');
     }
-    if (args.tabId !== undefined && typeof args.tabId !== 'number') {
-      throw new Error('tabId 必须是数字');
+    if (args.scope !== undefined && args.scope !== 'session' && args.scope !== 'tab') {
+      throw new Error('scope 必须是 "session" 或 "tab"');
     }
-    return args as unknown as NetworkListInput;
+    return {
+      action: action as NetworkAction,
+      filter: args.filter as string | undefined,
+      scope: args.scope as 'session' | 'tab' | undefined,
+      limit: args.limit as number | undefined,
+      method: args.method as string | undefined,
+      statusCode: args.statusCode as number | undefined,
+      type: args.type as string | undefined,
+      sinceTimestampMs: args.sinceTimestampMs as number | undefined,
+      requestId: args.requestId as string | undefined,
+      tabId: args.tabId as number | undefined,
+    };
   },
 
   execute: async (
-    input: NetworkListInput,
+    input: NetworkInput,
     daemon: DaemonClient,
   ): Promise<Record<string, unknown>> => {
+    const daemonCommand = `network_${input.action}`;
+    const { action, ...rest } = input;
     const envelope = daemon.buildEnvelope(
-      'network_list',
-      input as unknown as Record<string, unknown>,
+      daemonCommand,
+      rest as unknown as Record<string, unknown>,
     );
     const response = await daemon.command(envelope);
-    return response.data as Record<string, unknown>;
+    return { ...response.data as Record<string, unknown>, _action: action };
   },
 
-  toResult: (raw: Record<string, unknown>): CommandResult<NetworkListData> => {
+  toResult: (raw: Record<string, unknown>): CommandResult<NetworkData> => {
+    const action = raw._action as string;
     const rawData = raw.data as Record<string, unknown> | undefined;
 
-    if (!rawData) {
-      return {
-        ok: false,
-        summary: '网络请求列表获取失败: daemon 未返回结果',
-        nextSteps: ['请确认网络监控已启动', '重试 network_list 命令'],
-      };
-    }
-
-    const rawRequests = rawData.requests;
-    const requests = Array.isArray(rawRequests)
-      ? rawRequests.map((r: unknown) => {
-          const req = r as Record<string, unknown>;
+    switch (action) {
+      case 'start': {
+        if (!rawData) {
           return {
-            id: String(req.id || ''),
-            method: String(req.method || ''),
-            url: String(req.url || ''),
-            statusCode: req.statusCode !== undefined ? Number(req.statusCode) : undefined,
+            ok: false,
+            summary: '网络监控启动失败: daemon 未返回结果',
+            nextSteps: ['请确认 daemon 运行正常'],
           };
-        })
-      : [];
+        }
+        const started = rawData.started === true || rawData.started === undefined;
+        const filter = rawData.filter ? String(rawData.filter) : undefined;
+        const filterText = filter ? `（filter: ${filter}）` : '';
+        return {
+          ok: started,
+          summary: started ? `网络监控已启动${filterText}` : '网络监控启动失败',
+          data: { started, filter },
+        };
+      }
 
-    const count = typeof rawData.count === 'number' ? rawData.count : requests.length;
+      case 'list': {
+        if (!rawData) {
+          return {
+            ok: false,
+            summary: '网络请求列表获取失败: daemon 未返回结果',
+            nextSteps: ['请确认网络监控已启动'],
+          };
+        }
+        const rawRequests = rawData.requests;
+        const requests = Array.isArray(rawRequests)
+          ? rawRequests.map((r: unknown) => {
+              const req = r as Record<string, unknown>;
+              return {
+                id: String(req.id || ''),
+                method: String(req.method || ''),
+                url: String(req.url || ''),
+                statusCode: req.statusCode !== undefined ? Number(req.statusCode) : undefined,
+              };
+            })
+          : [];
+        const count = typeof rawData.count === 'number' ? rawData.count : requests.length;
+        return {
+          ok: true,
+          summary: `网络请求: 捕获到 ${count} 个请求`,
+          data: { count, requests },
+        };
+      }
 
-    return {
-      ok: true,
-      summary: `网络请求: 捕获到 ${count} 个请求`,
-      data: {
-        count,
-        requests,
-      },
-    };
+      case 'detail': {
+        if (!rawData) {
+          return {
+            ok: false,
+            summary: '请求详情获取失败: daemon 未返回结果',
+            nextSteps: ['请确认 requestId 有效'],
+          };
+        }
+        const requestRaw = rawData.request as Record<string, unknown> | undefined;
+        if (!requestRaw) {
+          return {
+            ok: false,
+            summary: '请求详情获取失败: daemon 未返回请求数据',
+            nextSteps: ['请确认 requestId 有效'],
+          };
+        }
+        const method = String(requestRaw.method || '');
+        const url = String(requestRaw.url || '');
+        const statusCode = Number(requestRaw.statusCode) || 0;
+        const responseRaw = rawData.response as Record<string, unknown> | undefined;
+        const response = responseRaw ? { statusCode: Number(responseRaw.statusCode) || 0 } : undefined;
+        return {
+          ok: true,
+          summary: `请求详情: ${method} ${url} → ${statusCode}`,
+          data: { request: { method, url, statusCode }, response },
+        };
+      }
+
+      case 'stop': {
+        if (!rawData) {
+          return {
+            ok: false,
+            summary: '网络监控停止失败: daemon 未返回结果',
+            nextSteps: ['请确认网络监控已启动'],
+          };
+        }
+        const stopped = rawData.stopped !== false;
+        return {
+          ok: stopped,
+          summary: stopped ? '网络监控已停止' : '网络监控停止失败',
+          data: { stopped },
+        };
+      }
+
+      default:
+        return { ok: false, summary: `未知操作: ${action}` };
+    }
   },
 };
 
-// ─── network_detail 命令定义 ─────────────────────────────────────
-
-const detailDef: CommandDefinition<NetworkDetailInput, NetworkDetailData> = {
-  name: 'network_detail',
-  requiredArgs: ['requestId'],
-
-  validate: (args: Record<string, unknown>): NetworkDetailInput => {
-    const validKeys = ['requestId'];
-    const unknownKeys = Object.keys(args).filter((k) => !validKeys.includes(k));
-    if (unknownKeys.length > 0) {
-      throw new Error(
-        `未知参数: ${unknownKeys.join(', ')}; 支持的参数: ${validKeys.join(', ')}`,
-      );
-    }
-    if (!args.requestId || typeof args.requestId !== 'string') {
-      throw new Error('requestId 是必填参数且必须是字符串');
-    }
-    return args as unknown as NetworkDetailInput;
-  },
-
-  execute: async (
-    input: NetworkDetailInput,
-    daemon: DaemonClient,
-  ): Promise<Record<string, unknown>> => {
-    const envelope = daemon.buildEnvelope(
-      'network_detail',
-      input as unknown as Record<string, unknown>,
-    );
-    const response = await daemon.command(envelope);
-    return response.data as Record<string, unknown>;
-  },
-
-  toResult: (raw: Record<string, unknown>): CommandResult<NetworkDetailData> => {
-    const rawData = raw.data as Record<string, unknown> | undefined;
-
-    if (!rawData) {
-      return {
-        ok: false,
-        summary: '请求详情获取失败: daemon 未返回结果',
-        nextSteps: ['请确认 requestId 有效', '重试 network_detail 命令'],
-      };
-    }
-
-    const requestRaw = rawData.request as Record<string, unknown> | undefined;
-    if (!requestRaw) {
-      return {
-        ok: false,
-        summary: '请求详情获取失败: daemon 未返回请求数据',
-        nextSteps: ['请确认 requestId 有效', '重试 network_detail 命令'],
-      };
-    }
-
-    const method = String(requestRaw.method || '');
-    const url = String(requestRaw.url || '');
-    const statusCode = Number(requestRaw.statusCode) || 0;
-
-    const responseRaw = rawData.response as Record<string, unknown> | undefined;
-    const response = responseRaw
-      ? { statusCode: Number(responseRaw.statusCode) || 0 }
-      : undefined;
-
-    return {
-      ok: true,
-      summary: `请求详情: ${method} ${url} → ${statusCode}`,
-      data: {
-        request: {
-          method,
-          url,
-          statusCode,
-        },
-        response,
-      },
-    };
-  },
-};
-
-// ─── network_stop 命令定义 ───────────────────────────────────────
-
-const stopDef: CommandDefinition<NetworkStopInput, NetworkStopData> = {
-  name: 'network_stop',
-  requiredArgs: [],
-
-  validate: (args: Record<string, unknown>): NetworkStopInput => {
-    const validKeys: string[] = [];
-    const unknownKeys = Object.keys(args).filter((k) => !validKeys.includes(k));
-    if (unknownKeys.length > 0) {
-      throw new Error(
-        `未知参数: ${unknownKeys.join(', ')}; network_stop 不支持任何参数`,
-      );
-    }
-    return {} as NetworkStopInput;
-  },
-
-  execute: async (
-    _input: NetworkStopInput,
-    daemon: DaemonClient,
-  ): Promise<Record<string, unknown>> => {
-    const envelope = daemon.buildEnvelope(
-      'network_stop',
-      {} as Record<string, unknown>,
-    );
-    const response = await daemon.command(envelope);
-    return response.data as Record<string, unknown>;
-  },
-
-  toResult: (raw: Record<string, unknown>): CommandResult<NetworkStopData> => {
-    const rawData = raw.data as Record<string, unknown> | undefined;
-
-    if (!rawData) {
-      return {
-        ok: false,
-        summary: '网络监控停止失败: daemon 未返回结果',
-        nextSteps: ['请确认网络监控已启动', '重试 network_stop 命令'],
-      };
-    }
-
-    const stopped = rawData.stopped !== false;
-
-    return {
-      ok: stopped,
-      summary: stopped ? '网络监控已停止' : '网络监控停止失败',
-      data: {
-        stopped,
-      },
-    };
-  },
-};
-
-// ─── 导出命令函数 ────────────────────────────────────────────────
-
-/**
- * 启动网络请求监控
- */
-export async function networkStart(
+export async function network(
   args: Record<string, unknown>,
   client: DaemonClient,
-): Promise<CommandResult<NetworkStartData>> {
-  return runCommand(startDef, args, client);
-}
-
-/**
- * 列出已捕获的网络请求
- */
-export async function networkList(
-  args: Record<string, unknown>,
-  client: DaemonClient,
-): Promise<CommandResult<NetworkListData>> {
-  return runCommand(listDef, args, client);
-}
-
-/**
- * 获取某个请求的详细信息
- */
-export async function networkDetail(
-  args: Record<string, unknown>,
-  client: DaemonClient,
-): Promise<CommandResult<NetworkDetailData>> {
-  return runCommand(detailDef, args, client);
-}
-
-/**
- * 停止网络监控
- */
-export async function networkStop(
-  args: Record<string, unknown>,
-  client: DaemonClient,
-): Promise<CommandResult<NetworkStopData>> {
-  return runCommand(stopDef, args, client);
+): Promise<CommandResult<NetworkData>> {
+  return runCommand(networkDef, args, client);
 }

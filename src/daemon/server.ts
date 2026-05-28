@@ -945,20 +945,6 @@ async function handleCommand(req, res) {
   try {
     log('info', `Command: ${request.command}`, { session: request.session, args: Object.keys(request.args) });
     ensureActionObservationSupported(request);
-    if (request.command === 'observe_start' || request.command === 'observe_diff') {
-      const observed = request.command === 'observe_start'
-        ? await handleObserveStart(request)
-        : await handleObserveDiff(request);
-      const tab = observed.data && typeof observed.data === 'object' ? (observed.data.tab || observed.data.tabId || null) : null;
-      return sendJson(req, res, 200, createResultEnvelope(request, {
-        ok: true,
-        startedAt,
-        tab,
-        data: observed.data,
-        artifacts: observed.artifacts,
-        diagnostics: { extensionConnected, pendingRequests: pendingRequests.size, runtime: runtimeMetadata(), warnings: capabilityWarnings() }
-      }));
-    }
     if (request.command === 'snapshot') {
       const { data, artifacts } = await runSnapshotWithStore(request, mapped);
       const tab = data && typeof data === 'object' ? (data.tab || data.tabId || null) : null;
